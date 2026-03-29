@@ -380,6 +380,9 @@ func SetSSOApiRouter(router *gin.Engine) {
 	ssoRouter := router.Group("/api/sso")
 	ssoRouter.Use(middleware.SSOAuth())
 	{
+		ssoRouter.GET("/user/self", controller.GetSelf)
+		ssoRouter.GET("/pricing", controller.GetPricing)
+
 		ssoTokenRoute := ssoRouter.Group("/token")
 		{
 			ssoTokenRoute.GET("/", controller.GetAllTokens)
