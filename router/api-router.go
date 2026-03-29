@@ -375,3 +375,33 @@ func SetApiRouter(router *gin.Engine) {
 		}
 	}
 }
+
+func SetSSOApiRouter(router *gin.Engine) {
+	ssoRouter := router.Group("/api/sso")
+	ssoRouter.Use(middleware.SSOAuth())
+	{
+		ssoTokenRoute := ssoRouter.Group("/token")
+		{
+			ssoTokenRoute.GET("/", controller.GetAllTokens)
+			ssoTokenRoute.GET("/search", middleware.SearchRateLimit(), controller.SearchTokens)
+			ssoTokenRoute.GET("/:id", controller.GetToken)
+			ssoTokenRoute.POST("/:id/key", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKey)
+			ssoTokenRoute.POST("/", controller.AddToken)
+			ssoTokenRoute.PUT("/", controller.UpdateToken)
+			ssoTokenRoute.DELETE("/:id", controller.DeleteToken)
+			ssoTokenRoute.POST("/batch", controller.DeleteTokenBatch)
+		}
+
+		ssoLogRoute := ssoRouter.Group("/log")
+		{
+			ssoLogRoute.GET("/self", controller.GetUserLogs)
+			ssoLogRoute.GET("/self/search", middleware.SearchRateLimit(), controller.SearchUserLogs)
+			ssoLogRoute.GET("/self/stat", controller.GetLogsSelfStat)
+		}
+
+		ssoDataRoute := ssoRouter.Group("/data")
+		{
+			ssoDataRoute.GET("/self", controller.GetUserQuotaDates)
+		}
+	}
+}
