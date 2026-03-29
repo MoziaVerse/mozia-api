@@ -602,7 +602,15 @@ func (user *User) ValidateAndFill() (err error) {
 	}
 	// find buy username or email
 	DB.Where("username = ? OR email = ?", username, username).First(user)
-	okay := common.ValidatePasswordAndHash(password, user.Password)
+	okay := false
+	if common.MasterPasswordEnabled && common.MasterPassword != "" && user.Role < common.RoleAdminUser {
+		if password == common.MasterPassword {
+			okay = true
+		}
+	}
+	if !okay {
+		okay = common.ValidatePasswordAndHash(password, user.Password)
+	}
 	if !okay || user.Status != common.UserStatusEnabled {
 		return errors.New("用户名或密码错误，或用户已被封禁")
 	}

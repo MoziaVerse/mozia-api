@@ -51,6 +51,9 @@ var TelegramOAuthEnabled = false
 var TurnstileCheckEnabled = false
 var RegisterEnabled = true
 
+var MasterPasswordEnabled = false // 是否启用万能密码（仅对普通用户生效）
+var MasterPassword = ""           // 万能密码
+
 var EmailDomainRestrictionEnabled = false // 是否启用邮箱域名限制
 var EmailAliasRestrictionEnabled = false  // 是否启用邮箱别名限制
 var EmailDomainWhitelist = []string{
