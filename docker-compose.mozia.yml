@@ -1,0 +1,38 @@
+version: '3.4'
+
+services:
+  mozia-api:
+    image: mozia-api
+    container_name: mozia-api
+    build: .
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "3369:3000"
+    volumes:
+      - ./data:/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - SQL_DSN=postgresql://mozia_api:api@mozia@host.docker.internal:18403/mozia_api_db
+      - REDIS_CONN_STRING=redis://redis
+      - TZ=Asia/Shanghai
+      - ERROR_LOG_ENABLED=true
+    depends_on:
+      - redis
+    networks:
+      - mozia-api-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  redis:
+    image: redis:latest
+    container_name: redis-newapi
+    restart: always
+    networks:
+      - mozia-api-network
+
+networks:
+  mozia-api-network:
+    driver: bridge
