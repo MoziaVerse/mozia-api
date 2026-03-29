@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -13,9 +14,41 @@ import (
 func SSOAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		session := sessions.Default(c)
-		role := session.Get("role")
-		id := session.Get("id")
-		if role == nil || role.(int) < common.RoleRootUser {
+		var role interface{} = session.Get("role")
+		var id interface{} = session.Get("id")
+
+		if role == nil {
+			accessToken := c.Request.Header.Get("Authorization")
+			if accessToken == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"success": false,
+					"message": "无权进行此操作，未登录且未提供 access token",
+				})
+				c.Abort()
+				return
+			}
+			user := model.ValidateAccessToken(accessToken)
+			if user == nil || user.Username == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"success": false,
+					"message": "无权进行此操作，access token 无效",
+				})
+				c.Abort()
+				return
+			}
+			if !common.IsValidateRole(user.Role) {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"success": false,
+					"message": "无权进行此操作，用户信息无效",
+				})
+				c.Abort()
+				return
+			}
+			role = user.Role
+			id = user.Id
+		}
+
+		if role.(int) < common.RoleRootUser {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "无权进行此操作，仅限超级管理员",
@@ -88,6 +121,7 @@ func SSOAuth() func(c *gin.Context) {
 		c.Set("group", ssoUser.Group)
 		c.Set("user_group", ssoUser.Group)
 		c.Set("sso_sub", userSSO.SSOSub)
+		c.Set("use_access_token", strings.HasPrefix(c.Request.Header.Get("Authorization"), "Bearer "))
 		c.Next()
 	}
 }
