@@ -15,7 +15,7 @@ services:
     env_file:
       - .env
     environment:
-      - SQL_DSN=postgresql://mozia_api:api@mozia@host.docker.internal:18403/mozia_api_db
+      - SQL_DSN=postgresql://mozia_api:api@mozia@host.docker.internal:36915/mozia_api_db
       - REDIS_CONN_STRING=redis://redis
       - TZ=Asia/Shanghai
       - ERROR_LOG_ENABLED=true
