@@ -25,6 +25,7 @@ const (
 	MsgDeleteFailed      = "common.delete_failed"
 	MsgAlreadyExists     = "common.already_exists"
 	MsgNameCannotBeEmpty = "common.name_cannot_be_empty"
+	MsgBatchTooMany      = "common.batch_too_many"
 )
 
 // Token related messages
@@ -100,6 +101,7 @@ const (
 	MsgUserTelegramIdEmpty           = "user.telegram_id_empty"
 	MsgUserTelegramNotBound          = "user.telegram_not_bound"
 	MsgUserLinuxDOIdEmpty            = "user.linux_do_id_empty"
+	MsgUserQuotaChangeZero           = "user.quota_change_zero"
 )
 
 // Quota related messages
