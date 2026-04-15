@@ -410,3 +410,18 @@ func SetSSOApiRouter(router *gin.Engine) {
 		}
 	}
 }
+
+func SetMoziaManagerRouter(router *gin.Engine) {
+	moziaRouter := router.Group("/api/mozia")
+	// 内部管理平台专用：供应商备案信息管理（仅超级管理员）
+	vendorFilingRoute := moziaRouter.Group("/vendor-filing")
+	vendorFilingRoute.Use(middleware.RootOnlyAuth())
+	{
+		vendorFilingRoute.GET("/", controller.GetAllVendorFilings)
+		vendorFilingRoute.GET("/:id", controller.GetVendorFiling)
+		vendorFilingRoute.POST("/", controller.CreateVendorFiling)
+		vendorFilingRoute.PUT("/", controller.UpdateVendorFiling)
+		vendorFilingRoute.DELETE("/:id", controller.DeleteVendorFiling)
+	}
+
+}
