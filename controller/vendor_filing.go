@@ -102,6 +102,16 @@ func UpdateVendorFiling(c *gin.Context) {
 	common.ApiSuccess(c, &f)
 }
 
+// GetSSOVendorsWithFiling 对外 SSO 只读接口：返回全部供应商（附带备案信息，可为空）。
+func GetSSOVendorsWithFiling(c *gin.Context) {
+	vendors, err := model.GetVendorsWithFiling()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, vendors)
+}
+
 // DeleteVendorFiling 删除备案信息。
 func DeleteVendorFiling(c *gin.Context) {
 	idStr := c.Param("id")

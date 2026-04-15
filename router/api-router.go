@@ -384,6 +384,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 	{
 		ssoRouter.GET("/user/self", controller.GetSelf)
 		ssoRouter.GET("/pricing", controller.GetPricing)
+		ssoRouter.GET("/vendors", controller.GetSSOVendorsWithFiling)
 
 		ssoTokenRoute := ssoRouter.Group("/token")
 		{

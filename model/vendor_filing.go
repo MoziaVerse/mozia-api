@@ -9,15 +9,16 @@ import (
 // VendorFiling 备案信息表，通过 VendorId 关联 Vendor。
 // 由于新增字段可能与上游 NewAPI 代码冲突，因此采用独立表存储备案信息。
 type VendorFiling struct {
-	Id           int            `json:"id"`
-	VendorId     int            `json:"vendor_id" gorm:"not null;uniqueIndex:uk_vendor_filing_vendor_id_delete_at,priority:1"`
-	FilingTime   int64          `json:"filing_time" gorm:"bigint"`
-	Location     string         `json:"location" gorm:"size:128"`
-	FilingEntity string         `json:"filing_entity" gorm:"size:256"`
-	FilingNumber string         `json:"filing_number" gorm:"size:128"`
-	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
-	UpdatedTime  int64          `json:"updated_time" gorm:"bigint"`
-	DeletedAt    gorm.DeletedAt `json:"-" gorm:"index;uniqueIndex:uk_vendor_filing_vendor_id_delete_at,priority:2"`
+	Id              int            `json:"id"`
+	VendorId        int            `json:"vendor_id" gorm:"not null;uniqueIndex:uk_vendor_filing_vendor_id_delete_at,priority:1"`
+	FilingTime      int64          `json:"filing_time" gorm:"bigint"`
+	Location        string         `json:"location" gorm:"size:128"`
+	FilingEntity    string         `json:"filing_entity" gorm:"size:256"`
+	FilingNumber    string         `json:"filing_number" gorm:"size:128"`
+	FilingModelName string         `json:"filing_model_name" gorm:"size:256"`
+	CreatedTime     int64          `json:"created_time" gorm:"bigint"`
+	UpdatedTime     int64          `json:"updated_time" gorm:"bigint"`
+	DeletedAt       gorm.DeletedAt `json:"-" gorm:"index;uniqueIndex:uk_vendor_filing_vendor_id_delete_at,priority:2"`
 }
 
 // VendorFilingWithVendor 返回给管理平台的视图，附带 Vendor 基本信息。
@@ -71,6 +72,51 @@ func IsVendorFilingDuplicated(id int, vendorId int) (bool, error) {
 	return cnt > 0, err
 }
 
+// VendorWithFiling 对外只读视图：Vendor 基础信息 + 可空的备案信息。
+type VendorWithFiling struct {
+	Id          int           `json:"id"`
+	Name        string        `json:"name"`
+	Description string        `json:"description,omitempty"`
+	Icon        string        `json:"icon,omitempty"`
+	Status      int           `json:"status"`
+	Filing      *VendorFiling `json:"filing"`
+}
+
+// GetVendorsWithFiling 返回全部 Vendor（附带备案信息，可为空），供外部前端展示。
+func GetVendorsWithFiling() ([]*VendorWithFiling, error) {
+	var vendors []Vendor
+	if err := DB.Order("id ASC").Find(&vendors).Error; err != nil {
+		return nil, err
+	}
+	if len(vendors) == 0 {
+		return []*VendorWithFiling{}, nil
+	}
+	vendorIDs := make([]int, 0, len(vendors))
+	for _, v := range vendors {
+		vendorIDs = append(vendorIDs, v.Id)
+	}
+	var filings []VendorFiling
+	if err := DB.Where("vendor_id IN ?", vendorIDs).Find(&filings).Error; err != nil {
+		return nil, err
+	}
+	filingMap := make(map[int]*VendorFiling, len(filings))
+	for i := range filings {
+		filingMap[filings[i].VendorId] = &filings[i]
+	}
+	result := make([]*VendorWithFiling, 0, len(vendors))
+	for _, v := range vendors {
+		result = append(result, &VendorWithFiling{
+			Id:          v.Id,
+			Name:        v.Name,
+			Description: v.Description,
+			Icon:        v.Icon,
+			Status:      v.Status,
+			Filing:      filingMap[v.Id],
+		})
+	}
+	return result, nil
+}
+
 // GetAllVendorFilings 分页获取备案信息，并附带 Vendor 基本信息。
 func GetAllVendorFilings(keyword string, offset int, limit int) ([]*VendorFilingWithVendor, int64, error) {
 	db := DB.Model(&VendorFiling{})
@@ -81,9 +127,9 @@ func GetAllVendorFilings(keyword string, offset int, limit int) ([]*VendorFiling
 			return nil, 0, err
 		}
 		if len(vendorIDs) > 0 {
-			db = db.Where("location LIKE ? OR filing_entity LIKE ? OR filing_number LIKE ? OR vendor_id IN ?", like, like, like, vendorIDs)
+			db = db.Where("location LIKE ? OR filing_entity LIKE ? OR filing_number LIKE ? OR filing_model_name LIKE ? OR vendor_id IN ?", like, like, like, like, vendorIDs)
 		} else {
-			db = db.Where("location LIKE ? OR filing_entity LIKE ? OR filing_number LIKE ?", like, like, like)
+			db = db.Where("location LIKE ? OR filing_entity LIKE ? OR filing_number LIKE ? OR filing_model_name LIKE ?", like, like, like, like)
 		}
 	}
 
