@@ -425,4 +425,25 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 		vendorFilingRoute.DELETE("/:id", controller.DeleteVendorFiling)
 	}
 
+	// 内部管理平台专用：OpenRouter 模型元数据管理（仅超级管理员）
+	openRouterMetaRoute := moziaRouter.Group("/openrouter-model")
+	openRouterMetaRoute.Use(middleware.RootOnlyAuth())
+	{
+		openRouterMetaRoute.GET("/", controller.GetAllOpenRouterModelMetas)
+		openRouterMetaRoute.GET("/:id", controller.GetOpenRouterModelMeta)
+		openRouterMetaRoute.POST("/", controller.CreateOpenRouterModelMeta)
+		openRouterMetaRoute.PUT("/", controller.UpdateOpenRouterModelMeta)
+		openRouterMetaRoute.DELETE("/:id", controller.DeleteOpenRouterModelMeta)
+	}
+}
+
+// SetOpenRouterApiRouter 注册 OpenRouter 对外接口。独立分组以避免与上游通用
+// API 中间件叠加，方便后续扩展 OpenRouter 侧的额外端点。
+func SetOpenRouterApiRouter(router *gin.Engine) {
+	openRouter := router.Group("/api/openrouter")
+	openRouter.Use(middleware.RouteTag("openrouter"))
+	openRouter.Use(gzip.Gzip(gzip.DefaultCompression))
+	{
+		openRouter.GET("/models", controller.ListOpenRouterModels)
+	}
 }
