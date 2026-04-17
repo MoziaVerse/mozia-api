@@ -85,15 +85,26 @@ func GetOpenRouterModelBoundChannels(modelName string) ([]OpenRouterModelBoundCh
 		return []OpenRouterModelBoundChannel{}, nil
 	}
 
-	var channels []OpenRouterModelBoundChannel
+	type boundChannelRow struct {
+		OpenRouterModelBoundChannel
+		Priority int64 `json:"-"`
+	}
+
+	var rows []boundChannelRow
 	err := DB.Table("channels").
-		Select("DISTINCT channels.id, channels.name, channels.type, COALESCE(channels.base_url, '') as base_url").
+		Select("channels.id, channels.name, channels.type, COALESCE(channels.base_url, '') as base_url, COALESCE(channels.priority, 0) as priority").
 		Joins("JOIN abilities ON abilities.channel_id = channels.id").
 		Where("abilities.model = ? AND abilities.enabled = ? AND channels.status = ?", modelName, true, 1).
-		Order("channels.priority DESC, channels.id DESC").
-		Scan(&channels).Error
+		Group("channels.id, channels.name, channels.type, channels.base_url, channels.priority").
+		Order("priority DESC, channels.id DESC").
+		Scan(&rows).Error
 	if err != nil {
 		return nil, err
+	}
+
+	channels := make([]OpenRouterModelBoundChannel, 0, len(rows))
+	for _, row := range rows {
+		channels = append(channels, row.OpenRouterModelBoundChannel)
 	}
 	return channels, nil
 }
