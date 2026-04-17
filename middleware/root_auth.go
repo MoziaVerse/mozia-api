@@ -22,7 +22,15 @@ func RootOnlyAuth() func(c *gin.Context) {
 			c.Abort()
 			return
 		}
-		user := model.ValidateAccessToken(accessToken)
+		user, err := model.ValidateAccessToken(accessToken)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": "无权进行此操作，access token 校验失败",
+			})
+			c.Abort()
+			return
+		}
 		if user == nil || user.Username == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
