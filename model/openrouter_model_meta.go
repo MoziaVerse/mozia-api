@@ -41,6 +41,13 @@ type OpenRouterModelMetaWithModel struct {
 	ModelStatus      int    `json:"model_status"`
 }
 
+type OpenRouterModelBoundChannel struct {
+	Id      int    `json:"id"`
+	Name    string `json:"name"`
+	Type    int    `json:"type"`
+	BaseURL string `json:"base_url"`
+}
+
 func (m *OpenRouterModelMeta) Insert() error {
 	now := common.GetTimestamp()
 	m.CreatedTime = now
@@ -71,6 +78,24 @@ func GetOpenRouterModelMetaByID(id int) (*OpenRouterModelMetaWithModel, error) {
 		result.ModelStatus = mm.Status
 	}
 	return result, nil
+}
+
+func GetOpenRouterModelBoundChannels(modelName string) ([]OpenRouterModelBoundChannel, error) {
+	if modelName == "" {
+		return []OpenRouterModelBoundChannel{}, nil
+	}
+
+	var channels []OpenRouterModelBoundChannel
+	err := DB.Table("channels").
+		Select("DISTINCT channels.id, channels.name, channels.type, COALESCE(channels.base_url, '') as base_url").
+		Joins("JOIN abilities ON abilities.channel_id = channels.id").
+		Where("abilities.model = ? AND abilities.enabled = ? AND channels.status = ?", modelName, true, 1).
+		Order("channels.priority DESC, channels.id DESC").
+		Scan(&channels).Error
+	if err != nil {
+		return nil, err
+	}
+	return channels, nil
 }
 
 // IsOpenRouterModelMetaDuplicated 同一 ModelId 只能存在一条元数据。

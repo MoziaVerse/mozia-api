@@ -430,6 +430,7 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 	openRouterMetaRoute.Use(middleware.RootOnlyAuth())
 	{
 		openRouterMetaRoute.GET("/", controller.GetAllOpenRouterModelMetas)
+		openRouterMetaRoute.GET("/prefill", controller.GetOpenRouterModelMetaPrefill)
 		openRouterMetaRoute.GET("/:id", controller.GetOpenRouterModelMeta)
 		openRouterMetaRoute.POST("/", controller.CreateOpenRouterModelMeta)
 		openRouterMetaRoute.PUT("/", controller.UpdateOpenRouterModelMeta)
