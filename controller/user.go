@@ -1243,3 +1243,46 @@ func UpdateUserSetting(c *gin.Context) {
 
 	common.ApiSuccessI18n(c, i18n.MsgSettingSaved, nil)
 }
+
+// SSOTopUpRequest SSO 桥 topup 接口请求体
+type SSOTopUpRequest struct {
+	// 额度增量（>0，单位与 user.quota 一致）
+	DeltaQuota int `json:"delta_quota" binding:"required,gt=0"`
+	// 可选业务原因，写入 LogTypeTopup 日志便于对账
+	Reason string `json:"reason"`
+}
+
+// SSOTopUp 管理员代当前 SSO 用户加额度。
+// 走 SSOAuth 中间件：调用方需带 admin access token + New-Api-User + X-SSO-SUB，
+// 中间件已将 SSO 用户 resolve 到 context 的 "id"，此处直接复用。
+// 用途：外部计费/支付服务（如 matrix 接的微信支付）回调后给用户充值。
+//
+// 落账方式：调 IncreaseUserQuota（DB 原子 UPDATE quota = quota + delta），
+// 并写 LogTypeTopup 日志，与 redemption / waffo / admin 补单同口径。
+func SSOTopUp(c *gin.Context) {
+	var req SSOTopUpRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误: "+err.Error())
+		return
+	}
+
+	userId := c.GetInt("id")
+	if userId == 0 {
+		common.ApiErrorMsg(c, "SSO 用户未解析")
+		return
+	}
+
+	if err := model.IncreaseUserQuota(userId, req.DeltaQuota, true); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	reason := req.Reason
+	if reason == "" {
+		reason = "外部充值"
+	}
+	model.RecordLog(userId, model.LogTypeTopup,
+		fmt.Sprintf("%s，到账 %s", reason, logger.LogQuota(req.DeltaQuota)))
+
+	common.ApiSuccess(c, nil)
+}

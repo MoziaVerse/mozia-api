@@ -383,6 +383,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 	ssoRouter.Use(middleware.SSOAuth())
 	{
 		ssoRouter.GET("/user/self", controller.GetSelf)
+		ssoRouter.POST("/user/topup", controller.SSOTopUp)
 		ssoRouter.GET("/pricing", controller.GetPricing)
 		ssoRouter.GET("/vendors", controller.GetSSOVendorsWithFiling)
 
