@@ -384,6 +384,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 	{
 		ssoRouter.GET("/user/self", controller.GetSelf)
 		ssoRouter.POST("/user/topup", controller.SSOTopUp)
+		ssoRouter.POST("/user/redeem", middleware.CriticalRateLimit(), controller.SSORedeem)
 		ssoRouter.GET("/pricing", controller.GetPricing)
 		ssoRouter.GET("/vendors", controller.GetSSOVendorsWithFiling)
 
