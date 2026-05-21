@@ -1286,3 +1286,38 @@ func SSOTopUp(c *gin.Context) {
 
 	common.ApiSuccess(c, nil)
 }
+
+// SSORedeemRequest SSO 桥充值码核销请求体
+type SSORedeemRequest struct {
+	// 充值码（redemption key，admin 后台批量生成）
+	Key string `json:"key" binding:"required"`
+}
+
+// SSORedeem 当前 SSO 用户使用充值码（redemption code）兑换额度。
+// 走 SSOAuth 中间件：调用方带 admin access token + New-Api-User + X-SSO-SUB，
+// 中间件已将 SSO 用户 resolve 到 context 的 "id"，此处直接复用。
+// 用途：matrix 钱包页的「兑换码」入口，复用 admin 后台批量生成的同一套 redemption 码。
+//
+// 落账方式：复用 model.Redeem（事务 + 行锁 FOR UPDATE 防并发重复核销，
+// 加额度并写 LogTypeTopup 日志），与 admin 兑换、外部充值同口径。
+func SSORedeem(c *gin.Context) {
+	var req SSORedeemRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误: "+err.Error())
+		return
+	}
+
+	userId := c.GetInt("id")
+	if userId == 0 {
+		common.ApiErrorMsg(c, "SSO 用户未解析")
+		return
+	}
+
+	quota, err := model.Redeem(strings.TrimSpace(req.Key), userId)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{"quota": quota})
+}
