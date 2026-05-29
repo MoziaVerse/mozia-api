@@ -18,6 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 export const CHANNEL_OPTIONS = [
+  // ===== Mozia 私有渠道（200+，避开 upstream new-api 未来 ID 撞号）=====
+  {
+    value: 201,
+    color: 'blue',
+    label: 'Mulerun（含 studio 多模态）',
+  },
   { value: 1, color: 'green', label: 'OpenAI' },
   {
     value: 2,

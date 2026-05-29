@@ -46,6 +46,26 @@ export interface ChannelTypeConfig {
  * Configuration for each channel type
  */
 export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
+  // ===== Mozia 私有渠道 =====
+  201: {
+    id: 201,
+    name: CHANNEL_TYPES[201],
+    icon: 'openai',
+    defaultBaseUrl: 'https://api.mulerun.com',
+    hints: {
+      baseUrl: 'Default: https://api.mulerun.com',
+      key: 'Format: muk-...',
+      models:
+        'Chat（OpenAI/Anthropic 双协议）：openai/gpt-5.5、google/gemini-3.1-pro-preview、moonshot/kimi-k2.6、zhipu/glm-5.1 ...\n多模态任务（异步）：alibaba/wan2.6-t2v、bytedance/seedance-2.0/image-to-video、google/veo3、klingai/kling-v3-omni-t2v、midjourney/diffusion、minimax/music-2.5、openai/gpt-image-2 ...',
+      other:
+        '同一渠道同时承载 chat 与 task：/v1/chat/completions 与 /v1/messages 走 chat 适配器，/v1/video/generations 走 mulerun studio task 适配器。',
+    },
+    validation: {
+      keyFormat: /^muk-/,
+      keyMinLength: 20,
+    },
+  },
+  // ===== NewAPI default =====
   1: {
     id: 1,
     name: CHANNEL_TYPES[1],
