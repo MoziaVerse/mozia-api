@@ -3,6 +3,10 @@ package common
 import "github.com/QuantumNous/new-api/constant"
 
 func ChannelType2APIType(channelType int) (int, bool) {
+	// Mozia 私有渠道扩展见 api_type_mozia.go；命中则直接返回，不进入 upstream switch。
+	if at, ok := MoziaChannelType2APIType(channelType); ok {
+		return at, true
+	}
 	apiType := -1
 	switch channelType {
 	case constant.ChannelTypeOpenAI:

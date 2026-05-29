@@ -51,6 +51,10 @@ import (
 )
 
 func GetAdaptor(apiType int) channel.Adaptor {
+	// Mozia 私有渠道见 relay_adaptor_mozia.go；命中则直接返回，不进入 upstream switch。
+	if a := GetMoziaAdaptor(apiType); a != nil {
+		return a
+	}
 	switch apiType {
 	case constant.APITypeAli:
 		return &ali.Adaptor{}
@@ -140,6 +144,10 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 		return &suno.TaskAdaptor{}
 	}
 	if channelType, err := strconv.ParseInt(string(platform), 10, 64); err == nil {
+		// Mozia 私有 task 渠道见 relay_adaptor_mozia.go；命中则直接返回。
+		if a := GetMoziaTaskAdaptor(int(channelType)); a != nil {
+			return a
+		}
 		switch channelType {
 		case constant.ChannelTypeAli:
 			return &taskali.TaskAdaptor{}
