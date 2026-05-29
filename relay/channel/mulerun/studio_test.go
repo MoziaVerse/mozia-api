@@ -1,8 +1,10 @@
 package mulerun
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	taskmulerun "github.com/QuantumNous/new-api/relay/channel/task/mulerun"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -87,6 +89,22 @@ func TestAdaptorGetRequestURL(t *testing.T) {
 				t.Fatalf("GetRequestURL=%q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestConvertImageRequestErrorDoesNotLeakProvider(t *testing.T) {
+	_, err := (&Adaptor{}).ConvertImageRequest(nil, nil, dto.ImageRequest{})
+	if err == nil {
+		t.Fatal("expected unsupported image request error")
+	}
+	msg := strings.ToLower(err.Error())
+	for _, forbidden := range []string{"mulerun", "studio"} {
+		if strings.Contains(msg, forbidden) {
+			t.Fatalf("ConvertImageRequest error leaks %q: %q", forbidden, err.Error())
+		}
+	}
+	if !strings.Contains(msg, "/v1/video/generations") {
+		t.Fatalf("ConvertImageRequest error should point callers to video generations, got %q", err.Error())
 	}
 }
 

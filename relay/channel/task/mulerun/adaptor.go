@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -59,6 +60,11 @@ type taskResponse struct {
 	Audios   []interface{} `json:"audios,omitempty"`
 }
 
+var (
+	publicMulerunStudioPattern = regexp.MustCompile(`(?i)mulerun\s+studio`)
+	publicMulerunPattern       = regexp.MustCompile(`(?i)mulerun`)
+)
+
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	a.ChannelType = info.ChannelType
 	a.baseURL = info.ChannelBaseUrl
@@ -83,7 +89,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	ep := LookupStudioEndpoint(modelID)
 	if ep == nil {
 		return service.TaskErrorWrapperLocal(
-			fmt.Errorf("unknown mulerun studio model: %q (检查 relay/channel/task/mulerun/registry.go 是否注册过此 CLI ID)", modelID),
+			fmt.Errorf("unknown multimodal task model: %q", modelID),
 			"invalid_request", http.StatusBadRequest,
 		)
 	}
@@ -100,8 +106,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	ep := LookupStudioByShortKey(info.Action)
 	if ep == nil {
-		return "", fmt.Errorf("mulerun endpoint not resolved (info.Action=%q); "+
-			"ValidateRequestAndSetAction must run before BuildRequestURL", info.Action)
+		return "", fmt.Errorf("task endpoint not resolved for action %q", info.Action)
 	}
 	return strings.TrimRight(strings.TrimSpace(a.baseURL), "/") + ep.APIPath, nil
 }
@@ -159,7 +164,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	}
 	if tr.TaskInfo.ID == "" {
 		taskErr = service.TaskErrorWrapperLocal(
-			fmt.Errorf("empty task_info.id from mulerun: %s", body),
+			errors.New("empty task_info.id from upstream response"),
 			"task_submit_failed", resp.StatusCode,
 		)
 		return
@@ -184,8 +189,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	}
 	ep := LookupStudioByShortKey(shortKey)
 	if ep == nil {
-		return nil, fmt.Errorf("unknown mulerun studio shortKey %q in task.action; "+
-			"check StudioEndpoints (refresh script may have removed this endpoint)", shortKey)
+		return nil, fmt.Errorf("unknown task action %q; task endpoint may no longer be available", shortKey)
 	}
 
 	url := strings.TrimRight(strings.TrimSpace(baseUrl), "/") + ep.APIPath + "/" + taskID
@@ -206,7 +210,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
 	var tr taskResponse
 	if err := common.Unmarshal(respBody, &tr); err != nil {
-		return nil, errors.Wrap(err, "failed to unmarshal mulerun task response")
+		return nil, errors.Wrap(err, "failed to unmarshal task response")
 	}
 
 	out := &relaycommon.TaskInfo{Code: 0}
@@ -221,12 +225,12 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	case "failed":
 		out.Status = model.TaskStatusFailure
 		if tr.TaskInfo.Error != nil {
-			out.Reason = fmt.Sprintf("%v", tr.TaskInfo.Error)
+			out.Reason = publicTaskMessage(fmt.Sprintf("%v", tr.TaskInfo.Error))
 		} else {
 			out.Reason = "task failed"
 		}
 	default:
-		return nil, fmt.Errorf("unknown mulerun task status: %q", tr.TaskInfo.Status)
+		return nil, fmt.Errorf("unknown task status: %q", tr.TaskInfo.Status)
 	}
 	return out, nil
 }
@@ -250,7 +254,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 		ov.SetMetadata("url", url)
 	}
 	if tr.TaskInfo.Status == "failed" && tr.TaskInfo.Error != nil {
-		msg := fmt.Sprintf("%v", tr.TaskInfo.Error)
+		msg := publicTaskMessage(fmt.Sprintf("%v", tr.TaskInfo.Error))
 		ov.Error = &dto.OpenAIVideoError{Message: msg, Code: "task_failed"}
 	}
 
@@ -313,9 +317,15 @@ func prepareBodyForEndpoint(raw []byte, ep *StudioEndpoint) ([]byte, error) {
 	}
 	out, err := common.Marshal(m)
 	if err != nil {
-		return nil, fmt.Errorf("remarshal task body for mulerun endpoint: %w", err)
+		return nil, fmt.Errorf("remarshal task body for upstream endpoint: %w", err)
 	}
 	return out, nil
+}
+
+func publicTaskMessage(message string) string {
+	message = common.MaskSensitiveInfo(message)
+	message = publicMulerunStudioPattern.ReplaceAllString(message, "upstream task")
+	return publicMulerunPattern.ReplaceAllString(message, "upstream")
 }
 
 func upstreamBodyModel(ep *StudioEndpoint) string {

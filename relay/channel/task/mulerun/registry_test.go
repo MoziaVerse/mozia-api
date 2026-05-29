@@ -1,9 +1,12 @@
 package mulerun
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 )
 
 // ShortKey 必须：
@@ -153,5 +156,35 @@ func TestPrepareBodyForEndpointAddsVeoModelVariant(t *testing.T) {
 	}
 	if body["prompt"] != "hello" {
 		t.Fatalf("prompt should be preserved, got body=%s", got)
+	}
+}
+
+func TestConvertToOpenAIVideoSanitizesFailureMessage(t *testing.T) {
+	originTask := &model.Task{
+		TaskID: "video_public_123",
+		Status: model.TaskStatusFailure,
+		Data:   []byte(`{"task_info":{"status":"failed","error":"MuleRun Studio failed at https://api.mulerun.com/v1/tasks/abc"}}`),
+	}
+
+	got, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(originTask)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var video dto.OpenAIVideo
+	if err := common.Unmarshal(got, &video); err != nil {
+		t.Fatal(err)
+	}
+	if video.Error == nil {
+		t.Fatal("expected failed task response to include error")
+	}
+	msg := strings.ToLower(video.Error.Message)
+	for _, forbidden := range []string{"mulerun", "studio", "api.mulerun.com"} {
+		if strings.Contains(msg, forbidden) {
+			t.Fatalf("video error leaks %q: %q", forbidden, video.Error.Message)
+		}
+	}
+	if !strings.Contains(msg, "upstream") {
+		t.Fatalf("video error should keep a generic upstream hint, got %q", video.Error.Message)
 	}
 }
