@@ -80,12 +80,17 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		return service.TaskErrorWrapper(err, "get_task_request_failed", http.StatusBadRequest)
 	}
 
-	// 优先用 UpstreamModelName（通过 channel model_mapping 映射后），
-	// 没映射时退回客户端原始 model。
+	// 优先用 UpstreamModelName；若 task 通用流程尚未应用 channel
+	// model_mapping，则在本 adaptor 内做一次 Mulerun 局部解析。
 	modelID := strings.TrimSpace(info.UpstreamModelName)
 	if modelID == "" {
 		modelID = strings.TrimSpace(req.Model)
 	}
+	mappedModelID, err := resolveMappedStudioModelID(c, modelID)
+	if err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
+	}
+	modelID = mappedModelID
 	ep := LookupStudioEndpoint(modelID)
 	if ep == nil {
 		return service.TaskErrorWrapperLocal(
@@ -101,6 +106,37 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	// 也不能存完整 cli_id（最长 56 字符）。改用 ShortKey（8 字符稳定 hash）。
 	info.Action = ShortKey(ep.CLIID)
 	return nil
+}
+
+func resolveMappedStudioModelID(c *gin.Context, modelID string) (string, error) {
+	if LookupStudioEndpoint(modelID) != nil {
+		return modelID, nil
+	}
+	modelMapping := strings.TrimSpace(c.GetString("model_mapping"))
+	if modelMapping == "" || modelMapping == "{}" || strings.TrimSpace(modelID) == "" {
+		return modelID, nil
+	}
+
+	modelMap := make(map[string]string)
+	if err := common.Unmarshal([]byte(modelMapping), &modelMap); err != nil {
+		return "", fmt.Errorf("unmarshal_model_mapping_failed")
+	}
+
+	currentModel := modelID
+	visitedModels := map[string]bool{currentModel: true}
+	for {
+		mappedModel, exists := modelMap[currentModel]
+		mappedModel = strings.TrimSpace(mappedModel)
+		if !exists || mappedModel == "" {
+			break
+		}
+		if visitedModels[mappedModel] {
+			return "", fmt.Errorf("model_mapping_contains_cycle")
+		}
+		visitedModels[mappedModel] = true
+		currentModel = mappedModel
+	}
+	return currentModel, nil
 }
 
 func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {

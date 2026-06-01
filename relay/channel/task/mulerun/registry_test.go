@@ -1,12 +1,16 @@
 package mulerun
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/gin-gonic/gin"
 )
 
 // ShortKey 必须：
@@ -137,6 +141,43 @@ func TestPrepareBodyForEndpointStripsGatewayModel(t *testing.T) {
 	}
 	if body["prompt"] != "hello" {
 		t.Fatalf("prompt should be preserved, got body=%s", got)
+	}
+}
+
+func TestValidateRequestAndSetActionUsesChannelModelMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const (
+		publicModel   = "seedance-2.0-fast/text-to-video"
+		upstreamModel = "bytedance/seedance-2.0-fast/text-to-video"
+	)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/v1/videos",
+		strings.NewReader(`{"model":"`+publicModel+`","prompt":"hello"}`),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("model_mapping", `{"`+publicModel+`":"`+upstreamModel+`"}`)
+
+	info := &relaycommon.RelayInfo{
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: publicModel,
+			ChannelBaseUrl:    "https://api.mulerun.com",
+		},
+	}
+	adaptor := &TaskAdaptor{}
+	adaptor.Init(info)
+
+	if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
+		t.Fatalf("ValidateRequestAndSetAction returned error: %+v", taskErr)
+	}
+
+	if wantAction := ShortKey(upstreamModel); info.Action != wantAction {
+		t.Fatalf("Action = %q, want short key %q", info.Action, wantAction)
 	}
 }
 
