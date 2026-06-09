@@ -9,17 +9,22 @@ package constant
 //   - 渠道名、base URL 通过本文件 init() 注入到 upstream 的 ChannelTypeNames
 //     map 与 ChannelBaseURLs slice，不修改 upstream 文件本身。
 //   - 新增渠道时只往本文件追加常量与 mapping，不动 channel.go。
-const ChannelTypeMoziaMulerun = 201 // mulerun 多模型网关（OpenAI + Anthropic 双协议）
+const (
+	ChannelTypeMoziaMulerun = 201 // mulerun 多模型网关（OpenAI + Anthropic 双协议）
+	ChannelTypeMoziaCool    = 202 // Cool 图片/视频生成（异步任务）
+)
 
 // moziaChannelTypeNames 与 upstream ChannelTypeNames 同语义；通过 init() 合并。
 var moziaChannelTypeNames = map[int]string{
 	ChannelTypeMoziaMulerun: "Mulerun",
+	ChannelTypeMoziaCool:    "Cool",
 }
 
 // moziaChannelBaseURLs 与 upstream ChannelBaseURLs slice 同语义；通过 init()
 // 把 slice 扩容到能容纳最大 ID，再按 index 写入。
 var moziaChannelBaseURLs = map[int]string{
 	ChannelTypeMoziaMulerun: "https://api.mulerun.com",
+	ChannelTypeMoziaCool:    "https://api.mjapi.cc.cd",
 }
 
 func init() {

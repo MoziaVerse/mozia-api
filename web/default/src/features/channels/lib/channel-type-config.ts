@@ -56,13 +56,26 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       baseUrl: 'Default: https://api.mulerun.com',
       key: 'Format: muk-...',
       models:
-        'Chat（OpenAI/Anthropic 双协议）：openai/gpt-5.5、google/gemini-3.1-pro-preview、moonshot/kimi-k2.6、zhipu/glm-5.1 ...\n多模态任务（异步）：alibaba/wan2.6-t2v、bytedance/seedance-2.0/image-to-video、google/veo3、klingai/kling-v3-omni-t2v、midjourney/diffusion、minimax/music-2.5、openai/gpt-image-2 ...',
+        'Chat（OpenAI/Anthropic 双协议）：openai/gpt-5.5、google/gemini-3.1-pro-preview、moonshot/kimi-k2.6、zhipu/glm-5.1 ...\n多模态任务（异步）：alibaba/wan2.6-t2v、bytedance/seedance-2.0:image-to-video、google/veo3、klingai/kling-v3-omni-t2v、midjourney/diffusion、minimax/music-2.5、openai/gpt-image-2 ...',
       other:
-        '同一渠道同时承载 chat 与 task：/v1/chat/completions 与 /v1/messages 走 chat 适配器，/v1/video/generations 走 mulerun studio task 适配器。',
+        '同一渠道同时承载 chat 与 task：/v1/chat/completions 与 /v1/messages 走 chat 适配器，/v1/tasks/* 走 mulerun task 适配器；多动作模型（seedance/gpt-image-2/nano-banana）可在 model 字段后追加 ":<action>" 指定，如 "openai/gpt-image-2:edit"',
     },
     validation: {
       keyFormat: /^muk-/,
       keyMinLength: 20,
+    },
+  },
+  202: {
+    id: 202,
+    name: CHANNEL_TYPES[202],
+    icon: 'openai',
+    defaultBaseUrl: 'https://api.mjapi.cc.cd',
+    hints: {
+      baseUrl: 'Default: https://api.mjapi.cc.cd',
+      key: 'Cool API Key（sk- 前缀走自动扣费/退费）',
+      models:
+        '图片：gpt_image_2, midjourney_v7, flux_kontext_pro ...; 视频：seedance_2_fast, kling_3_omni, vidu_q3_pro ...',
+      other: 'Cool 是异步任务接口（提交 → 轮询），请通过 /v1/cool/* 路径调用',
     },
   },
   // ===== NewAPI default =====
