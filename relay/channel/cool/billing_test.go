@@ -65,9 +65,9 @@ func TestSeedanceRatios(t *testing.T) {
 	}{
 		// 按秒计费：durationRatio == 秒数。
 		{"dynamic 720p 5s baseline", "cool:seedance_2", "720p", 5, 5, 1.0},
-		{"dynamic 1080p 10s", "cool:seedance_2", "1080p", 10, 10, 1.70 / 0.75},
-		{"dynamic 480p 4s linear", "cool:seedance_2", "480p", 4, 4, 0.42 / 0.75},
-		{"dynamic fast 480p 15s", "cool:seedance_2_fast", "480p", 15, 15, 0.36 / 0.59},
+		{"dynamic 1080p 10s", "cool:seedance_2", "1080p", 10, 10, 2.478 / 0.994},
+		{"dynamic 480p 4s linear", "cool:seedance_2", "480p", 4, 4, 0.462 / 0.994},
+		{"dynamic fast 480p 15s", "cool:seedance_2_fast", "480p", 15, 15, 0.372 / 0.800},
 		{"dynamic fast 1080p -> 720p fallback", "cool:seedance_2_fast", "1080p", 5, 5, 1.0},
 		{"dynamic missing res -> 720p", "cool:seedance_2", "", 5, 5, 1.0},
 		// 固定 SKU：只有 duration 倍率，不叠加 resolution（单价已含分辨率）。
@@ -100,7 +100,7 @@ func TestEstimateBillingDynamicReadsTopLevelResolution(t *testing.T) {
 		`{"model":"cool:seedance_2","prompt":"hi","resolution":"1080p","duration":10}`,
 	)
 	assertFloatClose(t, got["duration"], 10)
-	assertFloatClose(t, got["resolution"], 1.70/0.75)
+	assertFloatClose(t, got["resolution"], 2.478/0.994)
 }
 
 func TestEstimateBillingDynamicReadsMetadataResolution(t *testing.T) {
@@ -109,7 +109,7 @@ func TestEstimateBillingDynamicReadsMetadataResolution(t *testing.T) {
 		`{"model":"seedance_2_fast","prompt":"hi","metadata":{"resolution":"480p"},"duration":5}`,
 	)
 	assertFloatClose(t, got["duration"], 5)
-	assertFloatClose(t, got["resolution"], 0.36/0.59)
+	assertFloatClose(t, got["resolution"], 0.372/0.800)
 }
 
 func TestEstimateBillingDynamicDefaultsToBaseline(t *testing.T) {

@@ -10,31 +10,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Cool Seedance 2.0 系列按「分辨率 × 时长」动态计费，cool 官方按秒计费。
+// Cool Seedance 2.0 系列按「分辨率 × 时长」动态计费（cool 上游按秒计费）。
+//
+// 注意：这里的倍率只决定【对客户的扣费】，与 cool 给我们的成本无关，因此取自
+// 对外【售价】曲线（mzsjai 定价，元/秒；本部署 RMB:积分=1:1，直接按元填）。
 //
 // 对外有两类 SKU（见 constants.SeedanceSKUs，由 parseSeedanceModel 解析）：
 //
 //  1. 动态 SKU：cool:seedance_2 / cool:seedance_2_fast —— 无分辨率后缀，
-//     分辨率由请求参数决定（默认 720p），价格随分辨率变化。cool 按秒计费，
-//     管理员把 ModelPrice 填 720p 的「每秒」单价（直接照抄 pricing 页）：
-//     cool:seedance_2       => 0.75 / 秒（720p）
-//     cool:seedance_2_fast  => 0.59 / 秒（720p）
-//     再由 resolution 倍率（相对 720p）+ duration 倍率（=秒数）自动放缩。
+//     分辨率由请求参数决定（默认 720p）。管理员给【客户调用的模型名】填 720p 售价：
+//     doubao/seedance-2.0       => 0.994 / 秒（720p）
+//     doubao/seedance-2.0-fast  => 0.800 / 秒（720p）
+//     再由 resolution 倍率（相对 720p）+ duration 倍率（=秒数）自动放缩出 480p/1080p。
 //
 //  2. 固定 SKU：cool:seedance_2_480p / _720p / _1080p 及其 _video 变体 ——
-//     分辨率（及是否参考视频）已写死在模型名里，各有独立的每秒单价。管理员
-//     把 ModelPrice 直接照抄该 SKU 在 pricing 页的每秒单价，代码只叠加
-//     duration 倍率（=秒数），不再叠加 resolution 倍率（否则会重复计）。
+//     分辨率（及是否参考视频）已写死在模型名里，各有独立的每秒售价。管理员
+//     把 ModelPrice 直接填该 SKU 的每秒售价，代码只叠加 duration 倍率
+//     （=秒数），不再叠加 resolution 倍率（否则会重复计）。
 //
 // 倍率公式：最终额度 = 每秒单价 × (resolutionRatio?) × durationRatio
 //   - durationRatio = duration / seedanceBillingUnitSeconds = duration（按秒线性）
-//   - resolutionRatio 仅动态 SKU 生效，取自 cool 官方价目（相对 720p）：
-//     seedance_2:      480p 0.42/0.75 | 720p 1.0 | 1080p 1.70/0.75
-//     seedance_2_fast: 480p 0.36/0.59 | 720p 1.0 |（无 1080p，回落 720p）
+//   - resolutionRatio 仅动态 SKU 生效，取自【售价】曲线（相对 720p）：
+//     seedance_2:      480p 0.462/0.994 | 720p 1.0 | 1080p 2.478/0.994
+//     seedance_2_fast: 480p 0.372/0.800 | 720p 1.0 |（无 1080p，回落 720p）
 //
 // 固定 _video SKU 与非 video SKU 走同一 cool 基础模型，差异仅在 files 是否带
-// type:video 的参考素材；价格差异由各自的 ModelPrice 体现。本部署已把
-// USD:RMB 汇率设为 1:1，pricing 页价格即按 RMB/积分直接填入，无需换算美元。
+// type:video 的参考素材；价格差异由各自的 ModelPrice 体现。
 // 非 Seedance 2.0 模型返回 nil，走默认定额计费。
 const (
 	seedanceBillingUnitSeconds = 1 // cool 按秒计费：ModelPrice 即每秒单价
@@ -44,15 +45,16 @@ const (
 
 var (
 	// seedanceStandardResolutionRatios 是 seedance_2 动态 SKU 的清晰度倍率（相对 720p=1.0）。
+	// 取自对外【售价】曲线（元/秒）：480p 0.462 | 720p 0.994 | 1080p 2.478。
 	seedanceStandardResolutionRatios = map[string]float64{
-		"480p":  0.42 / 0.75,
+		"480p":  0.462 / 0.994,
 		"720p":  1.0,
-		"1080p": 1.70 / 0.75,
+		"1080p": 2.478 / 0.994,
 	}
 	// seedanceFastResolutionRatios 是 seedance_2_fast 动态 SKU 的清晰度倍率（相对 720p=1.0）。
-	// fast 版本不支持 1080p：请求 1080p 时回落到默认 720p 计费。
+	// 售价曲线（元/秒）：480p 0.372 | 720p 0.800。fast 不支持 1080p：请求 1080p 回落 720p 计费。
 	seedanceFastResolutionRatios = map[string]float64{
-		"480p": 0.36 / 0.59,
+		"480p": 0.372 / 0.800,
 		"720p": 1.0,
 	}
 )
