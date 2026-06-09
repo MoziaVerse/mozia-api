@@ -11,18 +11,25 @@ import (
 
 const (
 	seedanceDefaultDurationSeconds = 15
-	seedanceBillingUnitSeconds     = 5
+	// 按秒计费（与 cool 渠道对齐 unit=1）：ModelPrice 即「480p 每秒单价」，duration 倍率 = 秒数。
+	seedanceBillingUnitSeconds = 1
 )
 
+// 清晰度倍率以 480p 为基准（=1.0）：管理员给 ModelPrice 填 480p 的每秒售价
+// （标准 0.462 / fast 0.350 元/秒），720p / 1080p 由倍率放缩。
+// 倍率取自 mulerun 自身的对外售价曲线（元/秒）：
+//
+//	标准:  480p 0.462 | 720p 0.994 | 1080p 2.548
+//	fast:  480p 0.350 | 720p 0.812 |（无 1080p，请求 1080p 回落 720p 计费）
 var (
 	seedanceStandardResolutionRatios = map[string]float64{
-		"480p":  1,
-		"720p":  0.71 / 0.33,
-		"1080p": 1.82 / 0.33,
+		"480p":  1.0,
+		"720p":  0.994 / 0.462,
+		"1080p": 2.548 / 0.462,
 	}
 	seedanceFastResolutionRatios = map[string]float64{
-		"480p": 1,
-		"720p": 0.58 / 0.25,
+		"480p": 1.0,
+		"720p": 0.812 / 0.350,
 	}
 )
 

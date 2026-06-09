@@ -18,10 +18,10 @@ import (
 // 对外有两类 SKU（见 constants.SeedanceSKUs，由 parseSeedanceModel 解析）：
 //
 //  1. 动态 SKU：cool:seedance_2 / cool:seedance_2_fast —— 无分辨率后缀，
-//     分辨率由请求参数决定（默认 720p）。管理员给【客户调用的模型名】填 720p 售价：
-//     doubao/seedance-2.0       => 0.994 / 秒（720p）
-//     doubao/seedance-2.0-fast  => 0.800 / 秒（720p）
-//     再由 resolution 倍率（相对 720p）+ duration 倍率（=秒数）自动放缩出 480p/1080p。
+//     分辨率由请求参数决定（缺省回落默认 720p）。管理员给【客户调用的模型名】填 480p 售价：
+//     doubao/seedance-2.0       => 0.462 / 秒（480p）
+//     doubao/seedance-2.0-fast  => 0.372 / 秒（480p）
+//     再由 resolution 倍率（相对 480p）+ duration 倍率（=秒数）自动放缩出 720p/1080p。
 //
 //  2. 固定 SKU：cool:seedance_2_480p / _720p / _1080p 及其 _video 变体 ——
 //     分辨率（及是否参考视频）已写死在模型名里，各有独立的每秒售价。管理员
@@ -30,9 +30,9 @@ import (
 //
 // 倍率公式：最终额度 = 每秒单价 × (resolutionRatio?) × durationRatio
 //   - durationRatio = duration / seedanceBillingUnitSeconds = duration（按秒线性）
-//   - resolutionRatio 仅动态 SKU 生效，取自【售价】曲线（相对 720p）：
-//     seedance_2:      480p 0.462/0.994 | 720p 1.0 | 1080p 2.478/0.994
-//     seedance_2_fast: 480p 0.372/0.800 | 720p 1.0 |（无 1080p，回落 720p）
+//   - resolutionRatio 仅动态 SKU 生效，取自【售价】曲线（相对 480p）：
+//     seedance_2:      480p 1.0 | 720p 0.994/0.462 | 1080p 2.478/0.462
+//     seedance_2_fast: 480p 1.0 | 720p 0.800/0.372 |（无 1080p，回落 720p）
 //
 // 固定 _video SKU 与非 video SKU 走同一 cool 基础模型，差异仅在 files 是否带
 // type:video 的参考素材；价格差异由各自的 ModelPrice 体现。
@@ -44,18 +44,18 @@ const (
 )
 
 var (
-	// seedanceStandardResolutionRatios 是 seedance_2 动态 SKU 的清晰度倍率（相对 720p=1.0）。
+	// seedanceStandardResolutionRatios 是 seedance_2 动态 SKU 的清晰度倍率（相对 480p=1.0）。
 	// 取自对外【售价】曲线（元/秒）：480p 0.462 | 720p 0.994 | 1080p 2.478。
 	seedanceStandardResolutionRatios = map[string]float64{
-		"480p":  0.462 / 0.994,
-		"720p":  1.0,
-		"1080p": 2.478 / 0.994,
+		"480p":  1.0,
+		"720p":  0.994 / 0.462,
+		"1080p": 2.478 / 0.462,
 	}
-	// seedanceFastResolutionRatios 是 seedance_2_fast 动态 SKU 的清晰度倍率（相对 720p=1.0）。
+	// seedanceFastResolutionRatios 是 seedance_2_fast 动态 SKU 的清晰度倍率（相对 480p=1.0）。
 	// 售价曲线（元/秒）：480p 0.372 | 720p 0.800。fast 不支持 1080p：请求 1080p 回落 720p 计费。
 	seedanceFastResolutionRatios = map[string]float64{
-		"480p": 0.372 / 0.800,
-		"720p": 1.0,
+		"480p": 1.0,
+		"720p": 0.800 / 0.372,
 	}
 )
 

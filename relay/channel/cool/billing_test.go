@@ -63,13 +63,14 @@ func TestSeedanceRatios(t *testing.T) {
 		wantDuration   float64
 		wantResolution float64 // -1 = 期望不返回 resolution key（固定 SKU）
 	}{
-		// 按秒计费：durationRatio == 秒数。
-		{"dynamic 720p 5s baseline", "cool:seedance_2", "720p", 5, 5, 1.0},
-		{"dynamic 1080p 10s", "cool:seedance_2", "1080p", 10, 10, 2.478 / 0.994},
-		{"dynamic 480p 4s linear", "cool:seedance_2", "480p", 4, 4, 0.462 / 0.994},
-		{"dynamic fast 480p 15s", "cool:seedance_2_fast", "480p", 15, 15, 0.372 / 0.800},
-		{"dynamic fast 1080p -> 720p fallback", "cool:seedance_2_fast", "1080p", 5, 5, 1.0},
-		{"dynamic missing res -> 720p", "cool:seedance_2", "", 5, 5, 1.0},
+		// 按秒计费：durationRatio == 秒数。基准 480p=1.0。
+		{"dynamic 480p 4s baseline", "cool:seedance_2", "480p", 4, 4, 1.0},
+		{"dynamic 720p 5s", "cool:seedance_2", "720p", 5, 5, 0.994 / 0.462},
+		{"dynamic 1080p 10s", "cool:seedance_2", "1080p", 10, 10, 2.478 / 0.462},
+		{"dynamic fast 480p 15s", "cool:seedance_2_fast", "480p", 15, 15, 1.0},
+		{"dynamic fast 720p", "cool:seedance_2_fast", "720p", 8, 8, 0.800 / 0.372},
+		{"dynamic fast 1080p -> 720p fallback", "cool:seedance_2_fast", "1080p", 5, 5, 0.800 / 0.372},
+		{"dynamic missing res -> 720p", "cool:seedance_2", "", 5, 5, 0.994 / 0.462},
 		// 固定 SKU：只有 duration 倍率，不叠加 resolution（单价已含分辨率）。
 		{"fixed 480p only duration", "cool:seedance_2_480p", "480p", 10, 10, -1},
 		{"fixed 1080p video only duration", "cool:seedance_2_1080p_video", "1080p", 5, 5, -1},
@@ -100,7 +101,7 @@ func TestEstimateBillingDynamicReadsTopLevelResolution(t *testing.T) {
 		`{"model":"cool:seedance_2","prompt":"hi","resolution":"1080p","duration":10}`,
 	)
 	assertFloatClose(t, got["duration"], 10)
-	assertFloatClose(t, got["resolution"], 2.478/0.994)
+	assertFloatClose(t, got["resolution"], 2.478/0.462)
 }
 
 func TestEstimateBillingDynamicReadsMetadataResolution(t *testing.T) {
@@ -109,7 +110,7 @@ func TestEstimateBillingDynamicReadsMetadataResolution(t *testing.T) {
 		`{"model":"seedance_2_fast","prompt":"hi","metadata":{"resolution":"480p"},"duration":5}`,
 	)
 	assertFloatClose(t, got["duration"], 5)
-	assertFloatClose(t, got["resolution"], 0.372/0.800)
+	assertFloatClose(t, got["resolution"], 1.0)
 }
 
 func TestEstimateBillingDynamicDefaultsToBaseline(t *testing.T) {
@@ -117,8 +118,8 @@ func TestEstimateBillingDynamicDefaultsToBaseline(t *testing.T) {
 		"seedance_2",
 		`{"model":"seedance_2","prompt":"hi"}`,
 	)
-	assertFloatClose(t, got["duration"], 5)   // missing duration -> 5s
-	assertFloatClose(t, got["resolution"], 1) // missing resolution -> 720p
+	assertFloatClose(t, got["duration"], 5)             // missing duration -> 5s
+	assertFloatClose(t, got["resolution"], 0.994/0.462) // missing resolution -> 720p（相对 480p）
 }
 
 // 固定 SKU：分辨率后缀优先，请求体 resolution 被忽略，且不叠加 resolution 倍率。

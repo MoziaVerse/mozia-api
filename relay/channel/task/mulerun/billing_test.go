@@ -26,8 +26,9 @@ func TestSeedanceBillingRatios(t *testing.T) {
 				Resolution: "720p",
 				Duration:   10,
 			},
-			wantDuration:   2,
-			wantResolution: 0.58 / 0.25,
+			// 按秒计费（unit=1）：durationRatio == 秒数；480p 为基准，720p = 0.812/0.350。
+			wantDuration:   10,
+			wantResolution: 0.812 / 0.350,
 		},
 		{
 			name:    "standard 1080p 15 seconds",
@@ -36,8 +37,8 @@ func TestSeedanceBillingRatios(t *testing.T) {
 				Resolution: "1080p",
 				Duration:   15,
 			},
-			wantDuration:   3,
-			wantResolution: 1.82 / 0.33,
+			wantDuration:   15,
+			wantResolution: 2.548 / 0.462,
 		},
 		{
 			name:    "standard 720p 4 seconds bills linearly",
@@ -46,17 +47,17 @@ func TestSeedanceBillingRatios(t *testing.T) {
 				Resolution: "720p",
 				Duration:   4,
 			},
-			wantDuration:   0.8,
-			wantResolution: 0.71 / 0.33,
+			wantDuration:   4,
+			wantResolution: 0.994 / 0.462,
 		},
 		{
 			name:    "missing parameters use conservative defaults",
 			modelID: "bytedance/seedance-2.0/reference-to-video",
 			params:  seedanceBillingParams{},
 			// No duration means the upstream may auto-select; bill as 15s.
-			wantDuration: 3,
+			wantDuration: 15,
 			// Standard Seedance maxes out at 1080p.
-			wantResolution: 1.82 / 0.33,
+			wantResolution: 2.548 / 0.462,
 		},
 		{
 			name:    "fast missing resolution defaults to 720p",
@@ -64,8 +65,8 @@ func TestSeedanceBillingRatios(t *testing.T) {
 			params: seedanceBillingParams{
 				Duration: 5,
 			},
-			wantDuration:   1,
-			wantResolution: 0.58 / 0.25,
+			wantDuration:   5,
+			wantResolution: 0.812 / 0.350,
 		},
 	}
 
@@ -105,8 +106,8 @@ func TestSeedanceEstimateBillingReadsTopLevelResolution(t *testing.T) {
 	}
 
 	got := adaptor.EstimateBilling(c, info)
-	assertFloatClose(t, got["duration"], 2)
-	assertFloatClose(t, got["resolution"], 0.58/0.25)
+	assertFloatClose(t, got["duration"], 10)
+	assertFloatClose(t, got["resolution"], 0.812/0.350)
 }
 
 func TestSeedanceEstimateBillingUsesConservativeDefaults(t *testing.T) {
@@ -136,8 +137,8 @@ func TestSeedanceEstimateBillingUsesConservativeDefaults(t *testing.T) {
 	}
 
 	got := adaptor.EstimateBilling(c, info)
-	assertFloatClose(t, got["duration"], 3)
-	assertFloatClose(t, got["resolution"], 1.82/0.33)
+	assertFloatClose(t, got["duration"], 15)
+	assertFloatClose(t, got["resolution"], 2.548/0.462)
 }
 
 func assertFloatClose(t *testing.T, got, want float64) {
