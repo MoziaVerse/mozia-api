@@ -4,7 +4,10 @@ WORKDIR /build/web
 COPY web/package.json web/bun.lock ./
 COPY web/default/package.json ./default/package.json
 COPY web/classic/package.json ./classic/package.json
-RUN bun install --frozen-lockfile
+# Use a China-accessible npm mirror to avoid tarball corruption / integrity
+# errors when bun downloads from registry.npmjs.org (same rationale as GOPROXY).
+RUN printf '[install]\nregistry = "https://registry.npmmirror.com"\n' > bunfig.toml \
+    && bun install --frozen-lockfile
 COPY ./web/default ./default
 COPY ./VERSION /build/VERSION
 RUN cd default && DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat /build/VERSION) bun run build
@@ -15,7 +18,10 @@ WORKDIR /build/web
 COPY web/package.json web/bun.lock ./
 COPY web/default/package.json ./default/package.json
 COPY web/classic/package.json ./classic/package.json
-RUN bun install --filter ./classic --frozen-lockfile
+# Use a China-accessible npm mirror to avoid tarball corruption / integrity
+# errors when bun downloads from registry.npmjs.org (same rationale as GOPROXY).
+RUN printf '[install]\nregistry = "https://registry.npmmirror.com"\n' > bunfig.toml \
+    && bun install --filter ./classic --frozen-lockfile
 COPY ./web/classic ./classic
 COPY ./VERSION /build/VERSION
 RUN cd classic && VITE_REACT_APP_VERSION=$(cat /build/VERSION) bun run build
