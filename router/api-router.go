@@ -432,6 +432,13 @@ func SetSSOApiRouter(router *gin.Engine) {
 		{
 			ssoDataRoute.GET("/self", controller.GetUserQuotaDates)
 		}
+
+		// 异步任务（视频生成、midjourney 等）的用户视角列表。
+		// 复用 controller.GetUserTask，SSOAuth 已把 user_id 写到 c.GetInt("id")。
+		ssoTaskRoute := ssoRouter.Group("/task")
+		{
+			ssoTaskRoute.GET("/self", controller.GetUserTask)
+		}
 	}
 }
 
