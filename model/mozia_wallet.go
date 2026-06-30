@@ -112,6 +112,14 @@ type MoziaWalletGrantInput struct {
 	Metadata      map[string]interface{}
 }
 
+type MoziaWalletAdjustInput struct {
+	UserId        int
+	Source        string
+	Delta         *int
+	TargetBalance *int
+	Reason        string
+}
+
 type MoziaWalletView struct {
 	UserId  int            `json:"user_id"`
 	Total   int            `json:"total"`
@@ -386,6 +394,99 @@ func GetMoziaWalletView(userId int) (*MoziaWalletView, error) {
 		}
 	}
 	return view, nil
+}
+
+func AdjustMoziaWalletBalance(input MoziaWalletAdjustInput) (*MoziaWalletView, error) {
+	if input.UserId == 0 {
+		return nil, errors.New("user id is empty")
+	}
+	source, err := normalizeMoziaWalletSource(input.Source)
+	if err != nil {
+		return nil, err
+	}
+	var delta int
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := tx.Select("id").Where("id = ?", input.UserId).First(&user).Error; err != nil {
+			return err
+		}
+		if err := syncMoziaLegacyBalanceForUserTx(tx, input.UserId); err != nil {
+			return err
+		}
+		if err := ensureMoziaWalletBalanceTx(tx, input.UserId, source); err != nil {
+			return err
+		}
+		currentBalance, err := getMoziaWalletBalanceTx(tx, input.UserId, source)
+		if err != nil {
+			return err
+		}
+		if input.TargetBalance != nil {
+			if *input.TargetBalance < 0 {
+				return errors.New("target balance must be non-negative")
+			}
+			delta = *input.TargetBalance - currentBalance
+		} else if input.Delta != nil {
+			delta = *input.Delta
+		} else {
+			return errors.New("delta or target_balance is required")
+		}
+		if delta == 0 {
+			return nil
+		}
+		now := common.GetTimestamp()
+		query := tx.Model(&MoziaWalletBalance{}).
+			Where("user_id = ? AND source = ?", input.UserId, source)
+		if delta < 0 {
+			query = query.Where("balance >= ?", -delta)
+		}
+		res := query.Updates(map[string]interface{}{
+			"balance":      gorm.Expr("balance + ?", delta),
+			"updated_time": now,
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrMoziaWalletInsufficient
+		}
+		userQuery := tx.Model(&User{}).Where("id = ?", input.UserId)
+		if delta < 0 {
+			userQuery = userQuery.Where("quota >= ?", -delta)
+		}
+		res = userQuery.Update("quota", gorm.Expr("quota + ?", delta))
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrMoziaWalletInsufficient
+		}
+		balanceAfter, err := getMoziaWalletBalanceTx(tx, input.UserId, source)
+		if err != nil {
+			return err
+		}
+		amount := delta
+		if amount < 0 {
+			amount = -amount
+		}
+		return createMoziaWalletTransactionTx(tx, MoziaWalletGrantInput{
+			UserId:        input.UserId,
+			Source:        source,
+			Amount:        amount,
+			EventType:     MoziaWalletEventAdjust,
+			ReferenceType: "admin_adjust",
+			ReferenceId:   strings.TrimSpace(input.Reason),
+			Metadata: map[string]interface{}{
+				"reason": strings.TrimSpace(input.Reason),
+			},
+		}, delta, balanceAfter)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if delta != 0 {
+		updateMoziaUserQuotaCache(input.UserId, delta)
+	}
+	return GetMoziaWalletView(input.UserId)
 }
 
 func CreateMoziaModelQuotaPolicy(policy *MoziaModelQuotaPolicy) error {

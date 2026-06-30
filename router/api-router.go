@@ -443,6 +443,7 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 	walletRoute.Use(middleware.RootOnlyAuth())
 	{
 		walletRoute.GET("/users/:id", controller.GetMoziaUserWallet)
+		walletRoute.POST("/users/:id/adjust", controller.AdjustMoziaUserWallet)
 	}
 
 	quotaPolicyRoute := moziaRouter.Group("/quota-policy")

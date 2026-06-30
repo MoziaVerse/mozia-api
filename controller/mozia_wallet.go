@@ -19,6 +19,13 @@ type moziaQuotaPolicyRequest struct {
 	Priority       int    `json:"priority"`
 }
 
+type moziaWalletAdjustRequest struct {
+	Source        string `json:"source"`
+	Delta         *int   `json:"delta"`
+	TargetBalance *int   `json:"target_balance"`
+	Reason        string `json:"reason"`
+}
+
 func (req moziaQuotaPolicyRequest) toModel(id int) model.MoziaModelQuotaPolicy {
 	enabled := true
 	if req.Enabled != nil {
@@ -56,6 +63,39 @@ func GetMoziaUserWallet(c *gin.Context) {
 		return
 	}
 	wallet, err := model.GetMoziaWalletView(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, wallet)
+}
+
+func AdjustMoziaUserWallet(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户 ID")
+		return
+	}
+	var req moziaWalletAdjustRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if req.Delta == nil && req.TargetBalance == nil {
+		common.ApiErrorMsg(c, "delta 或 target_balance 必填")
+		return
+	}
+	if req.Delta != nil && req.TargetBalance != nil {
+		common.ApiErrorMsg(c, "delta 和 target_balance 只能填写一个")
+		return
+	}
+	wallet, err := model.AdjustMoziaWalletBalance(model.MoziaWalletAdjustInput{
+		UserId:        userId,
+		Source:        req.Source,
+		Delta:         req.Delta,
+		TargetBalance: req.TargetBalance,
+		Reason:        strings.TrimSpace(req.Reason),
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return

@@ -98,3 +98,43 @@ func TestMoziaWalletReservationUsesPaidOnlyPolicy(t *testing.T) {
 	assert.Equal(t, 50, getMoziaSourceBalance(t, 1002, MoziaWalletSourcePaid))
 	assert.Equal(t, 150, getMoziaUserQuota(t, 1002))
 }
+
+func TestAdjustMoziaWalletBalance(t *testing.T) {
+	truncateTables(t)
+
+	seedMoziaWalletUser(t, 1003, 100)
+	require.NoError(t, RecordMoziaInitialGiftQuota(1003, 100, "test", "gift"))
+
+	delta := 50
+	wallet, err := AdjustMoziaWalletBalance(MoziaWalletAdjustInput{
+		UserId: 1003,
+		Source: MoziaWalletSourceGift,
+		Delta:  &delta,
+		Reason: "support adjustment",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 150, wallet.Sources[MoziaWalletSourceGift])
+	assert.Equal(t, 150, wallet.Total)
+	assert.Equal(t, 150, getMoziaUserQuota(t, 1003))
+
+	target := 20
+	wallet, err = AdjustMoziaWalletBalance(MoziaWalletAdjustInput{
+		UserId:        1003,
+		Source:        MoziaWalletSourcePaid,
+		TargetBalance: &target,
+		Reason:        "paid correction",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 20, wallet.Sources[MoziaWalletSourcePaid])
+	assert.Equal(t, 170, wallet.Total)
+	assert.Equal(t, 170, getMoziaUserQuota(t, 1003))
+
+	tooMuch := -200
+	_, err = AdjustMoziaWalletBalance(MoziaWalletAdjustInput{
+		UserId: 1003,
+		Source: MoziaWalletSourceGift,
+		Delta:  &tooMuch,
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrMoziaWalletInsufficient))
+}
