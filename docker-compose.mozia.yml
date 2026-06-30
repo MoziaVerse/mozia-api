@@ -8,14 +8,15 @@ services:
     restart: always
     command: --log-dir /app/logs
     ports:
-      - "3369:3000"
+      - "127.0.0.1:3369:3000"
+      - "172.16.10.107:3369:3000"
     volumes:
       - ./data:/data
       - ./logs:/app/logs
     env_file:
       - .env
     environment:
-      - SQL_DSN=postgresql://mozia_api:api@mozia@host.docker.internal:36915/mozia_api_db
+      - SQL_DSN=postgresql://mozia_api:api@mozia@postgres-dev:5432/mozia_api_db
       - REDIS_CONN_STRING=redis://redis
       - TZ=Asia/Shanghai
       - ERROR_LOG_ENABLED=true
@@ -23,6 +24,7 @@ services:
       - redis
     networks:
       - mozia-api-network
+      - postgres_db_internal
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -32,7 +34,11 @@ services:
     restart: always
     networks:
       - mozia-api-network
+      - postgres_db_internal
 
 networks:
   mozia-api-network:
     driver: bridge
+
+  postgres_db_internal:
+    external: true
