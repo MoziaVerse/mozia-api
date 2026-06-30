@@ -24,6 +24,7 @@ import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
+import { MoziaQuotaPolicySection } from './mozia-quota-policy-section'
 import { RoutingReliabilitySection } from './routing-reliability-section'
 
 function formatJsonForEditor(value: string, fallback: string) {
@@ -166,6 +167,11 @@ const MODELS_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'mozia-quota-policies',
+    titleKey: 'Mozia Model Quota Policies',
+    build: () => <MoziaQuotaPolicySection />,
   },
   {
     id: 'model-deployment',

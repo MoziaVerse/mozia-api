@@ -49,6 +49,7 @@ import DrawingSetting from '../../components/settings/DrawingSetting';
 import PaymentSetting from '../../components/settings/PaymentSetting';
 import ModelDeploymentSetting from '../../components/settings/ModelDeploymentSetting';
 import PerformanceSetting from '../../components/settings/PerformanceSetting';
+import MoziaQuotaPolicySetting from '../../components/settings/MoziaQuotaPolicySetting';
 
 const Setting = () => {
   const { t } = useTranslation();
@@ -137,6 +138,16 @@ const Setting = () => {
       ),
       content: <ModelSetting />,
       itemKey: 'models',
+    });
+    panes.push({
+      tab: (
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <CreditCard size={18} />
+          {t('模型额度策略')}
+        </span>
+      ),
+      content: <MoziaQuotaPolicySetting />,
+      itemKey: 'mozia-quota-policies',
     });
     panes.push({
       tab: (
