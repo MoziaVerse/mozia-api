@@ -79,6 +79,7 @@ func createDefaultTokenForUser(userId int) error {
 		AccessedTime:   common.GetTimestamp(),
 		ExpiredTime:    -1,
 		UnlimitedQuota: true,
+		Group:          "auto",
 	}
 
 	return token.Insert()
