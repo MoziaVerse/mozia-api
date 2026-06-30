@@ -1456,8 +1456,7 @@ type SSOTopUpRequest struct {
 // 中间件已将 SSO 用户 resolve 到 context 的 "id"，此处直接复用。
 // 用途：外部计费/支付服务（如 matrix 接的微信支付）回调后给用户充值。
 //
-// 落账方式：调 IncreaseUserQuota（DB 原子 UPDATE quota = quota + delta），
-// 并写 LogTypeTopup 日志，与 redemption / waffo / admin 补单同口径。
+// 落账方式：写入 Mozia paid 钱包分账，并同步 users.quota 总余额镜像。
 func SSOTopUp(c *gin.Context) {
 	var req SSOTopUpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1471,15 +1470,26 @@ func SSOTopUp(c *gin.Context) {
 		return
 	}
 
-	if err := model.IncreaseUserQuota(userId, req.DeltaQuota, true); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
 	reason := req.Reason
 	if reason == "" {
 		reason = "外部充值"
 	}
+
+	if err := model.GrantMoziaWalletQuota(model.MoziaWalletGrantInput{
+		UserId:        userId,
+		Source:        model.MoziaWalletSourcePaid,
+		Amount:        req.DeltaQuota,
+		EventType:     model.MoziaWalletEventTopUp,
+		ReferenceType: "sso_topup",
+		ReferenceId:   reason,
+		Metadata: map[string]interface{}{
+			"reason": reason,
+		},
+	}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
 	model.RecordLog(userId, model.LogTypeTopup,
 		fmt.Sprintf("%s，到账 %s", reason, logger.LogQuota(req.DeltaQuota)))
 

@@ -137,8 +137,14 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
 			return errors.New("该兑换码已过期")
 		}
-		err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
-		if err != nil {
+		if _, err = grantMoziaWalletQuotaTx(tx, MoziaWalletGrantInput{
+			UserId:        userId,
+			Source:        MoziaWalletSourcePaid,
+			Amount:        redemption.Quota,
+			EventType:     MoziaWalletEventRedeem,
+			ReferenceType: "redemption",
+			ReferenceId:   fmt.Sprintf("%d", redemption.Id),
+		}, true); err != nil {
 			return err
 		}
 		redemption.RedeemedTime = common.GetTimestamp()
@@ -151,6 +157,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		common.SysError("redemption failed: " + err.Error())
 		return 0, ErrRedeemFailed
 	}
+	updateMoziaUserQuotaCache(userId, redemption.Quota)
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return redemption.Quota, nil
 }

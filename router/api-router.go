@@ -382,6 +382,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 	ssoRouter.Use(middleware.SSOAuth())
 	{
 		ssoRouter.GET("/user/self", controller.GetSelf)
+		ssoRouter.GET("/user/wallet", controller.GetSSOMoziaWallet)
 		ssoRouter.POST("/user/topup", controller.SSOTopUp)
 		ssoRouter.POST("/user/redeem", middleware.CriticalRateLimit(), controller.SSORedeem)
 		ssoRouter.GET("/pricing", controller.GetPricing)
@@ -436,6 +437,21 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 		openRouterMetaRoute.POST("/", controller.CreateOpenRouterModelMeta)
 		openRouterMetaRoute.PUT("/", controller.UpdateOpenRouterModelMeta)
 		openRouterMetaRoute.DELETE("/:id", controller.DeleteOpenRouterModelMeta)
+	}
+
+	walletRoute := moziaRouter.Group("/wallet")
+	walletRoute.Use(middleware.RootOnlyAuth())
+	{
+		walletRoute.GET("/users/:id", controller.GetMoziaUserWallet)
+	}
+
+	quotaPolicyRoute := moziaRouter.Group("/quota-policy")
+	quotaPolicyRoute.Use(middleware.RootOnlyAuth())
+	{
+		quotaPolicyRoute.GET("/", controller.GetAllMoziaQuotaPolicies)
+		quotaPolicyRoute.POST("/", controller.CreateMoziaQuotaPolicy)
+		quotaPolicyRoute.PUT("/:id", controller.UpdateMoziaQuotaPolicy)
+		quotaPolicyRoute.DELETE("/:id", controller.DeleteMoziaQuotaPolicy)
 	}
 }
 

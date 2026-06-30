@@ -155,6 +155,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		return
 	}
+	if newAPIError = service.EnforceMoziaQuotaPolicy(relayInfo.UserId, relayInfo.OriginModelName); newAPIError != nil {
+		return
+	}
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
@@ -581,6 +584,7 @@ func RelayTask(c *gin.Context) {
 		task := model.InitTask(result.Platform, relayInfo)
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
+		task.PrivateData.WalletReservationRequestId = relayInfo.WalletReservationRequestId
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.NodeName = common.NodeName

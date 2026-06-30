@@ -430,11 +430,21 @@ func (user *User) finishInsert(inviterId int) {
 	}
 
 	if common.QuotaForNewUser > 0 {
+		if err := RecordMoziaInitialGiftQuota(user.Id, common.QuotaForNewUser, "user", fmt.Sprintf("%d", user.Id)); err != nil {
+			common.SysLog("failed to record mozia initial gift quota: " + err.Error())
+		}
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
 		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+			_ = GrantMoziaWalletQuota(MoziaWalletGrantInput{
+				UserId:        user.Id,
+				Source:        MoziaWalletSourceGift,
+				Amount:        common.QuotaForInvitee,
+				EventType:     MoziaWalletEventInviteGift,
+				ReferenceType: "inviter",
+				ReferenceId:   fmt.Sprintf("%d", inviterId),
+			})
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
 		if common.QuotaForInviter > 0 {
@@ -494,11 +504,21 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 	}
 
 	if common.QuotaForNewUser > 0 {
+		if err := RecordMoziaInitialGiftQuota(user.Id, common.QuotaForNewUser, "user", fmt.Sprintf("%d", user.Id)); err != nil {
+			common.SysLog("failed to record mozia initial gift quota: " + err.Error())
+		}
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
 		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+			_ = GrantMoziaWalletQuota(MoziaWalletGrantInput{
+				UserId:        user.Id,
+				Source:        MoziaWalletSourceGift,
+				Amount:        common.QuotaForInvitee,
+				EventType:     MoziaWalletEventInviteGift,
+				ReferenceType: "inviter",
+				ReferenceId:   fmt.Sprintf("%d", inviterId),
+			})
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
 		}
 		if common.QuotaForInviter > 0 {

@@ -111,7 +111,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		return errors.New("未提供支付单号")
 	}
 
-	var quota float64
+	var quotaToAdd int
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -140,13 +140,23 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			return err
 		}
 
-		quota = topUp.Money * common.QuotaPerUnit
-		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(map[string]interface{}{"stripe_customer": customerId, "quota": gorm.Expr("quota + ?", quota)}).Error
-		if err != nil {
+		quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+		if _, err = grantMoziaWalletQuotaTx(tx, MoziaWalletGrantInput{
+			UserId:        topUp.UserId,
+			Source:        MoziaWalletSourcePaid,
+			Amount:        quotaToAdd,
+			EventType:     MoziaWalletEventTopUp,
+			ReferenceType: "topup",
+			ReferenceId:   topUp.TradeNo,
+		}, true); err != nil {
 			return err
 		}
+		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("stripe_customer", customerId).Error
 
-		return nil
+		return err
 	})
 
 	if err != nil {
@@ -154,7 +164,8 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		return errors.New("充值失败，请稍后重试")
 	}
 
-	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
+	updateMoziaUserQuotaCache(topUp.UserId, quotaToAdd)
+	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(quotaToAdd), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
 
 	return nil
 }
@@ -370,8 +381,14 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			return err
 		}
 
-		// 增加用户额度（立即写库，保持一致性）
-		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+		if _, err := grantMoziaWalletQuotaTx(tx, MoziaWalletGrantInput{
+			UserId:        topUp.UserId,
+			Source:        MoziaWalletSourcePaid,
+			Amount:        quotaToAdd,
+			EventType:     MoziaWalletEventTopUp,
+			ReferenceType: "topup",
+			ReferenceId:   topUp.TradeNo,
+		}, true); err != nil {
 			return err
 		}
 
@@ -385,6 +402,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		return err
 	}
 
+	updateMoziaUserQuotaCache(userId, quotaToAdd)
 	// 事务外记录日志，避免阻塞
 	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
 	return nil
@@ -394,7 +412,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		return errors.New("未提供支付单号")
 	}
 
-	var quota int64
+	var quotaToAdd int
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -424,12 +442,13 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		}
 
 		// Creem 直接使用 Amount 作为充值额度（整数）
-		quota = topUp.Amount
+		quotaToAdd = int(topUp.Amount)
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
 
 		// 构建更新字段，优先使用邮箱，如果邮箱为空则使用用户名
-		updateFields := map[string]interface{}{
-			"quota": gorm.Expr("quota + ?", quota),
-		}
+		updateFields := map[string]interface{}{}
 
 		// 如果有客户邮箱，尝试更新用户邮箱（仅当用户邮箱为空时）
 		if customerEmail != "" {
@@ -446,8 +465,20 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			}
 		}
 
-		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields).Error
-		if err != nil {
+		if len(updateFields) > 0 {
+			err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields).Error
+			if err != nil {
+				return err
+			}
+		}
+		if _, err = grantMoziaWalletQuotaTx(tx, MoziaWalletGrantInput{
+			UserId:        topUp.UserId,
+			Source:        MoziaWalletSourcePaid,
+			Amount:        quotaToAdd,
+			EventType:     MoziaWalletEventTopUp,
+			ReferenceType: "topup",
+			ReferenceId:   topUp.TradeNo,
+		}, true); err != nil {
 			return err
 		}
 
@@ -459,7 +490,8 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		return errors.New("充值失败，请稍后重试")
 	}
 
-	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
+	updateMoziaUserQuotaCache(topUp.UserId, quotaToAdd)
+	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quotaToAdd, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
 
 	return nil
 }
@@ -508,7 +540,14 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 			return err
 		}
 
-		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+		if _, err := grantMoziaWalletQuotaTx(tx, MoziaWalletGrantInput{
+			UserId:        topUp.UserId,
+			Source:        MoziaWalletSourcePaid,
+			Amount:        quotaToAdd,
+			EventType:     MoziaWalletEventTopUp,
+			ReferenceType: "topup",
+			ReferenceId:   topUp.TradeNo,
+		}, true); err != nil {
 			return err
 		}
 
@@ -521,6 +560,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	}
 
 	if quotaToAdd > 0 {
+		updateMoziaUserQuotaCache(topUp.UserId, quotaToAdd)
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
 	}
 
@@ -569,7 +609,14 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 			return err
 		}
 
-		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+		if _, err := grantMoziaWalletQuotaTx(tx, MoziaWalletGrantInput{
+			UserId:        topUp.UserId,
+			Source:        MoziaWalletSourcePaid,
+			Amount:        quotaToAdd,
+			EventType:     MoziaWalletEventTopUp,
+			ReferenceType: "topup",
+			ReferenceId:   topUp.TradeNo,
+		}, true); err != nil {
 			return err
 		}
 
@@ -582,6 +629,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	}
 
 	if quotaToAdd > 0 {
+		updateMoziaUserQuotaCache(topUp.UserId, quotaToAdd)
 		RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money))
 	}
 

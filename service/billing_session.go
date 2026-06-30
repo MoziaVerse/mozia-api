@@ -46,6 +46,12 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	}
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
+		if !s.fundingSettled {
+			if err := s.funding.Settle(0); err != nil {
+				return err
+			}
+			s.fundingSettled = true
+		}
 		s.settled = true
 		return nil
 	}
@@ -135,6 +141,9 @@ func (s *BillingSession) needsRefundLocked() bool {
 		return false
 	}
 	if s.tokenConsumed > 0 {
+		return true
+	}
+	if wallet, ok := s.funding.(*WalletFunding); ok && wallet.consumed > 0 {
 		return true
 	}
 	// 订阅可能在 tokenConsumed=0 时仍预扣了额度
@@ -232,10 +241,21 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 func (s *BillingSession) reserveFunding(delta int) error {
 	switch funding := s.funding.(type) {
 	case *WalletFunding:
-		if err := model.DecreaseUserQuota(funding.userId, delta, false); err != nil {
+		target := funding.consumed + delta
+		if target < 0 {
+			target = 0
+		}
+		if funding.requestId == "" {
+			if err := model.DecreaseUserQuota(funding.userId, delta, false); err != nil {
+				return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
+			}
+			funding.consumed = target
+			return nil
+		}
+		if err := model.SettleMoziaWalletReservation(funding.requestId, funding.userId, funding.modelName, target); err != nil {
 			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 		}
-		funding.consumed += delta
+		funding.consumed = target
 		return nil
 	case *SubscriptionFunding:
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, int64(delta)); err != nil {
@@ -256,10 +276,20 @@ func (s *BillingSession) reserveFunding(delta int) error {
 func (s *BillingSession) rollbackFundingReserve(delta int) {
 	switch funding := s.funding.(type) {
 	case *WalletFunding:
-		if err := model.IncreaseUserQuota(funding.userId, delta, false); err != nil {
+		target := funding.consumed - delta
+		if target < 0 {
+			target = 0
+		}
+		var err error
+		if funding.requestId == "" {
+			err = model.IncreaseUserQuota(funding.userId, delta, false)
+		} else {
+			err = model.SettleMoziaWalletReservation(funding.requestId, funding.userId, funding.modelName, target)
+		}
+		if err != nil {
 			common.SysLog("error rolling back wallet funding reserve: " + err.Error())
 		} else {
-			funding.consumed -= delta
+			funding.consumed = target
 		}
 	case *SubscriptionFunding:
 		if err := model.PostConsumeUserSubscriptionDelta(funding.subscriptionId, -int64(delta)); err != nil {
@@ -302,7 +332,9 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 
 	switch s.funding.Source() {
 	case BillingSourceWallet:
-		return s.relayInfo.UserQuota > trustQuota
+		// Mozia 钱包需要按 gift/paid/legacy 来源选择额度。
+		// 信任旁路会跳过 reservation，无法提前锁定正确来源，所以钱包路径禁用旁路。
+		return false
 	case BillingSourceSubscription:
 		// 订阅不能启用信任旁路。原因：
 		// 1. PreConsumeUserSubscription 要求 amount>0 来创建预扣记录并锁定订阅
@@ -321,6 +353,7 @@ func (s *BillingSession) syncRelayInfo() {
 	info.BillingSource = s.funding.Source()
 
 	if sub, ok := s.funding.(*SubscriptionFunding); ok {
+		info.WalletReservationRequestId = ""
 		info.SubscriptionId = sub.subscriptionId
 		info.SubscriptionPreConsumed = sub.preConsumed + int64(s.extraReserved)
 		info.SubscriptionPostDelta = 0
@@ -331,6 +364,11 @@ func (s *BillingSession) syncRelayInfo() {
 	} else {
 		info.SubscriptionId = 0
 		info.SubscriptionPreConsumed = 0
+		if wallet, ok := s.funding.(*WalletFunding); ok {
+			info.WalletReservationRequestId = wallet.requestId
+		} else {
+			info.WalletReservationRequestId = ""
+		}
 	}
 }
 
@@ -368,7 +406,11 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 
 		session := &BillingSession{
 			relayInfo: relayInfo,
-			funding:   &WalletFunding{userId: relayInfo.UserId},
+			funding: &WalletFunding{
+				requestId: relayInfo.RequestId,
+				userId:    relayInfo.UserId,
+				modelName: relayInfo.OriginModelName,
+			},
 		}
 		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
 			return nil, apiErr

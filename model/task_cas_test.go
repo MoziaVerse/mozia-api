@@ -37,6 +37,10 @@ func TestMain(m *testing.M) {
 	if err := db.AutoMigrate(
 		&Task{},
 		&User{},
+		&MoziaWalletBalance{},
+		&MoziaWalletTransaction{},
+		&MoziaWalletReservation{},
+		&MoziaModelQuotaPolicy{},
 		&Token{},
 		&Log{},
 		&Channel{},
@@ -63,6 +67,10 @@ func truncateTables(t *testing.T) {
 	t.Cleanup(func() {
 		DB.Exec("DELETE FROM tasks")
 		DB.Exec("DELETE FROM users")
+		DB.Exec("DELETE FROM mozia_wallet_balances")
+		DB.Exec("DELETE FROM mozia_wallet_transactions")
+		DB.Exec("DELETE FROM mozia_wallet_reservations")
+		DB.Exec("DELETE FROM mozia_model_quota_policies")
 		DB.Exec("DELETE FROM tokens")
 		DB.Exec("DELETE FROM logs")
 		DB.Exec("DELETE FROM channels")

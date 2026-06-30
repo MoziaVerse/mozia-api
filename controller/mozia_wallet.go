@@ -1,0 +1,119 @@
+package controller
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+
+	"github.com/gin-gonic/gin"
+)
+
+type moziaQuotaPolicyRequest struct {
+	ModelPattern   string `json:"model_pattern"`
+	MatchType      string `json:"match_type"`
+	AllowedSources string `json:"allowed_sources"`
+	ConsumeOrder   string `json:"consume_order"`
+	Enabled        *bool  `json:"enabled"`
+	Priority       int    `json:"priority"`
+}
+
+func (req moziaQuotaPolicyRequest) toModel(id int) model.MoziaModelQuotaPolicy {
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	return model.MoziaModelQuotaPolicy{
+		Id:             id,
+		ModelPattern:   strings.TrimSpace(req.ModelPattern),
+		MatchType:      strings.TrimSpace(req.MatchType),
+		AllowedSources: strings.TrimSpace(req.AllowedSources),
+		ConsumeOrder:   strings.TrimSpace(req.ConsumeOrder),
+		Enabled:        enabled,
+		Priority:       req.Priority,
+	}
+}
+
+func GetSSOMoziaWallet(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		common.ApiErrorMsg(c, "SSO 用户未解析")
+		return
+	}
+	wallet, err := model.GetMoziaWalletView(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, wallet)
+}
+
+func GetMoziaUserWallet(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户 ID")
+		return
+	}
+	wallet, err := model.GetMoziaWalletView(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, wallet)
+}
+
+func GetAllMoziaQuotaPolicies(c *gin.Context) {
+	policies, err := model.GetAllMoziaModelQuotaPolicies()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, policies)
+}
+
+func CreateMoziaQuotaPolicy(c *gin.Context) {
+	var req moziaQuotaPolicyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	policy := req.toModel(0)
+	if err := model.CreateMoziaModelQuotaPolicy(&policy); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, &policy)
+}
+
+func UpdateMoziaQuotaPolicy(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "无效的策略 ID")
+		return
+	}
+	var req moziaQuotaPolicyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	policy := req.toModel(id)
+	if err := model.UpdateMoziaModelQuotaPolicy(&policy); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, &policy)
+}
+
+func DeleteMoziaQuotaPolicy(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "无效的策略 ID")
+		return
+	}
+	if err := model.DeleteMoziaModelQuotaPolicy(id); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
+}

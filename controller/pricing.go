@@ -57,6 +57,11 @@ func GetPricing(c *gin.Context) {
 
 	usableGroup = service.GetUserUsableGroups(group)
 	pricing = filterPricingByUsableGroups(pricing, usableGroup)
+	if exists {
+		if id, ok := userId.(int); ok && id > 0 {
+			pricing = model.FilterPricingByMoziaWalletAccess(id, pricing)
+		}
+	}
 	// check groupRatio contains usableGroup
 	for group := range ratio_setting.GetGroupRatioCopy() {
 		if _, ok := usableGroup[group]; !ok {

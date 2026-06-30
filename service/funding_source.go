@@ -27,8 +27,10 @@ type FundingSource interface {
 // ---------------------------------------------------------------------------
 
 type WalletFunding struct {
-	userId   int
-	consumed int // 实际预扣的用户额度
+	requestId string
+	userId    int
+	modelName string
+	consumed  int // 实际预扣的用户额度
 }
 
 func (w *WalletFunding) Source() string { return BillingSourceWallet }
@@ -37,7 +39,14 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if amount <= 0 {
 		return nil
 	}
-	if err := model.DecreaseUserQuota(w.userId, amount, false); err != nil {
+	if w.requestId == "" {
+		if err := model.DecreaseUserQuota(w.userId, amount, false); err != nil {
+			return err
+		}
+		w.consumed = amount
+		return nil
+	}
+	if err := model.ReserveMoziaWalletQuota(w.requestId, w.userId, w.modelName, amount); err != nil {
 		return err
 	}
 	w.consumed = amount
@@ -45,22 +54,49 @@ func (w *WalletFunding) PreConsume(amount int) error {
 }
 
 func (w *WalletFunding) Settle(delta int) error {
-	if delta == 0 {
+	if delta == 0 && w.requestId == "" {
 		return nil
 	}
-	if delta > 0 {
-		return model.DecreaseUserQuota(w.userId, delta, false)
+	if w.requestId == "" {
+		if delta > 0 {
+			if err := model.DecreaseUserQuota(w.userId, delta, false); err != nil {
+				return err
+			}
+		} else if err := model.IncreaseUserQuota(w.userId, -delta, false); err != nil {
+			return err
+		}
+		w.consumed += delta
+		return nil
 	}
-	return model.IncreaseUserQuota(w.userId, -delta, false)
+	target := w.consumed + delta
+	if target < 0 {
+		target = 0
+	}
+	if err := model.SettleMoziaWalletReservation(w.requestId, w.userId, w.modelName, target); err != nil {
+		return err
+	}
+	w.consumed = target
+	return nil
 }
 
 func (w *WalletFunding) Refund() error {
 	if w.consumed <= 0 {
 		return nil
 	}
+	if w.requestId != "" {
+		if err := model.RefundMoziaWalletReservation(w.requestId, w.userId); err != nil {
+			return err
+		}
+		w.consumed = 0
+		return nil
+	}
 	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
 	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
-	return model.IncreaseUserQuota(w.userId, w.consumed, false)
+	if err := model.IncreaseUserQuota(w.userId, w.consumed, false); err != nil {
+		return err
+	}
+	w.consumed = 0
+	return nil
 }
 
 // ---------------------------------------------------------------------------

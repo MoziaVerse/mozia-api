@@ -39,6 +39,10 @@ func TestMain(m *testing.M) {
 	if err := db.AutoMigrate(
 		&model.Task{},
 		&model.User{},
+		&model.MoziaWalletBalance{},
+		&model.MoziaWalletTransaction{},
+		&model.MoziaWalletReservation{},
+		&model.MoziaModelQuotaPolicy{},
 		&model.Token{},
 		&model.Log{},
 		&model.Channel{},
@@ -62,6 +66,10 @@ func truncate(t *testing.T) {
 	t.Cleanup(func() {
 		model.DB.Exec("DELETE FROM tasks")
 		model.DB.Exec("DELETE FROM users")
+		model.DB.Exec("DELETE FROM mozia_wallet_balances")
+		model.DB.Exec("DELETE FROM mozia_wallet_transactions")
+		model.DB.Exec("DELETE FROM mozia_wallet_reservations")
+		model.DB.Exec("DELETE FROM mozia_model_quota_policies")
 		model.DB.Exec("DELETE FROM tokens")
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")
@@ -171,6 +179,13 @@ func getSubscriptionUsed(t *testing.T, id int) int64 {
 	return sub.AmountUsed
 }
 
+func getMoziaTaskSourceBalance(t *testing.T, userId int, source string) int {
+	t.Helper()
+	wallet, err := model.GetMoziaWalletView(userId)
+	require.NoError(t, err)
+	return wallet.Sources[source]
+}
+
 func getLastLog(t *testing.T) *model.Log {
 	t.Helper()
 	var log model.Log
@@ -221,6 +236,30 @@ func TestRefundTaskQuota_Wallet(t *testing.T) {
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 	assert.Equal(t, preConsumed, log.Quota)
 	assert.Equal(t, "test-model", log.ModelName)
+}
+
+func TestRefundTaskQuota_WalletReservation(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 21, 21, 21
+	const initQuota, preConsumed = 10000, 3000
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	require.NoError(t, model.RecordMoziaInitialGiftQuota(userID, initQuota, "test", "task-refund"))
+	require.NoError(t, model.ReserveMoziaWalletQuota("task-wallet-refund", userID, "test-model", preConsumed))
+	seedToken(t, tokenID, userID, "sk-task-wallet-refund", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.WalletReservationRequestId = "task-wallet-refund"
+
+	RefundTaskQuota(ctx, task, "task failed: upstream error")
+
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, initQuota, getMoziaTaskSourceBalance(t, userID, model.MoziaWalletSourceGift))
+	assert.Equal(t, tokenRemain+preConsumed, getTokenRemainQuota(t, tokenID))
 }
 
 func TestRefundTaskQuota_Subscription(t *testing.T) {
@@ -328,6 +367,32 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+}
+
+func TestRecalculate_WalletReservationPositiveDelta(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, tokenID, channelID = 22, 22, 22
+	const initQuota, preConsumed = 10000, 2000
+	const actualQuota = 3000
+	const tokenRemain = 5000
+
+	seedUser(t, userID, initQuota)
+	require.NoError(t, model.RecordMoziaInitialGiftQuota(userID, initQuota, "test", "task-recalc"))
+	require.NoError(t, model.ReserveMoziaWalletQuota("task-wallet-recalc", userID, "test-model", preConsumed))
+	seedToken(t, tokenID, userID, "sk-task-wallet-recalc", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.PrivateData.WalletReservationRequestId = "task-wallet-recalc"
+
+	RecalculateTaskQuota(ctx, task, actualQuota, "adaptor adjustment")
+
+	assert.Equal(t, initQuota-actualQuota, getUserQuota(t, userID))
+	assert.Equal(t, initQuota-actualQuota, getMoziaTaskSourceBalance(t, userID, model.MoziaWalletSourceGift))
+	assert.Equal(t, actualQuota, task.Quota)
+	assert.Equal(t, tokenRemain-(actualQuota-preConsumed), getTokenRemainQuota(t, tokenID))
 }
 
 func TestRecalculate_NegativeDelta(t *testing.T) {

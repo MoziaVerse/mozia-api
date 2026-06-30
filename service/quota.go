@@ -419,10 +419,18 @@ func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQu
 		}
 	} else {
 		// Wallet
-		if quota > 0 {
-			err = model.DecreaseUserQuota(relayInfo.UserId, quota, false)
+		if relayInfo != nil && relayInfo.WalletReservationRequestId != "" {
+			actualQuota := preConsumedQuota + quota
+			if actualQuota < 0 {
+				actualQuota = 0
+			}
+			err = model.SettleMoziaWalletReservation(relayInfo.WalletReservationRequestId, relayInfo.UserId, relayInfo.OriginModelName, actualQuota)
 		} else {
-			err = model.IncreaseUserQuota(relayInfo.UserId, -quota, false)
+			if quota > 0 {
+				err = model.DecreaseUserQuota(relayInfo.UserId, quota, false)
+			} else {
+				err = model.IncreaseUserQuota(relayInfo.UserId, -quota, false)
+			}
 		}
 		if err != nil {
 			return err
