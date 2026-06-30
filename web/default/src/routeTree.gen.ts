@@ -35,6 +35,7 @@ import { Route as authOtpRouteImport } from './routes/(auth)/otp'
 import { Route as authOauthRouteImport } from './routes/(auth)/oauth'
 import { Route as authForgotPasswordRouteImport } from './routes/(auth)/forgot-password'
 import { Route as AuthenticatedSystemSettingsRouteRouteImport } from './routes/_authenticated/system-settings/route'
+import { Route as AuthenticatedMoziaSettingsRouteRouteImport } from './routes/_authenticated/mozia-settings/route'
 import { Route as PricingModelIdIndexRouteImport } from './routes/pricing/$modelId/index'
 import { Route as AuthenticatedWalletIndexRouteImport } from './routes/_authenticated/wallet/index'
 import { Route as AuthenticatedUsersIndexRouteImport } from './routes/_authenticated/users/index'
@@ -45,11 +46,13 @@ import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_a
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
+import { Route as AuthenticatedMoziaSettingsIndexRouteImport } from './routes/_authenticated/mozia-settings/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
+import { Route as AuthenticatedMoziaSettingsSectionRouteImport } from './routes/_authenticated/mozia-settings/$section'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
@@ -199,6 +202,12 @@ const AuthenticatedSystemSettingsRouteRoute =
     path: '/system-settings',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedMoziaSettingsRouteRoute =
+  AuthenticatedMoziaSettingsRouteRouteImport.update({
+    id: '/mozia-settings',
+    path: '/mozia-settings',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const PricingModelIdIndexRoute = PricingModelIdIndexRouteImport.update({
   id: '/pricing/$modelId/',
   path: '/pricing/$modelId/',
@@ -257,6 +266,12 @@ const AuthenticatedPlaygroundIndexRoute =
     path: '/playground/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedMoziaSettingsIndexRoute =
+  AuthenticatedMoziaSettingsIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedMoziaSettingsRouteRoute,
+  } as any)
 const AuthenticatedModelsIndexRoute =
   AuthenticatedModelsIndexRouteImport.update({
     id: '/models/',
@@ -285,6 +300,12 @@ const AuthenticatedUsageLogsSectionRoute =
     id: '/usage-logs/$section',
     path: '/usage-logs/$section',
     getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedMoziaSettingsSectionRoute =
+  AuthenticatedMoziaSettingsSectionRouteImport.update({
+    id: '/$section',
+    path: '/$section',
+    getParentRoute: () => AuthenticatedMoziaSettingsRouteRoute,
   } as any)
 const AuthenticatedModelsSectionRoute =
   AuthenticatedModelsSectionRouteImport.update({
@@ -403,6 +424,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
+  '/mozia-settings': typeof AuthenticatedMoziaSettingsRouteRouteWithChildren
   '/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/forgot-password': typeof authForgotPasswordRoute
   '/oauth': typeof authOauthRoute
@@ -429,11 +451,13 @@ export interface FileRoutesByFullPath {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/mozia-settings/$section': typeof AuthenticatedMoziaSettingsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
+  '/mozia-settings/': typeof AuthenticatedMoziaSettingsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
@@ -488,11 +512,13 @@ export interface FileRoutesByTo {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/mozia-settings/$section': typeof AuthenticatedMoziaSettingsSectionRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
+  '/mozia-settings': typeof AuthenticatedMoziaSettingsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
@@ -525,6 +551,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/privacy-policy': typeof PrivacyPolicyRoute
   '/user-agreement': typeof UserAgreementRoute
+  '/_authenticated/mozia-settings': typeof AuthenticatedMoziaSettingsRouteRouteWithChildren
   '/_authenticated/system-settings': typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   '/(auth)/forgot-password': typeof authForgotPasswordRoute
   '/(auth)/oauth': typeof authOauthRoute
@@ -551,11 +578,13 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/_authenticated/mozia-settings/$section': typeof AuthenticatedMoziaSettingsSectionRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
+  '/_authenticated/mozia-settings/': typeof AuthenticatedMoziaSettingsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
@@ -587,6 +616,7 @@ export interface FileRouteTypes {
     | '/'
     | '/privacy-policy'
     | '/user-agreement'
+    | '/mozia-settings'
     | '/system-settings'
     | '/forgot-password'
     | '/oauth'
@@ -613,11 +643,13 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/mozia-settings/$section'
     | '/usage-logs/$section'
     | '/channels/'
     | '/dashboard/'
     | '/keys/'
     | '/models/'
+    | '/mozia-settings/'
     | '/playground/'
     | '/profile/'
     | '/redemption-codes/'
@@ -672,11 +704,13 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/mozia-settings/$section'
     | '/usage-logs/$section'
     | '/channels'
     | '/dashboard'
     | '/keys'
     | '/models'
+    | '/mozia-settings'
     | '/playground'
     | '/profile'
     | '/redemption-codes'
@@ -708,6 +742,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/privacy-policy'
     | '/user-agreement'
+    | '/_authenticated/mozia-settings'
     | '/_authenticated/system-settings'
     | '/(auth)/forgot-password'
     | '/(auth)/oauth'
@@ -734,11 +769,13 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
+    | '/_authenticated/mozia-settings/$section'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
     | '/_authenticated/models/'
+    | '/_authenticated/mozia-settings/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
     | '/_authenticated/redemption-codes/'
@@ -970,6 +1007,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSystemSettingsRouteRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/mozia-settings': {
+      id: '/_authenticated/mozia-settings'
+      path: '/mozia-settings'
+      fullPath: '/mozia-settings'
+      preLoaderRoute: typeof AuthenticatedMoziaSettingsRouteRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/pricing/$modelId/': {
       id: '/pricing/$modelId/'
       path: '/pricing/$modelId'
@@ -1040,6 +1084,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlaygroundIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/mozia-settings/': {
+      id: '/_authenticated/mozia-settings/'
+      path: '/'
+      fullPath: '/mozia-settings/'
+      preLoaderRoute: typeof AuthenticatedMoziaSettingsIndexRouteImport
+      parentRoute: typeof AuthenticatedMoziaSettingsRouteRoute
+    }
     '/_authenticated/models/': {
       id: '/_authenticated/models/'
       path: '/models'
@@ -1074,6 +1125,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/usage-logs/$section'
       preLoaderRoute: typeof AuthenticatedUsageLogsSectionRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/mozia-settings/$section': {
+      id: '/_authenticated/mozia-settings/$section'
+      path: '/$section'
+      fullPath: '/mozia-settings/$section'
+      preLoaderRoute: typeof AuthenticatedMoziaSettingsSectionRouteImport
+      parentRoute: typeof AuthenticatedMoziaSettingsRouteRoute
     }
     '/_authenticated/models/$section': {
       id: '/_authenticated/models/$section'
@@ -1237,6 +1295,23 @@ const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
   authRouteRouteChildren,
 )
 
+interface AuthenticatedMoziaSettingsRouteRouteChildren {
+  AuthenticatedMoziaSettingsSectionRoute: typeof AuthenticatedMoziaSettingsSectionRoute
+  AuthenticatedMoziaSettingsIndexRoute: typeof AuthenticatedMoziaSettingsIndexRoute
+}
+
+const AuthenticatedMoziaSettingsRouteRouteChildren: AuthenticatedMoziaSettingsRouteRouteChildren =
+  {
+    AuthenticatedMoziaSettingsSectionRoute:
+      AuthenticatedMoziaSettingsSectionRoute,
+    AuthenticatedMoziaSettingsIndexRoute: AuthenticatedMoziaSettingsIndexRoute,
+  }
+
+const AuthenticatedMoziaSettingsRouteRouteWithChildren =
+  AuthenticatedMoziaSettingsRouteRoute._addFileChildren(
+    AuthenticatedMoziaSettingsRouteRouteChildren,
+  )
+
 interface AuthenticatedSystemSettingsRouteRouteChildren {
   AuthenticatedSystemSettingsIndexRoute: typeof AuthenticatedSystemSettingsIndexRoute
   AuthenticatedSystemSettingsAuthSectionRoute: typeof AuthenticatedSystemSettingsAuthSectionRoute
@@ -1295,6 +1370,7 @@ const AuthenticatedSystemSettingsRouteRouteWithChildren =
   )
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedMoziaSettingsRouteRoute: typeof AuthenticatedMoziaSettingsRouteRouteWithChildren
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
   AuthenticatedChat2linkRoute: typeof AuthenticatedChat2linkRoute
   AuthenticatedChatChatIdRoute: typeof AuthenticatedChatChatIdRoute
@@ -1317,6 +1393,8 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedMoziaSettingsRouteRoute:
+    AuthenticatedMoziaSettingsRouteRouteWithChildren,
   AuthenticatedSystemSettingsRouteRoute:
     AuthenticatedSystemSettingsRouteRouteWithChildren,
   AuthenticatedChat2linkRoute: AuthenticatedChat2linkRoute,

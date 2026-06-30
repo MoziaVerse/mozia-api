@@ -35,8 +35,9 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
+import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
-import { type SidebarData } from '@/components/layout/types'
 
 /**
  * Root navigation groups for the application sidebar.
@@ -154,6 +155,13 @@ export function useSidebarData(): SidebarData {
             url: '/system-settings/site',
             activeUrls: ['/system-settings'],
             icon: Settings,
+          },
+          {
+            title: t('Mozia Settings'),
+            url: '/mozia-settings/model-quota-policies',
+            activeUrls: ['/mozia-settings'],
+            icon: Wallet,
+            requiredRole: ROLE.SUPER_ADMIN,
           },
         ],
       },

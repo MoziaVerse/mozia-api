@@ -1,3 +1,4 @@
+import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -19,8 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
-import { api } from '@/lib/api'
+
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   AlertDialog,
@@ -60,10 +60,7 @@ import {
   FieldSet,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from '@/components/ui/native-select'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -74,8 +71,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { SettingsCard } from '../components/settings-card'
-import { SettingsSection } from '../components/settings-section'
+import { SettingsCard } from '@/features/system-settings/components/settings-card'
+import { SettingsSection } from '@/features/system-settings/components/settings-section'
+import { api } from '@/lib/api'
 
 type QuotaSource = 'gift' | 'paid' | 'legacy'
 type MatchType = 'exact' | 'prefix' | 'wildcard'
@@ -326,7 +324,9 @@ function PolicyDialog(props: PolicyDialogProps) {
           </div>
 
           <FieldSet>
-            <FieldLegend variant='label'>{t('Allowed quota sources')}</FieldLegend>
+            <FieldLegend variant='label'>
+              {t('Allowed quota sources')}
+            </FieldLegend>
             <FieldDescription>
               {t(
                 'A request can use the model only when at least one selected source has available balance.'
@@ -499,6 +499,96 @@ export function MoziaQuotaPolicySection() {
     }
   }
 
+  let policyContent = (
+    <div className='text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm'>
+      <Spinner />
+      {t('Loading policies...')}
+    </div>
+  )
+
+  if (!loading && sortedPolicies.length === 0) {
+    policyContent = (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>{t('No quota policies')}</EmptyTitle>
+          <EmptyDescription>
+            {t(
+              'Create a policy when a model should require paid or restricted quota sources.'
+            )}
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button onClick={openCreateDialog}>
+            <Plus data-icon='inline-start' />
+            {t('Create policy')}
+          </Button>
+        </EmptyContent>
+      </Empty>
+    )
+  }
+
+  if (!loading && sortedPolicies.length > 0) {
+    policyContent = (
+      <div className='overflow-x-auto'>
+        <Table className='min-w-[900px]'>
+          <TableHeader>
+            <TableRow className='bg-muted/40 hover:bg-muted/40'>
+              <TableHead className='px-4'>{t('Model pattern')}</TableHead>
+              <TableHead>{t('Match type')}</TableHead>
+              <TableHead>{t('Allowed quota sources')}</TableHead>
+              <TableHead>{t('Consume order')}</TableHead>
+              <TableHead>{t('Priority')}</TableHead>
+              <TableHead>{t('Status')}</TableHead>
+              <TableHead className='pr-4 text-right'>{t('Actions')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {sortedPolicies.map((policy) => (
+              <TableRow key={policy.id}>
+                <TableCell className='px-4 font-mono text-xs'>
+                  {policy.model_pattern}
+                </TableCell>
+                <TableCell>{t(policy.match_type)}</TableCell>
+                <TableCell>
+                  <SourceBadges
+                    sources={formatSources(policy.allowed_sources)}
+                  />
+                </TableCell>
+                <TableCell>{t(policy.consume_order)}</TableCell>
+                <TableCell>{policy.priority}</TableCell>
+                <TableCell>
+                  <Badge variant={policy.enabled ? 'default' : 'secondary'}>
+                    {policy.enabled ? t('Enabled') : t('Disabled')}
+                  </Badge>
+                </TableCell>
+                <TableCell className='pr-4'>
+                  <div className='flex justify-end gap-1'>
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      title={t('Edit')}
+                      onClick={() => openEditDialog(policy)}
+                    >
+                      <Pencil />
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      title={t('Delete')}
+                      onClick={() => setDeleteTarget(policy)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    )
+  }
+
   return (
     <SettingsSection title={t('Mozia Model Quota Policies')}>
       <SettingsCard
@@ -508,7 +598,7 @@ export function MoziaQuotaPolicySection() {
         )}
       >
         <div className='grid gap-4 text-sm lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.8fr)]'>
-          <div className='space-y-3 text-muted-foreground'>
+          <div className='text-muted-foreground space-y-3'>
             <p>
               {t(
                 'If no policy matches a model, gift, paid, and legacy quota are all allowed.'
@@ -529,7 +619,7 @@ export function MoziaQuotaPolicySection() {
             <Alert>
               <AlertTitle>{t('Example: paid-only premium models')}</AlertTitle>
               <AlertDescription>
-                <code className='block whitespace-pre-wrap rounded-md bg-muted p-2 text-xs text-foreground'>
+                <code className='bg-muted text-foreground block rounded-md p-2 text-xs whitespace-pre-wrap'>
                   {`model_pattern: claude-*
 match_type: wildcard
 allowed_sources: paid
@@ -539,9 +629,11 @@ priority: 100`}
               </AlertDescription>
             </Alert>
             <Alert>
-              <AlertTitle>{t('Example: trial-friendly small model')}</AlertTitle>
+              <AlertTitle>
+                {t('Example: trial-friendly small model')}
+              </AlertTitle>
               <AlertDescription>
-                <code className='block whitespace-pre-wrap rounded-md bg-muted p-2 text-xs text-foreground'>
+                <code className='bg-muted text-foreground block rounded-md p-2 text-xs whitespace-pre-wrap'>
                   {`model_pattern: gpt-4o-mini
 match_type: exact
 allowed_sources: gift,paid,legacy
@@ -573,89 +665,7 @@ priority: 10`}
           </Button>
         </div>
 
-        {loading ? (
-          <div className='text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm'>
-            <Spinner />
-            {t('Loading policies...')}
-          </div>
-        ) : sortedPolicies.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>{t('No quota policies')}</EmptyTitle>
-              <EmptyDescription>
-                {t(
-                  'Create a policy when a model should require paid or restricted quota sources.'
-                )}
-              </EmptyDescription>
-            </EmptyHeader>
-            <EmptyContent>
-              <Button onClick={openCreateDialog}>
-                <Plus data-icon='inline-start' />
-                {t('Create policy')}
-              </Button>
-            </EmptyContent>
-          </Empty>
-        ) : (
-          <div className='overflow-x-auto'>
-            <Table className='min-w-[900px]'>
-              <TableHeader>
-                <TableRow className='bg-muted/40 hover:bg-muted/40'>
-                  <TableHead className='px-4'>{t('Model pattern')}</TableHead>
-                  <TableHead>{t('Match type')}</TableHead>
-                  <TableHead>{t('Allowed quota sources')}</TableHead>
-                  <TableHead>{t('Consume order')}</TableHead>
-                  <TableHead>{t('Priority')}</TableHead>
-                  <TableHead>{t('Status')}</TableHead>
-                  <TableHead className='pr-4 text-right'>
-                    {t('Actions')}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sortedPolicies.map((policy) => (
-                  <TableRow key={policy.id}>
-                    <TableCell className='px-4 font-mono text-xs'>
-                      {policy.model_pattern}
-                    </TableCell>
-                    <TableCell>{t(policy.match_type)}</TableCell>
-                    <TableCell>
-                      <SourceBadges
-                        sources={formatSources(policy.allowed_sources)}
-                      />
-                    </TableCell>
-                    <TableCell>{t(policy.consume_order)}</TableCell>
-                    <TableCell>{policy.priority}</TableCell>
-                    <TableCell>
-                      <Badge variant={policy.enabled ? 'default' : 'secondary'}>
-                        {policy.enabled ? t('Enabled') : t('Disabled')}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className='pr-4'>
-                      <div className='flex justify-end gap-1'>
-                        <Button
-                          variant='ghost'
-                          size='icon-sm'
-                          title={t('Edit')}
-                          onClick={() => openEditDialog(policy)}
-                        >
-                          <Pencil />
-                        </Button>
-                        <Button
-                          variant='ghost'
-                          size='icon-sm'
-                          title={t('Delete')}
-                          onClick={() => setDeleteTarget(policy)}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+        {policyContent}
       </SettingsCard>
 
       <PolicyDialog

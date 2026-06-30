@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo } from 'react'
-import { useAuthStore } from '@/stores/auth-store'
-import { useStatus } from '@/hooks/use-status'
+
 import type { NavGroup, NavItem } from '@/components/layout/types'
+import { useStatus } from '@/hooks/use-status'
+import { useAuthStore } from '@/stores/auth-store'
 
 type SidebarSectionConfig = {
   enabled: boolean
@@ -58,6 +59,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     enabled: true,
     channel: true,
     models: true,
+    mozia: true,
     redemption: true,
     user: true,
     setting: true,
@@ -113,6 +115,15 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/mozia-settings': { section: 'admin', module: 'mozia' },
+  '/mozia-settings/model-quota-policies': {
+    section: 'admin',
+    module: 'mozia',
+  },
+  '/mozia-settings/user-wallet-balances': {
+    section: 'admin',
+    module: 'mozia',
+  },
   '/system-settings': { section: 'admin', module: 'setting' },
   '/system-settings/site': { section: 'admin', module: 'setting' },
 }

@@ -40,6 +40,7 @@ export { TopNav } from './components/top-nav'
 export { MobileDrawer } from './components/mobile-drawer'
 
 // Configuration
+export { MOZIA_SETTINGS_VIEW } from './config/mozia-settings.config'
 export { SYSTEM_SETTINGS_VIEW } from './config/system-settings.config'
 export { defaultTopNavLinks } from './config/top-nav.config'
 
