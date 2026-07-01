@@ -36,6 +36,14 @@ type Pricing struct {
 	BillingMode            string                  `json:"billing_mode,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
+	Access                 *PricingAccess          `json:"access,omitempty"`
+}
+
+type PricingAccess struct {
+	Available           bool     `json:"available"`
+	Reason              string   `json:"reason,omitempty"`
+	RequiredSources     []string `json:"required_sources,omitempty"`
+	SubscriptionAllowed bool     `json:"subscription_allowed,omitempty"`
 }
 
 type PricingVendor struct {

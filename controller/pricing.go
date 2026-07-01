@@ -35,6 +35,7 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 
 func GetPricing(c *gin.Context) {
 	pricing := model.GetPricing()
+	includeInaccessible := c.Query("include_inaccessible") == "true"
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}
@@ -59,7 +60,11 @@ func GetPricing(c *gin.Context) {
 	pricing = filterPricingByUsableGroups(pricing, usableGroup)
 	if exists {
 		if id, ok := userId.(int); ok && id > 0 {
-			pricing = model.FilterPricingByMoziaWalletAccess(id, pricing)
+			if includeInaccessible {
+				pricing = model.AnnotatePricingByMoziaWalletAccess(id, pricing)
+			} else {
+				pricing = model.FilterPricingByMoziaWalletAccess(id, pricing)
+			}
 		}
 	}
 	// check groupRatio contains usableGroup

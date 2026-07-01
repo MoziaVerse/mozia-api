@@ -37,6 +37,9 @@ const (
 
 	MoziaQuotaPolicyConsumeGiftFirst = "gift_first"
 	MoziaQuotaPolicyConsumePaidFirst = "paid_first"
+
+	MoziaPricingAccessReasonRequiresPaidQuota    = "requires_paid_quota"
+	MoziaPricingAccessReasonRequiresAllowedQuota = "requires_allowed_quota"
 )
 
 var (
@@ -596,18 +599,7 @@ func simpleMoziaWildcardMatch(pattern string, value string) bool {
 	return true
 }
 
-func getMoziaQuotaPolicyDecision(modelName string) (moziaQuotaPolicyDecision, error) {
-	return getMoziaQuotaPolicyDecisionTx(DB, modelName)
-}
-
-func getMoziaQuotaPolicyDecisionTx(tx *gorm.DB, modelName string) (moziaQuotaPolicyDecision, error) {
-	var policies []MoziaModelQuotaPolicy
-	if err := tx.Where("enabled = ?", true).Find(&policies).Error; err != nil {
-		return moziaDefaultPolicyDecision(), err
-	}
-	if len(policies) == 0 {
-		return moziaDefaultPolicyDecision(), nil
-	}
+func sortMoziaQuotaPolicies(policies []MoziaModelQuotaPolicy) {
 	sort.SliceStable(policies, func(i, j int) bool {
 		if policies[i].Priority != policies[j].Priority {
 			return policies[i].Priority > policies[j].Priority
@@ -622,21 +614,43 @@ func getMoziaQuotaPolicyDecisionTx(tx *gorm.DB, modelName string) (moziaQuotaPol
 		}
 		return len(policies[i].ModelPattern) > len(policies[j].ModelPattern)
 	})
+}
+
+func getMoziaQuotaPolicyDecisionFromPolicies(policies []MoziaModelQuotaPolicy, modelName string) moziaQuotaPolicyDecision {
+	if len(policies) == 0 {
+		return moziaDefaultPolicyDecision()
+	}
 	for i := range policies {
 		if !modelMatchesMoziaPolicy(policies[i], modelName) {
 			continue
 		}
 		allowed := parseMoziaSources(policies[i].AllowedSources)
 		if len(allowed) == 0 {
-			return moziaDefaultPolicyDecision(), nil
+			return moziaDefaultPolicyDecision()
 		}
 		return moziaQuotaPolicyDecision{
 			AllowedSources: allowed,
 			ConsumeOrder:   normalizeMoziaConsumeOrder(policies[i].ConsumeOrder),
 			Policy:         &policies[i],
-		}, nil
+		}
 	}
-	return moziaDefaultPolicyDecision(), nil
+	return moziaDefaultPolicyDecision()
+}
+
+func getMoziaQuotaPolicyDecision(modelName string) (moziaQuotaPolicyDecision, error) {
+	return getMoziaQuotaPolicyDecisionTx(DB, modelName)
+}
+
+func getMoziaQuotaPolicyDecisionTx(tx *gorm.DB, modelName string) (moziaQuotaPolicyDecision, error) {
+	var policies []MoziaModelQuotaPolicy
+	if err := tx.Where("enabled = ?", true).Find(&policies).Error; err != nil {
+		return moziaDefaultPolicyDecision(), err
+	}
+	if len(policies) == 0 {
+		return moziaDefaultPolicyDecision(), nil
+	}
+	sortMoziaQuotaPolicies(policies)
+	return getMoziaQuotaPolicyDecisionFromPolicies(policies, modelName), nil
 }
 
 func sourceAllowedByMoziaPolicy(source string, allowed []string) bool {
@@ -691,6 +705,88 @@ func CheckMoziaQuotaPolicyAccess(userId int, modelName string) error {
 		return nil
 	}
 	return fmt.Errorf("%w: model %s requires quota source %s", ErrMoziaWalletSourceForbidden, modelName, strings.Join(decision.AllowedSources, ","))
+}
+
+func buildMoziaPricingAccess(decision moziaQuotaPolicyDecision, balances *MoziaWalletView, hasSub bool) PricingAccess {
+	access := PricingAccess{Available: true}
+	if decision.Policy == nil {
+		return access
+	}
+	access.RequiredSources = append([]string(nil), decision.AllowedSources...)
+	access.SubscriptionAllowed = sourceAllowedByMoziaPolicy(MoziaWalletSourcePaid, decision.AllowedSources)
+
+	if balances != nil {
+		for _, source := range decision.AllowedSources {
+			if balances.Sources[source] > 0 {
+				return access
+			}
+		}
+	}
+	if hasSub && access.SubscriptionAllowed {
+		return access
+	}
+
+	access.Available = false
+	if access.SubscriptionAllowed {
+		access.Reason = MoziaPricingAccessReasonRequiresPaidQuota
+	} else {
+		access.Reason = MoziaPricingAccessReasonRequiresAllowedQuota
+	}
+	return access
+}
+
+func GetMoziaPricingAccess(userId int, modelName string) (PricingAccess, error) {
+	decision, err := getMoziaQuotaPolicyDecision(modelName)
+	if err != nil {
+		return PricingAccess{Available: true}, err
+	}
+	if decision.Policy == nil {
+		return buildMoziaPricingAccess(decision, nil, false), nil
+	}
+	balances, err := GetMoziaWalletView(userId)
+	if err != nil {
+		return PricingAccess{Available: true}, err
+	}
+	hasSub, subErr := HasActiveUserSubscription(userId)
+	if subErr != nil {
+		hasSub = false
+	}
+	return buildMoziaPricingAccess(decision, balances, hasSub), nil
+}
+
+func AnnotatePricingByMoziaWalletAccess(userId int, pricing []Pricing) []Pricing {
+	if userId == 0 || len(pricing) == 0 {
+		return pricing
+	}
+	var policies []MoziaModelQuotaPolicy
+	if err := DB.Where("enabled = ?", true).Find(&policies).Error; err != nil {
+		annotated := make([]Pricing, 0, len(pricing))
+		for _, item := range pricing {
+			item.Access = &PricingAccess{
+				Available: false,
+				Reason:    MoziaPricingAccessReasonRequiresAllowedQuota,
+			}
+			annotated = append(annotated, item)
+		}
+		return annotated
+	}
+	sortMoziaQuotaPolicies(policies)
+	balances, balanceErr := GetMoziaWalletView(userId)
+	if balanceErr != nil {
+		balances = nil
+	}
+	hasSub, subErr := HasActiveUserSubscription(userId)
+	if subErr != nil {
+		hasSub = false
+	}
+	annotated := make([]Pricing, 0, len(pricing))
+	for _, item := range pricing {
+		decision := getMoziaQuotaPolicyDecisionFromPolicies(policies, item.ModelName)
+		access := buildMoziaPricingAccess(decision, balances, hasSub)
+		item.Access = &access
+		annotated = append(annotated, item)
+	}
+	return annotated
 }
 
 func FilterPricingByMoziaWalletAccess(userId int, pricing []Pricing) []Pricing {
