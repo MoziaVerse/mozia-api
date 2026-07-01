@@ -1449,14 +1449,17 @@ type SSOTopUpRequest struct {
 	DeltaQuota int `json:"delta_quota" binding:"required,gt=0"`
 	// 可选业务原因，写入 LogTypeTopup 日志便于对账
 	Reason string `json:"reason"`
+	// 可选额度来源分区：gift（赠送/奖励，如推荐官奖励、实名认证奖励）或 paid（真实充值/订阅）。
+	// 不填默认 paid，保持既有调用方（微信/支付宝充值、订阅）行为不变。
+	Source string `json:"source"`
 }
 
 // SSOTopUp 管理员代当前 SSO 用户加额度。
 // 走 SSOAuth 中间件：调用方需带 admin access token + New-Api-User + X-SSO-SUB，
 // 中间件已将 SSO 用户 resolve 到 context 的 "id"，此处直接复用。
-// 用途：外部计费/支付服务（如 matrix 接的微信支付）回调后给用户充值。
+// 用途：外部计费/支付服务（如 matrix 接的微信支付）回调、以及 matrix 的推荐官/实名认证奖励发放后给用户充值。
 //
-// 落账方式：写入 Mozia paid 钱包分账，并同步 users.quota 总余额镜像。
+// 落账方式：写入 Mozia 钱包分账（默认 paid，可选 gift），并同步 users.quota 总余额镜像。
 func SSOTopUp(c *gin.Context) {
 	var req SSOTopUpRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1475,9 +1478,18 @@ func SSOTopUp(c *gin.Context) {
 		reason = "外部充值"
 	}
 
+	source := strings.ToLower(strings.TrimSpace(req.Source))
+	if source == "" {
+		source = model.MoziaWalletSourcePaid
+	}
+	if source != model.MoziaWalletSourceGift && source != model.MoziaWalletSourcePaid {
+		common.ApiErrorMsg(c, "source 仅支持 gift 或 paid")
+		return
+	}
+
 	if err := model.GrantMoziaWalletQuota(model.MoziaWalletGrantInput{
 		UserId:        userId,
-		Source:        model.MoziaWalletSourcePaid,
+		Source:        source,
 		Amount:        req.DeltaQuota,
 		EventType:     model.MoziaWalletEventTopUp,
 		ReferenceType: "sso_topup",
