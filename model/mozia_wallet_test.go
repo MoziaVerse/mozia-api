@@ -71,6 +71,13 @@ func TestMoziaQuotaPolicyPaidOnlyRejectsGiftOnly(t *testing.T) {
 		Status:      "active",
 	}).Error)
 	require.NoError(t, CheckMoziaQuotaPolicyAccess(1001, "paid-only-model"))
+
+	require.NoError(t, DB.Model(&UserSubscription{}).
+		Where("user_id = ?", 1001).
+		Update("amount_used", 100).Error)
+	err = CheckMoziaQuotaPolicyAccess(1001, "paid-only-model")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrMoziaWalletSourceForbidden))
 }
 
 func TestMoziaWalletReservationUsesPaidOnlyPolicy(t *testing.T) {
