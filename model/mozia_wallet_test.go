@@ -59,6 +59,17 @@ func TestMoziaQuotaPolicyPaidOnlyRejectsGiftOnly(t *testing.T) {
 		ReferenceType: "test",
 		ReferenceId:   "paid-topup",
 	}))
+	err = CheckMoziaQuotaPolicyAccess(1001, "paid-only-model")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrMoziaWalletSourceForbidden))
+
+	require.NoError(t, DB.Create(&UserSubscription{
+		UserId:      1001,
+		AmountTotal: 100,
+		StartTime:   common.GetTimestamp() - 60,
+		EndTime:     common.GetTimestamp() + 3600,
+		Status:      "active",
+	}).Error)
 	require.NoError(t, CheckMoziaQuotaPolicyAccess(1001, "paid-only-model"))
 }
 

@@ -678,6 +678,16 @@ func orderedMoziaSources(decision moziaQuotaPolicyDecision) []string {
 	return out
 }
 
+func moziaSourceCanUnlockAccess(source string, balance int, hasSub bool) bool {
+	if balance <= 0 {
+		return false
+	}
+	if source == MoziaWalletSourcePaid {
+		return hasSub
+	}
+	return true
+}
+
 func CheckMoziaQuotaPolicyAccess(userId int, modelName string) error {
 	decision, err := getMoziaQuotaPolicyDecision(modelName)
 	if err != nil {
@@ -695,13 +705,16 @@ func CheckMoziaQuotaPolicyAccess(userId int, modelName string) error {
 	if err != nil {
 		return err
 	}
+	hasSub, subErr := HasActiveUserSubscription(userId)
+	if subErr != nil {
+		hasSub = false
+	}
 	for _, source := range decision.AllowedSources {
-		if balances.Sources[source] > 0 {
+		if moziaSourceCanUnlockAccess(source, balances.Sources[source], hasSub) {
 			return nil
 		}
 	}
-	hasSub, subErr := HasActiveUserSubscription(userId)
-	if subErr == nil && hasSub && sourceAllowedByMoziaPolicy(MoziaWalletSourcePaid, decision.AllowedSources) {
+	if hasSub && sourceAllowedByMoziaPolicy(MoziaWalletSourcePaid, decision.AllowedSources) {
 		return nil
 	}
 	return fmt.Errorf("%w: model %s requires quota source %s", ErrMoziaWalletSourceForbidden, modelName, strings.Join(decision.AllowedSources, ","))
@@ -717,7 +730,7 @@ func buildMoziaPricingAccess(decision moziaQuotaPolicyDecision, balances *MoziaW
 
 	if balances != nil {
 		for _, source := range decision.AllowedSources {
-			if balances.Sources[source] > 0 {
+			if moziaSourceCanUnlockAccess(source, balances.Sources[source], hasSub) {
 				return access
 			}
 		}

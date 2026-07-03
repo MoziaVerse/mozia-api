@@ -54,6 +54,14 @@ func TestGetPricingCanIncludeInaccessibleMoziaWalletModels(t *testing.T) {
 		Status:   common.UserStatusEnabled,
 	}).Error)
 	require.NoError(t, model.RecordMoziaInitialGiftQuota(1004, 20, "test", "gift-only"))
+	require.NoError(t, model.GrantMoziaWalletQuota(model.MoziaWalletGrantInput{
+		UserId:        1004,
+		Source:        model.MoziaWalletSourcePaid,
+		Amount:        20,
+		EventType:     model.MoziaWalletEventTopUp,
+		ReferenceType: "test",
+		ReferenceId:   "paid-without-subscription",
+	}))
 	require.NoError(t, db.Create(&model.Ability{
 		Group:     "default",
 		Model:     "paid-only-catalog-model",
