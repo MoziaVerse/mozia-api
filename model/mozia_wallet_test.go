@@ -62,6 +62,26 @@ func TestMoziaQuotaPolicyPaidOnlyRejectsGiftOnly(t *testing.T) {
 	require.NoError(t, CheckMoziaQuotaPolicyAccess(1001, "paid-only-model"))
 }
 
+func TestMoziaQuotaPolicyPaidOnlyAllowsLegacyBalance(t *testing.T) {
+	truncateTables(t)
+
+	seedMoziaWalletUser(t, 1005, 200)
+	require.NoError(t, CreateMoziaModelQuotaPolicy(&MoziaModelQuotaPolicy{
+		ModelPattern:   "paid-only-legacy-model",
+		MatchType:      MoziaQuotaPolicyMatchExact,
+		AllowedSources: MoziaWalletSourcePaid,
+		ConsumeOrder:   MoziaQuotaPolicyConsumePaidFirst,
+		Enabled:        true,
+	}))
+
+	require.NoError(t, CheckMoziaQuotaPolicyAccess(1005, "paid-only-legacy-model"))
+	require.Equal(t, 200, getMoziaSourceBalance(t, 1005, MoziaWalletSourceLegacy))
+
+	require.NoError(t, ReserveMoziaWalletQuota("req-paid-legacy", 1005, "paid-only-legacy-model", 30))
+	assert.Equal(t, 170, getMoziaSourceBalance(t, 1005, MoziaWalletSourceLegacy))
+	assert.Equal(t, 170, getMoziaUserQuota(t, 1005))
+}
+
 func TestMoziaWalletReservationUsesPaidOnlyPolicy(t *testing.T) {
 	truncateTables(t)
 
