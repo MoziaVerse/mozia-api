@@ -8,15 +8,15 @@ services:
     restart: always
     command: --log-dir /app/logs
     ports:
-      - "127.0.0.1:3369:3000"
-      - "172.16.10.107:3369:3000"
+      - "${MOZIA_API_BIND_LOCAL:-127.0.0.1:3369}:3000"
+      - "${MOZIA_API_BIND_INTERNAL:?set MOZIA_API_BIND_INTERNAL in .env, for example 172.16.x.x:3369}:3000"
     volumes:
       - ./data:/data
       - ./logs:/app/logs
     env_file:
       - .env
     environment:
-      - SQL_DSN=postgresql://mozia_api:api@mozia@postgres-dev:5432/mozia_api_db
+      - SQL_DSN=${SQL_DSN:?set SQL_DSN in .env; never commit real database credentials}
       - REDIS_CONN_STRING=redis://redis
       - TZ=Asia/Shanghai
       - ERROR_LOG_ENABLED=true

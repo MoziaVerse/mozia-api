@@ -17,6 +17,13 @@ one-api
 new-api
 /__debug_bin*
 .DS_Store
+.env.*
+!.env.example
+!.env.mozia.example
+*.bak
+*.swp
+*.pem
+*.key
 tiktoken_cache
 .eslintcache
 .gocache
@@ -39,5 +46,8 @@ skills-lock.json
 
 # Local-only live probes and scratch test workspaces.
 .local-tests/
+.agents/tmp/
+backups/
 service/relayconvert/chat_responses_live_local_test.go
 service/openaicompat/chat_responses_live_local_test.go
+.omx/

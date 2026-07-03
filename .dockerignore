@@ -1,5 +1,17 @@
 .github
 .git
+.claude
+.omx
+.agents/tmp
+.env
+.env.*
+!.env.example
+!.env.mozia.example
+backups
+*.bak
+*.swp
+*.pem
+*.key
 *.md
 .vscode
 .gitignore
