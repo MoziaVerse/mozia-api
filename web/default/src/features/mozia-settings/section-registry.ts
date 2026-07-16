@@ -39,7 +39,7 @@ const MOZIA_SETTINGS_SECTIONS = [
   },
   {
     id: 'user-model-ratios',
-    titleKey: 'User Model Ratios',
+    titleKey: 'User Billing Ratios',
     build: () => createElement(MoziaUserModelRatioSection),
   },
 ] as const

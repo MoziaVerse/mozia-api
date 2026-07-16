@@ -17,11 +17,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-export type MoziaUserModelRatio = {
+export type MoziaUserRatioScope = 'model' | 'channel'
+
+type MoziaUserRatioBase = {
   user_id: number
-  model: string
+  username?: string
   ratio: number
 }
+
+export type MoziaUserModelRatio = MoziaUserRatioBase &
+  (
+    | {
+        scope: 'model'
+        model: string
+        channel_id?: never
+      }
+    | {
+        scope: 'channel'
+        channel_id: number
+        model?: never
+      }
+  )
 
 export type MoziaUserModelRatioPayload = MoziaUserModelRatio
 

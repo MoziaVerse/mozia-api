@@ -105,9 +105,9 @@ function getWalletSourceBalance(wallet: MoziaWalletView, source: QuotaSource) {
   return wallet.sources?.[source] ?? 0
 }
 
-async function fetchWallet(userId: number) {
+async function fetchWallet(userIdentifier: string) {
   const res = await api.get<ApiEnvelope<MoziaWalletView>>(
-    `/api/mozia/wallet/users/${userId}`,
+    `/api/mozia/wallet/users/${encodeURIComponent(userIdentifier)}`,
     { disableDuplicate: true }
   )
   return res.data
@@ -128,7 +128,7 @@ async function adjustWallet(
 
 export function MoziaWalletBalancesSection() {
   const { t } = useTranslation()
-  const [userIdInput, setUserIdInput] = useState('')
+  const [userIdentifierInput, setUserIdentifierInput] = useState('')
   const [wallet, setWallet] = useState<MoziaWalletView | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -140,7 +140,6 @@ export function MoziaWalletBalancesSection() {
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
   const tokensOnly = currencyMeta.kind === 'tokens'
-  const userId = Number(userIdInput)
   const amountValue = Number(amount)
   const parsedQuota = parseQuotaFromDollars(amountValue)
   const currentSourceBalance = wallet
@@ -158,13 +157,14 @@ export function MoziaWalletBalancesSection() {
   }, [amount, amountValue, currentSourceBalance, mode, parsedQuota, t, wallet])
 
   const loadWallet = async () => {
-    if (!Number.isInteger(userId) || userId <= 0) {
-      toast.error(t('Enter a valid user ID'))
+    const userIdentifier = userIdentifierInput.trim()
+    if (!userIdentifier) {
+      toast.error(t('Enter a user ID or username'))
       return
     }
     setLoading(true)
     try {
-      const res = await fetchWallet(userId)
+      const res = await fetchWallet(userIdentifier)
       if (res.success) {
         setWallet(res.data)
         toast.success(t('Wallet loaded successfully'))
@@ -270,27 +270,31 @@ export function MoziaWalletBalancesSection() {
       <SettingsCard
         title={t('Load user wallet')}
         description={t(
-          'Enter a user ID to inspect and adjust wallet balances.'
+          'Enter a user ID or username to inspect and adjust wallet balances.'
         )}
       >
         <FieldGroup className='grid gap-3 md:grid-cols-[minmax(180px,280px)_auto]'>
           <Field>
-            <FieldLabel htmlFor='mozia-wallet-user-id'>
-              {t('User ID')}
+            <FieldLabel htmlFor='mozia-wallet-user-identifier'>
+              {t('User ID or username')}
             </FieldLabel>
             <Input
-              id='mozia-wallet-user-id'
-              type='number'
-              min={1}
-              value={userIdInput}
-              onChange={(event) => setUserIdInput(event.target.value)}
+              id='mozia-wallet-user-identifier'
+              type='text'
+              value={userIdentifierInput}
+              placeholder={t('Enter a user ID or username')}
+              disabled={loading || saving}
+              onChange={(event) => {
+                setUserIdentifierInput(event.target.value)
+                setWallet(null)
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') void loadWallet()
               }}
             />
           </Field>
           <Field className='justify-end md:pt-6'>
-            <Button onClick={loadWallet} disabled={loading}>
+            <Button onClick={loadWallet} disabled={loading || saving}>
               {walletLoadIcon}
               {walletLoadLabel}
             </Button>
@@ -304,7 +308,9 @@ export function MoziaWalletBalancesSection() {
           description={
             wallet
               ? t('User {{id}}', { id: wallet.user_id })
-              : t('Search by user ID to load gift, paid, and legacy balances.')
+              : t(
+                  'Search by user ID or username to load gift, paid, and legacy balances.'
+                )
           }
         >
           {wallet ? (
@@ -357,7 +363,7 @@ export function MoziaWalletBalancesSection() {
                 <EmptyTitle>{t('No wallet loaded')}</EmptyTitle>
                 <EmptyDescription>
                   {t(
-                    'Search by user ID to load gift, paid, and legacy balances.'
+                    'Search by user ID or username to load gift, paid, and legacy balances.'
                   )}
                 </EmptyDescription>
               </EmptyHeader>

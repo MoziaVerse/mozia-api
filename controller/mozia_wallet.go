@@ -56,10 +56,25 @@ func GetSSOMoziaWallet(c *gin.Context) {
 	common.ApiSuccess(c, wallet)
 }
 
-func GetMoziaUserWallet(c *gin.Context) {
-	userId, err := strconv.Atoi(c.Param("id"))
+func resolveMoziaWalletUserId(identifier string) (int, error) {
+	identifier = strings.TrimSpace(identifier)
+	userId, err := strconv.Atoi(identifier)
 	if err != nil || userId <= 0 {
-		common.ApiErrorMsg(c, "无效的用户 ID")
+		user, lookupErr := model.GetUserByUsername(identifier)
+		if lookupErr != nil {
+			return 0, lookupErr
+		}
+		return user.Id, nil
+	} else if _, lookupErr := model.GetUserById(userId, false); lookupErr != nil {
+		return 0, lookupErr
+	}
+	return userId, nil
+}
+
+func GetMoziaUserWallet(c *gin.Context) {
+	userId, err := resolveMoziaWalletUserId(c.Param("id"))
+	if err != nil {
+		common.ApiErrorMsg(c, "用户不存在")
 		return
 	}
 	wallet, err := model.GetMoziaWalletView(userId)

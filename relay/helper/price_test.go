@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -17,6 +18,74 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHandleGroupRatioUsesChannelFallbackAndModelPriority(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	original := mozia_setting.UserModelRatios2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, mozia_setting.UpdateUserModelRatiosByJSONString(original))
+	})
+	require.NoError(t, mozia_setting.UpdateUserModelRatiosByJSONString(
+		`{"channel:396:35":{"user_id":396,"scope":"channel","channel_id":35,"ratio":0.5},"396:priority-model":{"user_id":396,"scope":"model","model":"priority-model","ratio":0.36}}`,
+	))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(ctx, constant.ContextKeyChannelId, 35)
+
+	channelInfo := HandleGroupRatio(ctx, &relaycommon.RelayInfo{
+		UserId:          396,
+		OriginModelName: "other-model",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	})
+	assert.True(t, channelInfo.HasUserModelRatio)
+	assert.InDelta(t, 0.5, channelInfo.UserModelRatio, 1e-12)
+	assert.InDelta(t, channelInfo.BaseGroupRatio*0.5, channelInfo.GroupRatio, 1e-12)
+
+	modelInfo := HandleGroupRatio(ctx, &relaycommon.RelayInfo{
+		UserId:          396,
+		OriginModelName: "priority-model",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	})
+	assert.True(t, modelInfo.HasUserModelRatio)
+	assert.InDelta(t, 0.36, modelInfo.UserModelRatio, 1e-12)
+	assert.InDelta(t, modelInfo.BaseGroupRatio*0.36, modelInfo.GroupRatio, 1e-12)
+}
+
+func TestRefreshUserModelRatioUsesRetryChannelForFinalSettlement(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	original := mozia_setting.UserModelRatios2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, mozia_setting.UpdateUserModelRatiosByJSONString(original))
+	})
+	require.NoError(t, mozia_setting.UpdateUserModelRatiosByJSONString(
+		`{"channel:396:36":{"user_id":396,"scope":"channel","channel_id":36,"ratio":0.25}}`,
+	))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		UserId:          396,
+		OriginModelName: "retry-model",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 36},
+		PriceData: types.PriceData{
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1, BaseGroupRatio: 1},
+		},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			EstimatedQuotaBeforeGroup: 100,
+			EstimatedQuotaAfterGroup:  100,
+			GroupRatio:                1,
+		},
+	}
+
+	RefreshUserModelRatio(ctx, info)
+	assert.InDelta(t, 0.25, info.PriceData.GroupRatioInfo.UserModelRatio, 1e-12)
+	assert.InDelta(t, info.PriceData.GroupRatioInfo.BaseGroupRatio*0.25, info.PriceData.GroupRatioInfo.GroupRatio, 1e-12)
+	assert.InDelta(t, info.PriceData.GroupRatioInfo.GroupRatio, info.TieredBillingSnapshot.GroupRatio, 1e-12)
+	assert.Equal(t, billingexpr.QuotaRound(100*info.PriceData.GroupRatioInfo.GroupRatio), info.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
+}
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)

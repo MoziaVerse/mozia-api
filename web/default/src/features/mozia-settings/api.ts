@@ -59,13 +59,18 @@ export async function saveMoziaUserModelRatio(
   return unwrapResponse(response.data)
 }
 
-export async function deleteMoziaUserModelRatio(
-  rule: Pick<MoziaUserModelRatio, 'user_id' | 'model'>
-) {
+export async function deleteMoziaUserModelRatio(rule: MoziaUserModelRatio) {
+  const targetParams =
+    rule.scope === 'model'
+      ? { model: rule.model }
+      : { channel_id: rule.channel_id }
   const response = await api.delete<ApiEnvelope<null>>(
     `${USER_MODEL_RATIO_ENDPOINT}/${rule.user_id}`,
     {
-      params: { model: rule.model },
+      params: {
+        scope: rule.scope,
+        ...targetParams,
+      },
       skipBusinessError: true,
       skipErrorHandler: true,
     }

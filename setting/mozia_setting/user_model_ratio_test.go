@@ -46,10 +46,56 @@ func TestUserModelRatioExactMatchAndStableList(t *testing.T) {
 	assert.False(t, ok, "model matching must remain case-sensitive and exact")
 
 	assert.Equal(t, []UserModelRatio{
-		{UserId: 12, Model: "a-model", Ratio: 0.8},
-		{UserId: 12, Model: "z-model", Ratio: 1.2},
-		{UserId: 396, Model: "video-v1", Ratio: 0.36},
+		{UserId: 12, Scope: UserRatioScopeModel, Model: "a-model", Ratio: 0.8},
+		{UserId: 12, Scope: UserRatioScopeModel, Model: "z-model", Ratio: 1.2},
+		{UserId: 396, Scope: UserRatioScopeModel, Model: "video-v1", Ratio: 0.36},
 	}, GetUserModelRatios())
+}
+
+func TestUserRatioModelTakesPriorityOverChannelAndKeysDoNotCollide(t *testing.T) {
+	original := UserModelRatios2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, UpdateUserModelRatiosByJSONString(original))
+	})
+	require.NoError(t, UpdateUserModelRatiosByJSONString(`{}`))
+
+	channelValue, err := BuildUserModelRatioUpsertJSON(UserModelRatio{
+		UserId:    396,
+		Scope:     UserRatioScopeChannel,
+		ChannelId: 35,
+		Ratio:     0.5,
+	})
+	require.NoError(t, err)
+	require.NoError(t, UpdateUserModelRatiosByJSONString(channelValue))
+
+	modelValue, err := BuildUserModelRatioUpsertJSON(UserModelRatio{
+		UserId: 396,
+		Scope:  UserRatioScopeModel,
+		Model:  "channel:35",
+		Ratio:  0.36,
+	})
+	require.NoError(t, err)
+	require.NoError(t, UpdateUserModelRatiosByJSONString(modelValue))
+
+	ratio, ok := GetUserModelRatio(396, "other-model", 35)
+	require.True(t, ok)
+	assert.InDelta(t, 0.5, ratio, 1e-12)
+
+	ratio, ok = GetUserModelRatio(396, "channel:35", 35)
+	require.True(t, ok)
+	assert.InDelta(t, 0.36, ratio, 1e-12)
+	assert.Len(t, GetUserModelRatios(), 2)
+
+	value, err := BuildUserRatioDeleteJSON(UserModelRatio{
+		UserId:    396,
+		Scope:     UserRatioScopeChannel,
+		ChannelId: 35,
+		Ratio:     1,
+	})
+	require.NoError(t, err)
+	require.NoError(t, UpdateUserModelRatiosByJSONString(value))
+	_, ok = GetUserModelRatio(396, "other-model", 35)
+	assert.False(t, ok)
 }
 
 func TestUserModelRatioValidationAndDelete(t *testing.T) {
@@ -67,6 +113,10 @@ func TestUserModelRatioValidationAndDelete(t *testing.T) {
 	assert.ErrorContains(t, err, "ratio")
 	_, err = BuildUserModelRatioUpsertJSON(UserModelRatio{UserId: 1, Model: "model", Ratio: 0})
 	assert.ErrorContains(t, err, "ratio")
+	_, err = BuildUserModelRatioUpsertJSON(UserModelRatio{UserId: 1, Scope: UserRatioScopeChannel, Ratio: 1})
+	assert.ErrorContains(t, err, "channel_id")
+	_, err = BuildUserModelRatioUpsertJSON(UserModelRatio{UserId: 1, Scope: "group", Ratio: 1})
+	assert.ErrorContains(t, err, "scope")
 
 	value, err := BuildUserModelRatioUpsertJSON(UserModelRatio{UserId: 396, Model: "video/v1", Ratio: 0.36})
 	require.NoError(t, err)

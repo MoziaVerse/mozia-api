@@ -42,12 +42,21 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 
 import {
   createUserModelRatioSchema,
   type UserModelRatioFormValues,
 } from '../lib/user-model-ratio-schema'
+import type { MoziaUserRatioScope } from '../types'
 
 type UserModelRatioDialogProps = {
   open: boolean
@@ -65,6 +74,7 @@ export function UserModelRatioDialog(props: UserModelRatioDialogProps) {
     resolver: zodResolver(schema),
     defaultValues: props.defaultValues,
   })
+  const scope = form.watch('scope')
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
@@ -72,12 +82,12 @@ export function UserModelRatioDialog(props: UserModelRatioDialogProps) {
         <DialogHeader>
           <DialogTitle>
             {props.editing
-              ? t('Edit user model ratio')
-              : t('Add user model ratio')}
+              ? t('Edit user billing ratio')
+              : t('Add user billing ratio')}
           </DialogTitle>
           <DialogDescription>
             {t(
-              'Set the billing multiplier applied to one exact user and model combination.'
+              'Set the billing multiplier for one user, scoped to a model or an entire channel.'
             )}
           </DialogDescription>
         </DialogHeader>
@@ -112,6 +122,54 @@ export function UserModelRatioDialog(props: UserModelRatioDialogProps) {
 
                 <FormField
                   control={form.control}
+                  name='scope'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Scope')}</FormLabel>
+                      <FormControl>
+                        <Select<MoziaUserRatioScope>
+                          items={[
+                            { value: 'model', label: t('Model') },
+                            { value: 'channel', label: t('Channel') },
+                          ]}
+                          value={field.value}
+                          disabled={props.editing || props.pending}
+                          onValueChange={(value) => {
+                            if (value === null) {
+                              return
+                            }
+                            field.onChange(value)
+                            if (value === 'model') {
+                              form.setValue('channel_id', undefined)
+                            } else {
+                              form.setValue('model', '')
+                            }
+                          }}
+                        >
+                          <SelectTrigger className='w-full'>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent alignItemWithTrigger={false}>
+                            <SelectGroup>
+                              <SelectItem value='model'>
+                                {t('Model')}
+                              </SelectItem>
+                              <SelectItem value='channel'>
+                                {t('Channel')}
+                              </SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {scope === 'model' ? (
+                <FormField
+                  control={form.control}
                   name='model'
                   render={({ field }) => (
                     <FormItem>
@@ -119,15 +177,55 @@ export function UserModelRatioDialog(props: UserModelRatioDialogProps) {
                       <FormControl>
                         <Input
                           {...field}
+                          value={field.value ?? ''}
                           placeholder='video-v1'
                           disabled={props.editing || props.pending}
                         />
                       </FormControl>
+                      <FormDescription>
+                        {t(
+                          'This rule only applies when the requested model matches exactly.'
+                        )}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              </div>
+              ) : (
+                <FormField
+                  control={form.control}
+                  name='channel_id'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Channel ID')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='number'
+                          min={1}
+                          step={1}
+                          value={field.value ?? ''}
+                          placeholder='35'
+                          disabled={props.editing || props.pending}
+                          onChange={(event) => {
+                            field.onChange(
+                              event.target.value === ''
+                                ? undefined
+                                : event.target.valueAsNumber
+                            )
+                          }}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'This rule applies to every model billed through the channel.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
 
               <FormField
                 control={form.control}
@@ -161,7 +259,7 @@ export function UserModelRatioDialog(props: UserModelRatioDialogProps) {
               {props.editing ? (
                 <p className='text-muted-foreground text-sm'>
                   {t(
-                    'User ID and model are locked while editing. Delete this rule and add a new one to change the combination.'
+                    'User ID, scope, and target are locked while editing. Delete this rule and add a new one to change them.'
                   )}
                 </p>
               ) : null}

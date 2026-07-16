@@ -22,11 +22,11 @@ func UpsertMoziaUserModelRatio(rule mozia_setting.UserModelRatio) error {
 	})
 }
 
-func DeleteMoziaUserModelRatio(userId int, modelName string) error {
+func DeleteMoziaUserModelRatio(rule mozia_setting.UserModelRatio) error {
 	moziaUserModelRatioMutationMutex.Lock()
 	defer moziaUserModelRatioMutationMutex.Unlock()
 
-	value, err := mozia_setting.BuildUserModelRatioDeleteJSON(userId, modelName)
+	value, err := mozia_setting.BuildUserRatioDeleteJSON(rule)
 	if err != nil {
 		return err
 	}

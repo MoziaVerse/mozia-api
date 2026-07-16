@@ -19,9 +19,9 @@ import (
 )
 
 type moziaUserModelRatioResponse struct {
-	Success bool                           `json:"success"`
-	Message string                         `json:"message"`
-	Data    []mozia_setting.UserModelRatio `json:"data"`
+	Success bool                              `json:"success"`
+	Message string                            `json:"message"`
+	Data    []moziaUserModelRatioWithUsername `json:"data"`
 }
 
 type moziaUserModelRatioItemResponse struct {
@@ -41,7 +41,7 @@ func setupMoziaUserModelRatioControllerTest(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Option{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Option{}, &model.Channel{}))
 	model.DB = db
 	model.LOG_DB = db
 	model.InitOptionMap()
@@ -98,6 +98,7 @@ func TestMoziaUserModelRatioCRUDPersistsOptionAndSupportsSlashModel(t *testing.T
 	require.True(t, itemResponse.Success, itemResponse.Message)
 	assert.Equal(t, mozia_setting.UserModelRatio{
 		UserId: 396,
+		Scope:  mozia_setting.UserRatioScopeModel,
 		Model:  "vendor/video-v1",
 		Ratio:  0.36,
 	}, itemResponse.Data)
@@ -120,10 +121,14 @@ func TestMoziaUserModelRatioCRUDPersistsOptionAndSupportsSlashModel(t *testing.T
 	var listResponse moziaUserModelRatioResponse
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &listResponse))
 	require.True(t, listResponse.Success, listResponse.Message)
-	assert.Equal(t, []mozia_setting.UserModelRatio{{
-		UserId: 396,
-		Model:  "vendor/video-v1",
-		Ratio:  0.36,
+	assert.Equal(t, []moziaUserModelRatioWithUsername{{
+		UserModelRatio: mozia_setting.UserModelRatio{
+			UserId: 396,
+			Scope:  mozia_setting.UserRatioScopeModel,
+			Model:  "vendor/video-v1",
+			Ratio:  0.36,
+		},
+		Username: "ratio-user",
 	}}, listResponse.Data)
 
 	recorder = performMoziaUserModelRatioRequest(
@@ -141,6 +146,68 @@ func TestMoziaUserModelRatioCRUDPersistsOptionAndSupportsSlashModel(t *testing.T
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &deleteResponse))
 	require.True(t, deleteResponse.Success, deleteResponse.Message)
 	_, ok = mozia_setting.GetUserModelRatio(396, "vendor/video-v1")
+	assert.False(t, ok)
+}
+
+func TestMoziaUserModelRatioChannelScopeValidatesChannelAndDeletes(t *testing.T) {
+	db := setupMoziaUserModelRatioControllerTest(t)
+	require.NoError(t, db.Create(&model.User{
+		Id:       396,
+		Username: "ratio-user",
+		Password: "password",
+		Group:    "default",
+	}).Error)
+
+	recorder := performMoziaUserModelRatioRequest(
+		t,
+		http.MethodPost,
+		"/api/mozia/user-model-ratio",
+		`{"user_id":396,"scope":"channel","channel_id":35,"ratio":0.36}`,
+		nil,
+		UpsertMoziaUserModelRatio,
+	)
+	var response moziaUserModelRatioItemResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "渠道不存在")
+
+	require.NoError(t, db.Create(&model.Channel{Id: 35, Name: "Pulseaify", Key: "test"}).Error)
+	recorder = performMoziaUserModelRatioRequest(
+		t,
+		http.MethodPost,
+		"/api/mozia/user-model-ratio",
+		`{"user_id":396,"scope":"channel","channel_id":35,"ratio":0.36}`,
+		nil,
+		UpsertMoziaUserModelRatio,
+	)
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, response.Message)
+	assert.Equal(t, mozia_setting.UserModelRatio{
+		UserId:    396,
+		Scope:     mozia_setting.UserRatioScopeChannel,
+		ChannelId: 35,
+		Ratio:     0.36,
+	}, response.Data)
+
+	ratio, ok := mozia_setting.GetUserModelRatio(396, "any-model", 35)
+	require.True(t, ok)
+	assert.InDelta(t, 0.36, ratio, 1e-12)
+
+	recorder = performMoziaUserModelRatioRequest(
+		t,
+		http.MethodDelete,
+		"/api/mozia/user-model-ratio/396?scope=channel&channel_id=35",
+		"",
+		gin.Params{{Key: "user_id", Value: "396"}},
+		DeleteMoziaUserModelRatio,
+	)
+	var deleteResponse struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &deleteResponse))
+	require.True(t, deleteResponse.Success, deleteResponse.Message)
+	_, ok = mozia_setting.GetUserModelRatio(396, "any-model", 35)
 	assert.False(t, ok)
 }
 
@@ -177,4 +244,27 @@ func TestMoziaUserModelRatioRejectsMissingUserAndNonPositiveRatio(t *testing.T) 
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	assert.False(t, response.Success)
 	assert.Contains(t, response.Message, "greater than 0")
+}
+
+func TestResolveMoziaWalletUserIdSupportsIdAndExactUsername(t *testing.T) {
+	db := setupMoziaUserModelRatioControllerTest(t)
+	require.NoError(t, db.Create(&model.User{
+		Id:       396,
+		Username: "wallet-user",
+		Password: "password",
+		Group:    "default",
+	}).Error)
+
+	userId, err := resolveMoziaWalletUserId("396")
+	require.NoError(t, err)
+	assert.Equal(t, 396, userId)
+
+	userId, err = resolveMoziaWalletUserId("  wallet-user  ")
+	require.NoError(t, err)
+	assert.Equal(t, 396, userId)
+
+	_, err = resolveMoziaWalletUserId("Wallet-User")
+	assert.Error(t, err, "username lookup must remain exact")
+	_, err = resolveMoziaWalletUserId("missing-user")
+	assert.Error(t, err)
 }

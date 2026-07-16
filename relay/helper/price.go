@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -65,13 +66,35 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 	}
 	groupRatioInfo.BaseGroupRatio = groupRatioInfo.GroupRatio
 
-	if userModelRatio, ok := mozia_setting.GetUserModelRatio(relayInfo.UserId, relayInfo.OriginModelName); ok {
+	channelId := 0
+	if relayInfo.ChannelMeta != nil {
+		channelId = relayInfo.ChannelId
+	}
+	if channelId <= 0 {
+		channelId = common.GetContextKeyInt(ctx, constant.ContextKeyChannelId)
+	}
+	if userModelRatio, ok := mozia_setting.GetUserModelRatio(relayInfo.UserId, relayInfo.OriginModelName, channelId); ok {
 		groupRatioInfo.UserModelRatio = userModelRatio
 		groupRatioInfo.HasUserModelRatio = true
 		groupRatioInfo.GroupRatio *= userModelRatio
 	}
 
 	return groupRatioInfo
+}
+
+// RefreshUserModelRatio reapplies the scoped user ratio after a retry selects a
+// different channel. Final settlement and tiered billing then use the channel
+// that actually served the successful request, while the original reservation
+// is reconciled by BillingSession.Settle.
+func RefreshUserModelRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	groupRatioInfo := HandleGroupRatio(ctx, relayInfo)
+	relayInfo.PriceData.GroupRatioInfo = groupRatioInfo
+	if snapshot := relayInfo.TieredBillingSnapshot; snapshot != nil {
+		snapshot.GroupRatio = groupRatioInfo.GroupRatio
+		snapshot.EstimatedQuotaAfterGroup = billingexpr.QuotaRound(
+			snapshot.EstimatedQuotaBeforeGroup * groupRatioInfo.GroupRatio,
+		)
+	}
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {

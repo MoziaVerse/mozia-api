@@ -22,17 +22,41 @@ import { z } from 'zod'
 type Translate = (key: string) => string
 
 export function createUserModelRatioSchema(t: Translate) {
-  return z.object({
-    user_id: z
-      .number(t('Enter a valid user ID'))
-      .int(t('User ID must be an integer'))
-      .positive(t('User ID must be greater than zero')),
-    model: z.string().trim().min(1, t('Model is required')),
-    ratio: z
-      .number(t('Enter a valid ratio'))
-      .finite(t('Enter a valid ratio'))
-      .positive(t('Ratio must be greater than zero')),
-  })
+  return z
+    .object({
+      user_id: z
+        .number(t('Enter a valid user ID'))
+        .int(t('User ID must be an integer'))
+        .positive(t('User ID must be greater than zero')),
+      scope: z.enum(['model', 'channel']),
+      model: z.string().trim().optional(),
+      channel_id: z
+        .number(t('Enter a valid channel ID'))
+        .int(t('Channel ID must be an integer'))
+        .positive(t('Channel ID must be greater than zero'))
+        .optional(),
+      ratio: z
+        .number(t('Enter a valid ratio'))
+        .finite(t('Enter a valid ratio'))
+        .positive(t('Ratio must be greater than zero')),
+    })
+    .superRefine((values, context) => {
+      if (values.scope === 'model' && !values.model) {
+        context.addIssue({
+          code: 'custom',
+          message: t('Model is required'),
+          path: ['model'],
+        })
+      }
+
+      if (values.scope === 'channel' && values.channel_id === undefined) {
+        context.addIssue({
+          code: 'custom',
+          message: t('Channel ID is required'),
+          path: ['channel_id'],
+        })
+      }
+    })
 }
 
 export type UserModelRatioFormValues = z.infer<
