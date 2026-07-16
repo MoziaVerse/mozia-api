@@ -21,6 +21,7 @@ import { createElement } from 'react'
 import { createSectionRegistry } from '@/features/system-settings/utils/section-registry'
 
 import { MoziaQuotaPolicySection } from './model-quota-policy-section'
+import { MoziaUserModelRatioSection } from './user-model-ratio-section'
 import { MoziaWalletBalancesSection } from './wallet-balances-section'
 
 type MoziaSettingsState = Record<string, never>
@@ -35,6 +36,11 @@ const MOZIA_SETTINGS_SECTIONS = [
     id: 'user-wallet-balances',
     titleKey: 'User Wallet Balances',
     build: () => createElement(MoziaWalletBalancesSection),
+  },
+  {
+    id: 'user-model-ratios',
+    titleKey: 'User Model Ratios',
+    build: () => createElement(MoziaUserModelRatioSection),
   },
 ] as const
 

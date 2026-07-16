@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
+	"github.com/QuantumNous/new-api/setting/mozia_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -39,7 +40,9 @@ const claudeCacheCreation1hMultiplier = 6 / 3.75
 func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.GroupRatioInfo {
 	groupRatioInfo := types.GroupRatioInfo{
 		GroupRatio:        1.0, // default ratio
+		BaseGroupRatio:    1.0,
 		GroupSpecialRatio: -1,
+		UserModelRatio:    1.0,
 	}
 
 	// check auto group
@@ -59,6 +62,13 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 	} else {
 		// normal group ratio
 		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
+	}
+	groupRatioInfo.BaseGroupRatio = groupRatioInfo.GroupRatio
+
+	if userModelRatio, ok := mozia_setting.GetUserModelRatio(relayInfo.UserId, relayInfo.OriginModelName); ok {
+		groupRatioInfo.UserModelRatio = userModelRatio
+		groupRatioInfo.HasUserModelRatio = true
+		groupRatioInfo.GroupRatio *= userModelRatio
 	}
 
 	return groupRatioInfo

@@ -454,6 +454,14 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 		quotaPolicyRoute.PUT("/:id", controller.UpdateMoziaQuotaPolicy)
 		quotaPolicyRoute.DELETE("/:id", controller.DeleteMoziaQuotaPolicy)
 	}
+
+	userModelRatioRoute := moziaRouter.Group("/user-model-ratio")
+	userModelRatioRoute.Use(middleware.RootOnlyAuth())
+	{
+		userModelRatioRoute.GET("/", controller.GetMoziaUserModelRatios)
+		userModelRatioRoute.POST("/", controller.UpsertMoziaUserModelRatio)
+		userModelRatioRoute.DELETE("/:user_id", controller.DeleteMoziaUserModelRatio)
+	}
 }
 
 // SetOpenRouterApiRouter 注册 OpenRouter 对外接口。独立分组以避免与上游通用

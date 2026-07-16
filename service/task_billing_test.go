@@ -783,3 +783,33 @@ func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
 }
+
+func TestRecalculateTaskQuotaByTokensUsesFrozenUserModelRatioSnapshot(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, channelID = 33, 33
+	const currentQuota, preConsumedQuota = 1000, 100
+
+	seedUser(t, userID, currentQuota)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumedQuota, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.ModelRatio = 2
+	task.PrivateData.BillingContext.BaseGroupRatio = 1
+	task.PrivateData.BillingContext.UserModelRatio = 0.36
+	task.PrivateData.BillingContext.HasUserModelRatio = true
+	task.PrivateData.BillingContext.GroupRatio = 0.36
+
+	RecalculateTaskQuotaByTokens(ctx, task, 100)
+
+	assert.Equal(t, 72, task.Quota)
+	assert.Equal(t, currentQuota+28, getUserQuota(t, userID))
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Contains(t, log.Content, "modelRatio=2.00")
+	assert.Contains(t, log.Content, "groupRatio=0.36")
+	other := taskBillingOther(task)
+	assert.Equal(t, 1.0, other["base_group_ratio"])
+	assert.Equal(t, 0.36, other["user_model_ratio"])
+}

@@ -10,8 +10,11 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/mozia_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,8 +31,9 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	})
 
 	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
-		"billing_setting.billing_mode": `{"tiered-test-model":"tiered_expr"}`,
-		"billing_setting.billing_expr": `{"tiered-test-model":"param(\"stream\") == true ? tier(\"stream\", p * 3) : tier(\"base\", p * 2)"}`,
+		"billing_setting.billing_mode":        `{"tiered-test-model":"tiered_expr"}`,
+		"billing_setting.billing_expr":        `{"tiered-test-model":"param(\"stream\") == true ? tier(\"stream\", p * 3) : tier(\"base\", p * 2)"}`,
+		mozia_setting.UserModelRatioOptionKey: `{"396:tiered-test-model":{"user_id":396,"model":"tiered-test-model","ratio":0.36}}`,
 	}))
 
 	recorder := httptest.NewRecorder()
@@ -42,6 +46,7 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	ctx.Set("group", "default")
 
 	info := &relaycommon.RelayInfo{
+		UserId:          396,
 		OriginModelName: "tiered-test-model",
 		UserGroup:       "default",
 		UsingGroup:      "default",
@@ -54,9 +59,61 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 
 	priceData, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
 	require.NoError(t, err)
-	require.Equal(t, 1500, priceData.QuotaToPreConsume)
+	require.Equal(t, 540, priceData.QuotaToPreConsume)
+	assert.Equal(t, 1.0, priceData.GroupRatioInfo.BaseGroupRatio)
+	assert.Equal(t, 0.36, priceData.GroupRatioInfo.UserModelRatio)
+	assert.Equal(t, 0.36, priceData.GroupRatioInfo.GroupRatio)
 	require.NotNil(t, info.TieredBillingSnapshot)
+	require.Equal(t, 0.36, info.TieredBillingSnapshot.GroupRatio)
 	require.Equal(t, "stream", info.TieredBillingSnapshot.EstimatedTier)
 	require.Equal(t, billing_setting.BillingModeTieredExpr, info.TieredBillingSnapshot.BillingMode)
 	require.Equal(t, common.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
+}
+
+func TestModelPriceHelpersApplyUserModelRatioToRatioAndFixedPricing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	original := mozia_setting.UserModelRatios2JSONString()
+	originalModelRatios := ratio_setting.ModelRatio2JSONString()
+	originalModelPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, mozia_setting.UpdateUserModelRatiosByJSONString(original))
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(originalModelRatios))
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalModelPrices))
+	})
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"user-ratio-test-model":2}`))
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"user-fixed-test-model":0.1}`))
+	require.NoError(t, mozia_setting.UpdateUserModelRatiosByJSONString(
+		`{"396:user-ratio-test-model":{"user_id":396,"model":"user-ratio-test-model","ratio":0.36},"396:user-fixed-test-model":{"user_id":396,"model":"user-fixed-test-model","ratio":0.36}}`,
+	))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	ratioInfo := &relaycommon.RelayInfo{
+		UserId:          396,
+		OriginModelName: "user-ratio-test-model",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	}
+	ratioPrice, err := ModelPriceHelper(ctx, ratioInfo, 1000, &types.TokenCountMeta{})
+	require.NoError(t, err)
+	modelRatio, ok, _ := ratio_setting.GetModelRatio("user-ratio-test-model")
+	require.True(t, ok)
+	preConsumedTokens := common.Max(1000, common.PreConsumedQuota)
+	assert.Equal(t, int(float64(preConsumedTokens)*modelRatio*0.36), ratioPrice.QuotaToPreConsume)
+	assert.True(t, ratioPrice.GroupRatioInfo.HasUserModelRatio)
+
+	fixedInfo := &relaycommon.RelayInfo{
+		UserId:          396,
+		OriginModelName: "user-fixed-test-model",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	}
+	fixedPrice, err := ModelPriceHelperPerCall(ctx, fixedInfo)
+	require.NoError(t, err)
+	modelPrice, ok := ratio_setting.GetModelPrice("user-fixed-test-model", true)
+	require.True(t, ok)
+	assert.Equal(t, int(modelPrice*common.QuotaPerUnit*0.36), fixedPrice.Quota)
+	assert.True(t, fixedPrice.GroupRatioInfo.HasUserModelRatio)
 }

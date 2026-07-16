@@ -117,7 +117,10 @@ func ChargeViolationFeeIfNeeded(ctx *gin.Context, relayInfo *relaycommon.RelayIn
 		return false
 	}
 
-	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	groupRatio := relayInfo.PriceData.GroupRatioInfo.BaseGroupRatio
+	if groupRatio == 0 {
+		groupRatio = relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	}
 	feeQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, groupRatio)
 	if feeQuota <= 0 {
 		return false
