@@ -29,6 +29,11 @@ export const CHANNEL_OPTIONS = [
     color: 'purple',
     label: 'Cool（图片/视频异步生成）',
   },
+  {
+    value: 203,
+    color: 'cyan',
+    label: 'Seedance 2.0 Compatible（异步视频）',
+  },
   { value: 1, color: 'green', label: 'OpenAI' },
   {
     value: 2,

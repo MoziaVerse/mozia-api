@@ -78,6 +78,21 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       other: 'Cool 是异步任务接口（提交 → 轮询），请通过 /v1/cool/* 路径调用',
     },
   },
+  203: {
+    id: 203,
+    name: CHANNEL_TYPES[203],
+    icon: 'openai',
+    defaultBaseUrl: '',
+    hints: {
+      baseUrl:
+        '必填：供应商 Base URL，可填写到域名根路径或 /v1，例如 https://pulseaify.com 或 https://pulseaify.com/v1',
+      key: '供应商 API Key（使用 Authorization: Bearer）',
+      models:
+        '填写对外模型名，并在模型映射中指定供应商模型 ID，例如 {"cool:seedance_2_720p":"video-1"}',
+      other:
+        '兼容 POST/GET /v1/video/generations；duration 必须显式传正整数。模型价格按每秒价格填写，实际费用 = 模型价格 × duration；失败或超时自动退款',
+    },
+  },
   // ===== NewAPI default =====
   1: {
     id: 1,
