@@ -19,6 +19,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -143,6 +144,13 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 // 控制器负责 defer Refund 和成功后 Settle。
 func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitResult, *dto.TaskError) {
 	info.InitChannelMeta(c)
+	restoreRequestBody, taskErr := applyTaskParamOverride(c, info)
+	if taskErr != nil {
+		return nil, taskErr
+	}
+	if restoreRequestBody != nil {
+		defer restoreRequestBody()
+	}
 
 	// 1. 确定 platform → 创建适配器 → 验证请求
 	platform := constant.TaskPlatform(c.GetString("platform"))
@@ -258,6 +266,59 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		Platform:       platform,
 		Quota:          finalQuota,
 	}, nil
+}
+
+// applyTaskParamOverride makes the selected channel's effective JSON body
+// available to task validation, billing estimation, and request conversion.
+// The controller retries with the original body, so each channel gets a clean
+// input instead of inheriting a previous channel's overrides.
+func applyTaskParamOverride(c *gin.Context, info *relaycommon.RelayInfo) (func(), *dto.TaskError) {
+	if info == nil || len(info.ParamOverride) == 0 ||
+		!strings.HasPrefix(c.GetHeader("Content-Type"), "application/json") {
+		return nil, nil
+	}
+
+	originalStorage, err := common.GetBodyStorage(c)
+	if err != nil {
+		statusCode := http.StatusBadRequest
+		if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
+			statusCode = http.StatusRequestEntityTooLarge
+		}
+		return nil, service.TaskErrorWrapperLocal(err, "read_request_body_failed", statusCode)
+	}
+	originalJSON, err := originalStorage.Bytes()
+	if err != nil {
+		return nil, service.TaskErrorWrapperLocal(err, "read_request_body_failed", http.StatusBadRequest)
+	}
+
+	overriddenJSON, err := relaycommon.ApplyParamOverrideWithRelayInfo(originalJSON, info)
+	if err != nil {
+		apiErr := newAPIErrorFromParamOverride(err)
+		taskErr := service.TaskErrorFromAPIError(apiErr)
+		taskErr.LocalError = types.IsSkipRetryError(apiErr)
+		return nil, taskErr
+	}
+	if bytes.Equal(originalJSON, overriddenJSON) {
+		return nil, nil
+	}
+
+	effectiveStorage, err := common.CreateBodyStorage(overriddenJSON)
+	if err != nil {
+		return nil, service.TaskErrorWrapperLocal(err, "create_request_body_failed", http.StatusInternalServerError)
+	}
+	originalContentLength := c.Request.ContentLength
+	c.Set(common.KeyBodyStorage, effectiveStorage)
+	c.Request.Body = io.NopCloser(effectiveStorage)
+	c.Request.ContentLength = effectiveStorage.Size()
+
+	restore := func() {
+		_ = effectiveStorage.Close()
+		_, _ = originalStorage.Seek(0, io.SeekStart)
+		c.Set(common.KeyBodyStorage, originalStorage)
+		c.Request.Body = io.NopCloser(originalStorage)
+		c.Request.ContentLength = originalContentLength
+	}
+	return restore, nil
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

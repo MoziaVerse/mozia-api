@@ -7,6 +7,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTaskSubmitReqAcceptsStringAndNumericSeconds(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "string", body: `{"seconds":"5"}`, want: "5"},
+		{name: "number", body: `{"seconds":15}`, want: "15"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var req TaskSubmitReq
+			require.NoError(t, req.UnmarshalJSON([]byte(tt.body)))
+			require.Equal(t, tt.want, req.Seconds)
+		})
+	}
+}
+
 func TestRelayInfoGetFinalRequestRelayFormatPrefersExplicitFinal(t *testing.T) {
 	info := &RelayInfo{
 		RelayFormat:             types.RelayFormatOpenAI,
