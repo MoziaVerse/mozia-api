@@ -249,6 +249,35 @@ func FetchUpstreamModels(c *gin.Context) {
 	})
 }
 
+func DiscoverChannelModels(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	channel, err := model.GetChannelById(id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	ids, err := fetchChannelUpstreamModelIDs(channel)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("获取模型列表失败: %s", err.Error()),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    ids,
+	})
+}
+
 func FixChannelsAbilities(c *gin.Context) {
 	success, fails, err := model.FixAbility()
 	if err != nil {
