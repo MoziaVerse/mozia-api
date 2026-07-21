@@ -19,7 +19,7 @@ func TestChannelStatusRoutesUseOperatePermission(t *testing.T) {
 }
 
 func TestChannelReadOnlyProbeRoutesUseReadPermission(t *testing.T) {
-	assertChannelRoutePermission(t, http.MethodGet, "/discover_models/:id", authz.ChannelRead, controller.DiscoverChannelModels)
+	assertChannelRoutePermission(t, http.MethodGet, "/discovery", authz.ChannelRead, controller.GetChannelDiscovery)
 	assertChannelRoutePermission(t, http.MethodGet, "/probe_balance/:id", authz.ChannelRead, controller.ProbeChannelBalance)
 }
 
