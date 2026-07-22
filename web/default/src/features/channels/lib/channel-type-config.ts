@@ -47,6 +47,20 @@ export interface ChannelTypeConfig {
  */
 export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
   // ===== Mozia 私有渠道 =====
+  200: {
+    id: 200,
+    name: CHANNEL_TYPES[200],
+    icon: 'openai',
+    defaultBaseUrl: 'https://model-router.edu-aliyun.com',
+    hints: {
+      baseUrl: 'Default: https://model-router.edu-aliyun.com',
+      key: '阿里教育 Model Router 控制台分发的 API Key',
+      models:
+        '同步模型按控制台实际授权填写；Seedance 可使用对外别名 seedance-2.0 / seedance-2.0-fast，并通过模型映射指向控制台显示的真实模型 ID',
+      other:
+        '异步视频使用 /v1/videos；431 规格最多 4 图、3 视频、1 音频。Seedance 模型价格按每秒价格填写，不同分辨率建议配置独立对外模型别名和价格',
+    },
+  },
   201: {
     id: 201,
     name: CHANNEL_TYPES[201],

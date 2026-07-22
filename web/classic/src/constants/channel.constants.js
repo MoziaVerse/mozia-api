@@ -25,6 +25,11 @@ export const CHANNEL_OPTIONS = [
     label: 'Mulerun（含 studio 多模态）',
   },
   {
+    value: 200,
+    color: 'orange',
+    label: 'Model Router（阿里教育）',
+  },
+  {
     value: 202,
     color: 'purple',
     label: 'Cool（图片/视频异步生成）',
