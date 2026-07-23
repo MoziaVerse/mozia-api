@@ -92,6 +92,13 @@ func TestSeedanceCompatibleChannelSkipsChatCompletionTest(t *testing.T) {
 	require.Contains(t, result.localErr.Error(), "channel test is not supported")
 }
 
+func TestGlobalaiopcChannelSkipsChatCompletionTest(t *testing.T) {
+	result := testChannel(nil, &model.Channel{Type: constant.ChannelTypeMoziaGlobalaiopc}, 0, "", "", false)
+
+	require.Error(t, result.localErr)
+	require.Contains(t, result.localErr.Error(), "channel test is not supported")
+}
+
 func TestSelectChannelsForAutomaticTestPassiveRecoveryOnlyUsesAutoDisabled(t *testing.T) {
 	channels := []*model.Channel{
 		{Id: 1, Status: common.ChannelStatusEnabled},

@@ -5,10 +5,10 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/cool"
-	"github.com/QuantumNous/new-api/relay/channel/modelrouter"
+	"github.com/QuantumNous/new-api/relay/channel/globalaiopc"
 	"github.com/QuantumNous/new-api/relay/channel/mulerun"
 	"github.com/QuantumNous/new-api/relay/channel/seedance"
-	taskmodelrouter "github.com/QuantumNous/new-api/relay/channel/task/modelrouter"
+	taskglobalaiopc "github.com/QuantumNous/new-api/relay/channel/task/globalaiopc"
 	taskmulerun "github.com/QuantumNous/new-api/relay/channel/task/mulerun"
 )
 
@@ -19,8 +19,8 @@ import (
 
 func GetMoziaAdaptor(apiType int) channel.Adaptor {
 	switch apiType {
-	case common.APITypeMoziaModelRouter:
-		return &modelrouter.Adaptor{}
+	case common.APITypeMoziaGlobalaiopc:
+		return &globalaiopc.Adaptor{}
 	case common.APITypeMoziaMulerun:
 		return &mulerun.Adaptor{}
 	}
@@ -29,8 +29,8 @@ func GetMoziaAdaptor(apiType int) channel.Adaptor {
 
 func GetMoziaTaskAdaptor(channelType int) channel.TaskAdaptor {
 	switch channelType {
-	case constant.ChannelTypeMoziaModelRouter:
-		return &taskmodelrouter.TaskAdaptor{}
+	case constant.ChannelTypeMoziaGlobalaiopc:
+		return &taskglobalaiopc.TaskAdaptor{}
 	case constant.ChannelTypeMoziaCool:
 		return &cool.TaskAdaptor{}
 	case constant.ChannelTypeMoziaSeedance:

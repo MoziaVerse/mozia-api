@@ -23,7 +23,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 export const CHANNEL_TYPES = {
   // Mozia 私有渠道（200+，不与 upstream new-api 撞号）。
-  200: 'ModelRouter',
+  200: 'Globalaiopc',
   201: 'Mulerun',
   202: 'Cool',
   203: 'SeedanceCompatible',

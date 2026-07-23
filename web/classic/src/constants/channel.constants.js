@@ -27,7 +27,7 @@ export const CHANNEL_OPTIONS = [
   {
     value: 200,
     color: 'orange',
-    label: 'Model Router（阿里教育）',
+    label: 'Globalaiopc',
   },
   {
     value: 202,

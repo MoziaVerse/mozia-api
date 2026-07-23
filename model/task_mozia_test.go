@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestInitTaskPersistsModelRouterSubmissionKeyForPolling(t *testing.T) {
+func TestInitTaskPersistsGlobalaiopcSubmissionKeyForPolling(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"},
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelType: constant.ChannelTypeMoziaModelRouter,
+			ChannelType: constant.ChannelTypeMoziaGlobalaiopc,
 			ApiKey:      "selected-key",
 		},
 	}

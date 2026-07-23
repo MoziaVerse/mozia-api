@@ -8,13 +8,13 @@ import "github.com/QuantumNous/new-api/constant"
 // 通过 MoziaChannelType2APIType + 在 api_type.go 顶部加一行 hook 完成 ChannelType→APIType
 // 的非侵入式扩展。
 const (
-	APITypeMoziaModelRouter = 200
+	APITypeMoziaGlobalaiopc = 200
 	APITypeMoziaMulerun     = 201
 	// Cool 走 TaskAdaptor 路径，不参与 ChannelType→APIType 映射。
 )
 
 var moziaChannelToAPIType = map[int]int{
-	constant.ChannelTypeMoziaModelRouter: APITypeMoziaModelRouter,
+	constant.ChannelTypeMoziaGlobalaiopc: APITypeMoziaGlobalaiopc,
 	constant.ChannelTypeMoziaMulerun:     APITypeMoziaMulerun,
 }
 

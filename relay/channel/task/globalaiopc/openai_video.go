@@ -1,4 +1,4 @@
-package modelrouter
+package globalaiopc
 
 import (
 	"github.com/QuantumNous/new-api/common"

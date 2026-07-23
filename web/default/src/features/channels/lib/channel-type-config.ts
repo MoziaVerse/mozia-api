@@ -51,14 +51,14 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
     id: 200,
     name: CHANNEL_TYPES[200],
     icon: 'openai',
-    defaultBaseUrl: 'https://model-router.edu-aliyun.com',
+    defaultBaseUrl: 'https://zcbservice.aizfw.cn/kyyReactApiServer',
     hints: {
-      baseUrl: 'Default: https://model-router.edu-aliyun.com',
-      key: '阿里教育 Model Router 控制台分发的 API Key',
+      baseUrl: 'Default: https://zcbservice.aizfw.cn/kyyReactApiServer',
+      key: 'Globalaiopc 控制台分发的 API Key',
       models:
-        '同步模型按控制台实际授权填写；Seedance 可使用对外别名 seedance-2.0 / seedance-2.0-fast，并通过模型映射指向控制台显示的真实模型 ID',
+        '模型列表填写你希望对外暴露的名称，并在渠道“模型映射”中自行映射到 Globalaiopc Seedance2.0 特价版完整模型编码（sd_2.0_*_special*）',
       other:
-        '异步视频使用 /v1/videos；431 规格最多 4 图、3 视频、1 音频。Seedance 模型价格按每秒价格填写，不同分辨率建议配置独立对外模型别名和价格',
+        '客户端统一调用 /v1/videos 或 /v1/video/generations；上游固定转发到 /v1/seedance-special/videos，查询固定使用 /v1/result/{id}；模型价格按次填写',
     },
   },
   201: {

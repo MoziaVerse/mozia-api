@@ -10,7 +10,7 @@ package constant
 //     map 与 ChannelBaseURLs slice，不修改 upstream 文件本身。
 //   - 新增渠道时只往本文件追加常量与 mapping，不动 channel.go。
 const (
-	ChannelTypeMoziaModelRouter = 200 // 阿里教育 Model Router 网关（OpenAI 兼容）
+	ChannelTypeMoziaGlobalaiopc = 200 // Globalaiopc Seedance2.0 特价版异步视频
 	ChannelTypeMoziaMulerun     = 201 // mulerun 多模型网关（OpenAI + Anthropic 双协议）
 	ChannelTypeMoziaCool        = 202 // Cool 图片/视频生成（异步任务）
 	ChannelTypeMoziaSeedance    = 203 // Seedance 2.0 兼容异步视频渠道
@@ -18,7 +18,7 @@ const (
 
 // moziaChannelTypeNames 与 upstream ChannelTypeNames 同语义；通过 init() 合并。
 var moziaChannelTypeNames = map[int]string{
-	ChannelTypeMoziaModelRouter: "ModelRouter",
+	ChannelTypeMoziaGlobalaiopc: "Globalaiopc",
 	ChannelTypeMoziaMulerun:     "Mulerun",
 	ChannelTypeMoziaCool:        "Cool",
 	ChannelTypeMoziaSeedance:    "SeedanceCompatible",
@@ -27,7 +27,7 @@ var moziaChannelTypeNames = map[int]string{
 // moziaChannelBaseURLs 与 upstream ChannelBaseURLs slice 同语义；通过 init()
 // 把 slice 扩容到能容纳最大 ID，再按 index 写入。
 var moziaChannelBaseURLs = map[int]string{
-	ChannelTypeMoziaModelRouter: "https://model-router.edu-aliyun.com",
+	ChannelTypeMoziaGlobalaiopc: "https://zcbservice.aizfw.cn/kyyReactApiServer",
 	ChannelTypeMoziaMulerun:     "https://api.mulerun.com",
 	ChannelTypeMoziaCool:        "https://api.mjapi.cc.cd",
 	ChannelTypeMoziaSeedance:    "",
