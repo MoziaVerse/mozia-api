@@ -10,7 +10,7 @@ package constant
 //     map 与 ChannelBaseURLs slice，不修改 upstream 文件本身。
 //   - 新增渠道时只往本文件追加常量与 mapping，不动 channel.go。
 const (
-	ChannelTypeMoziaGlobalaiopc = 200 // Globalaiopc Seedance2.0 特价版异步视频
+	ChannelTypeMoziaGlobalaiopc = 200 // Globalaiopc Videos 系列异步视频
 	ChannelTypeMoziaMulerun     = 201 // mulerun 多模型网关（OpenAI + Anthropic 双协议）
 	ChannelTypeMoziaCool        = 202 // Cool 图片/视频生成（异步任务）
 	ChannelTypeMoziaSeedance    = 203 // Seedance 2.0 兼容异步视频渠道

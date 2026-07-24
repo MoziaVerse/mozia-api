@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -25,18 +26,22 @@ import (
 )
 
 const (
-	specialSubmitPath  = "/seedance-special/videos"
-	resultPathPrefix   = "/result/"
-	maxSpecialImages   = 9
-	maxSpecialVideos   = 3
-	maxSpecialAudios   = 3
-	minSpecialDuration = 4
-	maxSpecialDuration = 15
+	videosSubmitPath = "/videos/videos"
+	resultPathPrefix = "/result/"
 )
 
-type seedanceSpecialSpec struct {
-	Name            string
-	RequireVideoRef bool
+type videosModelSpec struct {
+	Name               string
+	MaxPromptChars     int
+	MaxImages          int
+	MaxVideos          int
+	MaxAudios          int
+	MinDuration        int
+	MaxDuration        int
+	ExactDurations     []int
+	AllowedRatios      []string
+	AudioRequiresImage bool
+	SupportsAutoFace   bool
 }
 
 type requestSummary struct {
@@ -50,14 +55,15 @@ type requestSummary struct {
 	LastImage   string
 }
 
-// TaskAdaptor implements GlobalAiOpc's Seedance2.0 special asynchronous video protocol.
+// TaskAdaptor implements GlobalAiOpc's Videos asynchronous video protocol.
 //
-//	POST /v1/seedance-special/videos
+//	POST /v1/videos/videos
 //	GET  /v1/result/{task_id}
 //
-// Provider-native payloads are passed through after model remapping. Public
-// /v1/videos and /v1/video/generations style flat requests are normalized into
-// the official GlobalAiOpc Seedance-special schema.
+// Public /v1/videos and /v1/video/generations requests are normalized into the
+// official GlobalAiOpc Videos schema. Legacy content[] requests remain accepted
+// as compatibility input, but the upstream request always uses root prompt,
+// referenceImages, referenceVideos, and referenceAudios fields.
 type TaskAdaptor struct {
 	taskcommon.BaseBilling
 	baseURL string
@@ -111,12 +117,12 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	return nil
 }
 
-func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, error) {
+func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
 	baseURL, err := apiBaseURL(a.baseURL)
 	if err != nil {
 		return "", err
 	}
-	return baseURL + specialSubmitPath, nil
+	return baseURL + videosSubmitPath, nil
 }
 
 func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
@@ -278,23 +284,62 @@ func (a *TaskAdaptor) GetChannelName() string {
 	return globalaiopcchannel.ChannelName
 }
 
-func resolveModelSpec(c *gin.Context, info *relaycommon.RelayInfo, payload map[string]any) (string, seedanceSpecialSpec, error) {
+func resolveModelSpec(c *gin.Context, info *relaycommon.RelayInfo, payload map[string]any) (string, videosModelSpec, error) {
 	requestModel := ""
 	if payload != nil {
 		requestModel = stringField(payload, "model")
 	}
 	requestModel = firstString(requestModel, upstreamModel(info), channelMetaUpstreamModel(info), originModel(info))
 	if requestModel == "" {
-		return "", seedanceSpecialSpec{}, fmt.Errorf("model is required")
+		return "", videosModelSpec{}, fmt.Errorf("model is required")
 	}
 	finalModel, err := resolveConfiguredUpstreamModel(c, requestModel)
 	if err != nil {
-		return "", seedanceSpecialSpec{}, err
+		return "", videosModelSpec{}, err
 	}
-	return finalModel, seedanceSpecialSpec{
-		Name:            finalModel,
-		RequireVideoRef: strings.HasSuffix(strings.ToLower(finalModel), "_with_video_ref"),
-	}, nil
+	spec, err := videosModelSpecification(finalModel)
+	if err != nil {
+		return "", videosModelSpec{}, err
+	}
+	return finalModel, spec, nil
+}
+
+func videosModelSpecification(modelName string) (videosModelSpec, error) {
+	spec := videosModelSpec{
+		Name:           modelName,
+		MaxPromptChars: 5000,
+		MaxImages:      9,
+		MaxVideos:      3,
+		MaxAudios:      3,
+		MinDuration:    4,
+		MaxDuration:    15,
+		AllowedRatios:  []string{"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"},
+	}
+	switch strings.ToLower(strings.TrimSpace(modelName)) {
+	case "videos":
+		spec.MaxPromptChars = 0
+		spec.SupportsAutoFace = true
+	case "videos_stable":
+		spec.MaxImages = 4
+		spec.MaxAudios = 1
+		spec.AllowedRatios = []string{"16:9", "9:16", "1:1"}
+	case "videos_stable_fast":
+		spec.MaxImages = 4
+		spec.MaxAudios = 1
+		spec.ExactDurations = []int{10, 15}
+		spec.AllowedRatios = []string{"16:9", "9:16", "1:1"}
+	case "videos_pro", "videos_pro_fast":
+		spec.MaxVideos = 0
+		spec.ExactDurations = []int{10, 15}
+		spec.AllowedRatios = []string{"16:9", "9:16", "1:1"}
+		spec.AudioRequiresImage = true
+	default:
+		return videosModelSpec{}, fmt.Errorf(
+			"unsupported GlobalAiOpc Videos model %q; configure model mapping to videos, videos_stable, videos_stable_fast, videos_pro, or videos_pro_fast",
+			modelName,
+		)
+	}
+	return spec, nil
 }
 
 func resolveConfiguredUpstreamModel(c *gin.Context, modelName string) (string, error) {
@@ -324,44 +369,37 @@ func setResolvedModel(info *relaycommon.RelayInfo, modelName string) {
 	}
 }
 
-func validatePayload(spec seedanceSpecialSpec, payload map[string]any) (requestSummary, error) {
-	if hasContentArray(payload) {
-		return validateSpecialContentPayload(spec, payload)
-	}
-
+func validatePayload(spec videosModelSpec, payload map[string]any) (requestSummary, error) {
 	fields := mergedRequestFields(payload)
-	prompt := strings.TrimSpace(stringField(fields, "prompt"))
-	if prompt == "" {
-		return requestSummary{}, fmt.Errorf("prompt is required")
+	if hasContentArray(payload) {
+		summary, err := parseLegacyContentPayload(fields, payload)
+		if err != nil {
+			return requestSummary{}, err
+		}
+		if err := validateVideosSummary(spec, fields, summary); err != nil {
+			return requestSummary{}, err
+		}
+		return summary, nil
 	}
 
+	prompt := strings.TrimSpace(stringField(fields, "prompt"))
 	duration, hasDuration, err := durationValue(fields)
 	if err != nil {
 		return requestSummary{}, err
 	}
-	if err := validateDuration(spec, duration, hasDuration); err != nil {
-		return requestSummary{}, err
-	}
-
-	if size := stringField(fields, "size"); size != "" {
-		if _, _, err := normalizeVideoSize(size); err != nil {
-			return requestSummary{}, err
-		}
-	}
-	if err := validateResolution(spec, fields); err != nil {
-		return requestSummary{}, err
-	}
-
-	return validateSpecialFlatFields(spec, fields, prompt, duration, hasDuration)
-}
-
-func validateSpecialFlatFields(spec seedanceSpecialSpec, fields map[string]any, prompt string, duration int, hasDuration bool) (requestSummary, error) {
 	if err := validateFrameAliasConsistency(fields); err != nil {
 		return requestSummary{}, err
 	}
+	firstImage := firstFrameValue(fields)
+	lastImage := lastFrameValue(fields)
 	images, err := firstStringSlice(fields, "referenceImages", "image_urls", "images")
 	if err != nil {
 		return requestSummary{}, err
+	}
+	if len(images) == 0 && firstImage == "" && lastImage == "" {
+		if image := firstString(stringField(fields, "image"), stringField(fields, "input_reference")); image != "" {
+			images = []string{image}
+		}
 	}
 	videos, err := firstStringSlice(fields, "referenceVideos", "video_urls", "videos")
 	if err != nil {
@@ -371,33 +409,7 @@ func validateSpecialFlatFields(spec seedanceSpecialSpec, fields map[string]any, 
 	if err != nil {
 		return requestSummary{}, err
 	}
-	firstImage := firstFrameValue(fields)
-	lastImage := lastFrameValue(fields)
-	if lastImage != "" && firstImage == "" {
-		return requestSummary{}, fmt.Errorf("last_image requires first_image")
-	}
-	if (firstImage != "" || lastImage != "") && (len(images) > 0 || len(videos) > 0 || len(audios) > 0) {
-		return requestSummary{}, fmt.Errorf("first_frame/last_frame cannot be mixed with reference materials")
-	}
-	if len(images) > maxSpecialImages {
-		return requestSummary{}, materialLimitError("images", len(images), maxSpecialImages)
-	}
-	if len(videos) > maxSpecialVideos {
-		return requestSummary{}, materialLimitError("videos", len(videos), maxSpecialVideos)
-	}
-	if len(audios) > maxSpecialAudios {
-		return requestSummary{}, materialLimitError("audios", len(audios), maxSpecialAudios)
-	}
-	if spec.RequireVideoRef && len(videos) == 0 {
-		return requestSummary{}, fmt.Errorf("model %s requires at least one reference video", spec.Name)
-	}
-	if !spec.RequireVideoRef && len(videos) > 0 {
-		return requestSummary{}, fmt.Errorf("model %s does not support reference videos; map to a _with_video_ref model", spec.Name)
-	}
-	if len(audios) > 0 && len(images) == 0 && len(videos) == 0 {
-		return requestSummary{}, fmt.Errorf("reference_audio requires at least one reference_image or reference_video")
-	}
-	return requestSummary{
+	summary := requestSummary{
 		Prompt:      prompt,
 		Duration:    duration,
 		HasDuration: hasDuration,
@@ -406,26 +418,25 @@ func validateSpecialFlatFields(spec seedanceSpecialSpec, fields map[string]any, 
 		Audios:      audios,
 		FirstImage:  firstImage,
 		LastImage:   lastImage,
-	}, nil
+	}
+	if err := validateVideosSummary(spec, fields, summary); err != nil {
+		return requestSummary{}, err
+	}
+	return summary, nil
 }
 
-func validateSpecialContentPayload(spec seedanceSpecialSpec, payload map[string]any) (requestSummary, error) {
+func parseLegacyContentPayload(fields, payload map[string]any) (requestSummary, error) {
 	content, ok := payload["content"].([]any)
 	if !ok || len(content) == 0 {
 		return requestSummary{}, fmt.Errorf("content must be a non-empty array")
 	}
-	if err := validateResolution(spec, payload); err != nil {
-		return requestSummary{}, err
-	}
-	duration, hasDuration, err := durationValue(payload)
+	duration, hasDuration, err := durationValue(fields)
 	if err != nil {
-		return requestSummary{}, err
-	}
-	if err := validateDuration(spec, duration, hasDuration); err != nil {
 		return requestSummary{}, err
 	}
 
 	summary := requestSummary{
+		Prompt:      strings.TrimSpace(stringField(fields, "prompt")),
 		Duration:    duration,
 		HasDuration: hasDuration,
 	}
@@ -479,134 +490,103 @@ func validateSpecialContentPayload(spec seedanceSpecialSpec, payload map[string]
 			return requestSummary{}, fmt.Errorf("unsupported content type %q", stringField(object, "type"))
 		}
 	}
-
-	if summary.Prompt == "" {
-		return requestSummary{}, fmt.Errorf("content must include a text item")
-	}
-	if summary.LastImage != "" && summary.FirstImage == "" {
-		return requestSummary{}, fmt.Errorf("last_frame requires first_frame")
-	}
-	if (summary.FirstImage != "" || summary.LastImage != "") && (len(summary.Images) > 0 || len(summary.Videos) > 0 || len(summary.Audios) > 0) {
-		return requestSummary{}, fmt.Errorf("first_frame/last_frame cannot be mixed with reference materials")
-	}
-	if len(summary.Images) > maxSpecialImages {
-		return requestSummary{}, materialLimitError("images", len(summary.Images), maxSpecialImages)
-	}
-	if len(summary.Videos) > maxSpecialVideos {
-		return requestSummary{}, materialLimitError("videos", len(summary.Videos), maxSpecialVideos)
-	}
-	if len(summary.Audios) > maxSpecialAudios {
-		return requestSummary{}, materialLimitError("audios", len(summary.Audios), maxSpecialAudios)
-	}
-	if spec.RequireVideoRef && len(summary.Videos) == 0 {
-		return requestSummary{}, fmt.Errorf("model %s requires at least one reference video", spec.Name)
-	}
-	if !spec.RequireVideoRef && len(summary.Videos) > 0 {
-		return requestSummary{}, fmt.Errorf("model %s does not support reference videos; map to a _with_video_ref model", spec.Name)
-	}
-	if len(summary.Audios) > 0 && len(summary.Images) == 0 && len(summary.Videos) == 0 {
-		return requestSummary{}, fmt.Errorf("reference_audio requires at least one reference_image or reference_video")
-	}
 	return summary, nil
 }
 
-func buildProviderPayload(_ seedanceSpecialSpec, payload map[string]any, modelName string) (map[string]any, error) {
-	if hasContentArray(payload) && !hasLegacyEnvelope(payload) {
-		normalized, err := normalizeSpecialPayload(mergedRequestFields(payload), modelName)
-		if err != nil {
-			return nil, err
-		}
-		// Preserve provider-native content while removing compatibility-only
-		// fields such as prompt, image, seconds, and aspect_ratio.
-		normalized["content"] = payload["content"]
-		return normalized, nil
+func validateVideosSummary(spec videosModelSpec, fields map[string]any, summary requestSummary) error {
+	if summary.Prompt == "" {
+		return fmt.Errorf("prompt is required")
 	}
-	fields := mergedRequestFields(payload)
-	return normalizeSpecialPayload(fields, modelName)
+	if spec.MaxPromptChars > 0 && utf8.RuneCountInString(summary.Prompt) > spec.MaxPromptChars {
+		return fmt.Errorf("prompt for model %s must not exceed %d characters", spec.Name, spec.MaxPromptChars)
+	}
+	if err := validateDuration(spec, summary.Duration, summary.HasDuration); err != nil {
+		return err
+	}
+	if err := validateResolutionAndRatio(spec, fields); err != nil {
+		return err
+	}
+	if (summary.FirstImage == "") != (summary.LastImage == "") {
+		return fmt.Errorf("first_image and last_image must be provided together")
+	}
+	if (summary.FirstImage != "" || summary.LastImage != "") && (len(summary.Images) > 0 || len(summary.Videos) > 0 || len(summary.Audios) > 0) {
+		return fmt.Errorf("first_image/last_image cannot be mixed with reference materials")
+	}
+	if len(summary.Images) > spec.MaxImages {
+		return materialLimitError(spec.Name, "images", len(summary.Images), spec.MaxImages)
+	}
+	if len(summary.Videos) > spec.MaxVideos {
+		return materialLimitError(spec.Name, "videos", len(summary.Videos), spec.MaxVideos)
+	}
+	if len(summary.Audios) > spec.MaxAudios {
+		return materialLimitError(spec.Name, "audios", len(summary.Audios), spec.MaxAudios)
+	}
+	if spec.AudioRequiresImage && len(summary.Audios) > 0 && len(summary.Images) == 0 {
+		return fmt.Errorf("model %s requires referenceImages when referenceAudios is provided", spec.Name)
+	}
+	if _, exists, err := autoFaceValue(fields); err != nil {
+		return err
+	} else if exists && !spec.SupportsAutoFace {
+		return fmt.Errorf("model %s does not support autoFace", spec.Name)
+	}
+	return nil
 }
 
-func normalizeSpecialPayload(fields map[string]any, modelName string) (map[string]any, error) {
-	if err := validateFrameAliasConsistency(fields); err != nil {
+func buildProviderPayload(spec videosModelSpec, payload map[string]any, modelName string) (map[string]any, error) {
+	fields := mergedRequestFields(payload)
+	summary, err := validatePayload(spec, payload)
+	if err != nil {
 		return nil, err
 	}
-	normalized := copyWithoutKeys(fields,
-		"model", "input", "parameters", "metadata", "size", "seconds",
-		"images", "image_urls", "videos", "video_urls", "audios", "audio_urls",
-		"referenceImages", "referenceVideos", "referenceAudios", "content",
-		"prompt", "image", "input_reference", "first_image", "last_image", "lastFrameImage", "last_frame_image",
-		"aspect_ratio", "generation_type",
-		"callback_url", "priority", "safety_identifier", "service_tier", "execution_expires_after",
-		"frames", "camera_fixed", "watermark", "draft",
-	)
-	normalized["model"] = modelName
 
-	if duration, ok, err := durationValue(fields); err != nil {
-		return nil, err
-	} else if ok {
-		normalized["duration"] = duration
+	normalized := map[string]any{
+		"model":    modelName,
+		"prompt":   summary.Prompt,
+		"duration": summary.Duration,
 	}
-	if ratio := firstString(stringField(fields, "ratio"), stringField(fields, "aspect_ratio")); ratio != "" {
+	resolution, ratio, err := requestResolutionAndRatio(fields)
+	if err != nil {
+		return nil, err
+	}
+	if ratio != "" {
 		normalized["ratio"] = ratio
 	}
-	if size := stringField(fields, "size"); size != "" {
-		_, ratio, err := normalizeVideoSize(size)
-		if err != nil {
-			return nil, err
-		}
-		if _, exists := normalized["ratio"]; !exists && ratio != "" {
-			normalized["ratio"] = ratio
-		}
+	if resolution != "" {
+		normalized["resolution"] = resolution
 	}
-
-	content := make([]any, 0, 1)
-	if prompt := stringField(fields, "prompt"); prompt != "" {
-		content = append(content, map[string]any{
-			"type": "text",
-			"text": prompt,
-		})
+	if summary.FirstImage != "" {
+		normalized["first_image"] = summary.FirstImage
 	}
-	firstImage := firstFrameValue(fields)
-	lastImage := lastFrameValue(fields)
-	if firstImage != "" {
-		content = append(content, specialContentItem("image_url", "first_frame", firstImage))
+	if summary.LastImage != "" {
+		normalized["last_image"] = summary.LastImage
 	}
-	if lastImage != "" {
-		content = append(content, specialContentItem("image_url", "last_frame", lastImage))
+	if len(summary.Images) > 0 {
+		normalized["referenceImages"] = summary.Images
 	}
-	if images, err := firstStringSlice(fields, "referenceImages", "image_urls", "images"); err != nil {
+	if len(summary.Videos) > 0 {
+		normalized["referenceVideos"] = summary.Videos
+	}
+	if len(summary.Audios) > 0 {
+		normalized["referenceAudios"] = summary.Audios
+	}
+	if autoFace, exists, err := autoFaceValue(fields); err != nil {
 		return nil, err
-	} else {
-		for _, value := range images {
-			content = append(content, specialContentItem("image_url", "reference_image", value))
-		}
+	} else if exists {
+		normalized["autoFace"] = autoFace
 	}
-	if videos, err := firstStringSlice(fields, "referenceVideos", "video_urls", "videos"); err != nil {
-		return nil, err
-	} else {
-		for _, value := range videos {
-			content = append(content, specialContentItem("video_url", "reference_video", value))
-		}
-	}
-	if audios, err := firstStringSlice(fields, "referenceAudios", "audio_urls", "audios"); err != nil {
-		return nil, err
-	} else {
-		for _, value := range audios {
-			content = append(content, specialContentItem("audio_url", "reference_audio", value))
-		}
-	}
-	normalized["content"] = content
 	return normalized, nil
 }
 
-func specialContentItem(itemType, role, value string) map[string]any {
-	field := itemType
-	return map[string]any{
-		"type": itemType,
-		"role": role,
-		field: map[string]any{
-			"url": value,
-		},
+func autoFaceValue(fields map[string]any) (bool, bool, error) {
+	value, exists := fields["autoFace"]
+	if !exists {
+		return false, false, nil
 	}
+	autoFace, ok := value.(bool)
+	if !ok {
+		return false, true, fmt.Errorf("autoFace must be a boolean")
+	}
+	return autoFace, true, nil
 }
 
 func classifyValidationError(err error) *dto.TaskError {
@@ -616,40 +596,51 @@ func classifyValidationError(err error) *dto.TaskError {
 		return service.TaskErrorWrapperLocal(err, "material_limit_exceeded", statusCode)
 	case strings.Contains(err.Error(), "duration"):
 		return service.TaskErrorWrapperLocal(err, "invalid_duration", statusCode)
-	case strings.Contains(err.Error(), "size"):
+	case strings.Contains(err.Error(), "size"),
+		strings.Contains(err.Error(), "resolution"),
+		strings.Contains(err.Error(), "ratio"):
 		return service.TaskErrorWrapperLocal(err, "invalid_size", statusCode)
 	default:
 		return service.TaskErrorWrapperLocal(err, "invalid_request", statusCode)
 	}
 }
 
-func validateDuration(spec seedanceSpecialSpec, duration int, hasDuration bool) error {
+func validateDuration(spec videosModelSpec, duration int, hasDuration bool) error {
 	if !hasDuration {
-		return nil
+		return fmt.Errorf("duration is required for model %s", spec.Name)
 	}
 	if duration <= 0 {
 		return fmt.Errorf("duration must be a positive integer number of seconds")
 	}
-	if duration < minSpecialDuration || duration > maxSpecialDuration {
-		return fmt.Errorf("duration for model %s must be between %d and %d seconds", spec.Name, minSpecialDuration, maxSpecialDuration)
+	if len(spec.ExactDurations) > 0 {
+		for _, allowed := range spec.ExactDurations {
+			if duration == allowed {
+				return nil
+			}
+		}
+		return fmt.Errorf("duration for model %s must be one of %v seconds", spec.Name, spec.ExactDurations)
+	}
+	if duration < spec.MinDuration || duration > spec.MaxDuration {
+		return fmt.Errorf("duration for model %s must be between %d and %d seconds", spec.Name, spec.MinDuration, spec.MaxDuration)
 	}
 	return nil
 }
 
-func validateResolution(spec seedanceSpecialSpec, fields map[string]any) error {
+func validateResolutionAndRatio(spec videosModelSpec, fields map[string]any) error {
 	resolution, ratio, err := requestResolutionAndRatio(fields)
 	if err != nil {
 		return err
 	}
-	expected := modelResolution(spec.Name)
-	if expected != "" && resolution != "" && resolution != expected {
-		return fmt.Errorf("model %s requires %s resolution", spec.Name, expected)
+	if resolution != "" && resolution != "720p" {
+		return fmt.Errorf("model %s only supports 720p resolution", spec.Name)
 	}
 	if ratio != "" {
-		allowed := ratio == "16:9" || ratio == "4:3" || ratio == "1:1" || ratio == "3:4" || ratio == "9:16" || ratio == "21:9" || ratio == "adaptive"
-		if !allowed {
-			return fmt.Errorf("model %s does not support ratio %q", spec.Name, ratio)
+		for _, allowed := range spec.AllowedRatios {
+			if ratio == allowed {
+				return nil
+			}
 		}
+		return fmt.Errorf("model %s does not support ratio %q", spec.Name, ratio)
 	}
 	return nil
 }
@@ -670,21 +661,6 @@ func requestResolutionAndRatio(fields map[string]any) (string, string, error) {
 		}
 	}
 	return resolution, ratio, nil
-}
-
-func modelResolution(modelName string) string {
-	switch {
-	case strings.Contains(modelName, "720p"):
-		return "720p"
-	case strings.Contains(modelName, "1080p"):
-		return "1080p"
-	case strings.Contains(modelName, "2k"):
-		return "2k"
-	case strings.Contains(modelName, "4k"):
-		return "4k"
-	default:
-		return ""
-	}
 }
 
 func apiBaseURL(rawURL string) (string, error) {
@@ -749,18 +725,14 @@ func hasContentArray(payload map[string]any) bool {
 	return ok
 }
 
-func hasLegacyEnvelope(payload map[string]any) bool {
-	_, hasInput := payload["input"]
-	_, hasParameters := payload["parameters"]
-	return hasInput || hasParameters
-}
-
 func firstFrameValue(fields map[string]any) string {
-	return firstString(
-		stringField(fields, "first_image"),
-		stringField(fields, "image"),
-		stringField(fields, "input_reference"),
-	)
+	if firstImage := stringField(fields, "first_image"); firstImage != "" {
+		return firstImage
+	}
+	if lastFrameValue(fields) == "" {
+		return ""
+	}
+	return firstString(stringField(fields, "image"), stringField(fields, "input_reference"))
 }
 
 func validateFrameAliasConsistency(fields map[string]any) error {
@@ -908,8 +880,8 @@ func normalizeVideoSize(size string) (resolution string, aspectRatio string, err
 	}
 }
 
-func materialLimitError(kind string, got, limit int) error {
-	return fmt.Errorf("GlobalAiOpc supports at most %d %s, got %d", limit, kind, got)
+func materialLimitError(modelName, kind string, got, limit int) error {
+	return fmt.Errorf("GlobalAiOpc model %s supports at most %d %s, got %d", modelName, limit, kind, got)
 }
 
 func frameImages(firstImage, lastImage string) []string {
@@ -1024,19 +996,4 @@ func firstString(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func copyWithoutKeys(object map[string]any, keys ...string) map[string]any {
-	ignored := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
-		ignored[key] = struct{}{}
-	}
-	copied := make(map[string]any, len(object))
-	for key, value := range object {
-		if _, skip := ignored[key]; skip {
-			continue
-		}
-		copied[key] = value
-	}
-	return copied
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -18,163 +19,157 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestValidateSpecialConstraintsAndMappedModels(t *testing.T) {
-	t.Run("mapped special model rejects video on non video-ref sku", func(t *testing.T) {
+func TestValidateVideosModelCapabilities(t *testing.T) {
+	t.Run("videos accepts documented material limits and wide ratio", func(t *testing.T) {
 		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"public-special",
-			"prompt":"p",
-			"videos":["v1"],
-			"duration":5
+			"model":"videos",
+			"prompt":"use every reference",
+			"duration":4,
+			"ratio":"21:9",
+			"referenceImages":["i1","i2","i3","i4","i5","i6","i7","i8","i9"],
+			"referenceVideos":["v1","v2","v3"],
+			"referenceAudios":["a1","a2","a3"]
 		}`)
-		c.Set("model_mapping", `{"public-special":"sd_2.0_special_720p"}`)
-
-		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
-		require.NotNil(t, taskErr)
-		assert.Equal(t, "invalid_request", taskErr.Code)
-	})
-
-	t.Run("mapped special with_video_ref requires video", func(t *testing.T) {
-		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"public-special",
-			"prompt":"p",
-			"images":["i1"],
-			"duration":5
-		}`)
-		c.Set("model_mapping", `{"public-special":"sd_2.0_fast_special_720p_with_video_ref"}`)
-
-		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
-		require.NotNil(t, taskErr)
-		assert.Equal(t, "invalid_request", taskErr.Code)
-	})
-
-	t.Run("special content requires text", func(t *testing.T) {
-		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"sd_2.0_special_720p",
-			"duration":5,
-			"content":[
-				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/1.png"}}
-			]
-		}`)
-
-		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
-		require.NotNil(t, taskErr)
-		assert.Equal(t, "invalid_request", taskErr.Code)
-	})
-
-	t.Run("special content last frame requires first frame", func(t *testing.T) {
-		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"sd_2.0_special_720p",
-			"duration":5,
-			"content":[
-				{"type":"text","text":"p"},
-				{"type":"image_url","role":"last_frame","image_url":{"url":"https://example.com/last.png"}}
-			]
-		}`)
-
-		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
-		require.NotNil(t, taskErr)
-		assert.Equal(t, "invalid_request", taskErr.Code)
-	})
-
-	t.Run("special audio requires image or video", func(t *testing.T) {
-		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"sd_2.0_special_720p",
-			"prompt":"p",
-			"audios":["a1"],
-			"duration":5
-		}`)
-
-		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
-		require.NotNil(t, taskErr)
-		assert.Equal(t, "invalid_request", taskErr.Code)
-	})
-
-	t.Run("special accepts mapped with_video_ref", func(t *testing.T) {
-		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"public-special",
-			"prompt":"p",
-			"images":["i1"],
-			"videos":["v1"],
-			"audios":["a1"],
-			"duration":5
-		}`)
-		c.Set("model_mapping", `{"public-special":"sd_2.0_fast_special_720p_with_video_ref"}`)
 
 		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
-		assert.Equal(t, "sd_2.0_fast_special_720p_with_video_ref", info.UpstreamModelName)
+		assert.Equal(t, constant.TaskActionReferenceGenerate, info.Action)
 	})
 
-	t.Run("special material boundary and overflow", func(t *testing.T) {
-		valid := `{
-			"model":"sd_2.0_special_720p_with_video_ref",
-			"prompt":"p",
-			"images":["1","2","3","4","5","6","7","8","9"],
-			"videos":["v1","v2","v3"],
-			"audios":["a1","a2","a3"],
-			"duration":5
-		}`
-		adaptor, c, info := prepareRequestWithoutValidation(t, valid)
-		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	t.Run("stable fast accepts its documented boundary", func(t *testing.T) {
+		adaptor, c, info := prepareRequestWithoutValidation(t, `{
+			"model":"videos_stable_fast",
+			"prompt":"use the references",
+			"duration":10,
+			"ratio":"1:1",
+			"referenceImages":["i1","i2","i3","i4"],
+			"referenceVideos":["v1","v2","v3"],
+			"referenceAudios":["a1"]
+		}`)
 
-		for _, body := range []string{
-			`{"model":"sd_2.0_special_720p","prompt":"p","images":["1","2","3","4","5","6","7","8","9","10"],"duration":5}`,
-			`{"model":"sd_2.0_special_720p_with_video_ref","prompt":"p","images":["1"],"videos":["1","2","3","4"],"duration":5}`,
-			`{"model":"sd_2.0_special_720p","prompt":"p","images":["1"],"audios":["1","2","3","4"],"duration":5}`,
-		} {
-			adaptor, c, info := prepareRequestWithoutValidation(t, body)
+		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+		assert.Equal(t, constant.TaskActionReferenceGenerate, info.Action)
+	})
+
+	for _, tc := range []struct {
+		name     string
+		body     string
+		wantCode string
+	}{
+		{
+			name:     "stable fast rejects unsupported duration",
+			body:     `{"model":"videos_stable_fast","prompt":"p","duration":5}`,
+			wantCode: "invalid_duration",
+		},
+		{
+			name:     "stable rejects duration over range",
+			body:     `{"model":"videos_stable","prompt":"p","duration":16}`,
+			wantCode: "invalid_duration",
+		},
+		{
+			name:     "duration is required",
+			body:     `{"model":"videos_stable","prompt":"p"}`,
+			wantCode: "invalid_duration",
+		},
+		{
+			name:     "stable rejects fifth image",
+			body:     `{"model":"videos_stable","prompt":"p","duration":5,"images":["1","2","3","4","5"]}`,
+			wantCode: "material_limit_exceeded",
+		},
+		{
+			name:     "stable rejects second audio",
+			body:     `{"model":"videos_stable","prompt":"p","duration":5,"audios":["1","2"]}`,
+			wantCode: "material_limit_exceeded",
+		},
+		{
+			name:     "pro rejects reference video",
+			body:     `{"model":"videos_pro","prompt":"p","duration":10,"videos":["1"]}`,
+			wantCode: "material_limit_exceeded",
+		},
+		{
+			name:     "pro audio requires reference image",
+			body:     `{"model":"videos_pro_fast","prompt":"p","duration":10,"audios":["1"]}`,
+			wantCode: "invalid_request",
+		},
+		{
+			name:     "videos only supports 720p",
+			body:     `{"model":"videos","prompt":"p","duration":5,"resolution":"1080p"}`,
+			wantCode: "invalid_size",
+		},
+		{
+			name:     "stable only supports documented ratios",
+			body:     `{"model":"videos_stable","prompt":"p","duration":5,"ratio":"4:3"}`,
+			wantCode: "invalid_size",
+		},
+		{
+			name:     "auto face is limited to videos",
+			body:     `{"model":"videos_stable","prompt":"p","duration":5,"autoFace":true}`,
+			wantCode: "invalid_request",
+		},
+		{
+			name:     "frame fields must be paired",
+			body:     `{"model":"videos_stable_fast","prompt":"p","duration":10,"first_image":"first"}`,
+			wantCode: "invalid_request",
+		},
+		{
+			name:     "frame mode excludes reference materials",
+			body:     `{"model":"videos_stable_fast","prompt":"p","duration":10,"image":"first","lastFrameImage":"last","images":["ref"]}`,
+			wantCode: "invalid_request",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			adaptor, c, info := prepareRequestWithoutValidation(t, tc.body)
+
 			taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
 			require.NotNil(t, taskErr)
-			assert.Equal(t, "material_limit_exceeded", taskErr.Code)
-		}
+			assert.Equal(t, tc.wantCode, taskErr.Code)
+			assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+			assert.True(t, taskErr.LocalError)
+		})
+	}
+
+	t.Run("pro accepts image and three audios", func(t *testing.T) {
+		adaptor, c, info := prepareRequestWithoutValidation(t, `{
+			"model":"videos_pro_fast",
+			"prompt":"use image and audio",
+			"duration":15,
+			"images":["i1"],
+			"audios":["a1","a2","a3"]
+		}`)
+
+		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
 	})
 
-	t.Run("special alias frames are mutually exclusive with references", func(t *testing.T) {
-		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"sd_2.0_special_720p",
-			"prompt":"p",
-			"image":"https://example.com/first.png",
-			"referenceImages":["https://example.com/ref.png"],
-			"duration":5
-		}`)
-		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
-		require.NotNil(t, taskErr)
-		assert.Equal(t, "invalid_request", taskErr.Code)
-	})
+	t.Run("stable prompt is limited to 5000 characters", func(t *testing.T) {
+		body := `{"model":"videos_stable","duration":5,"prompt":"` + strings.Repeat("a", 5001) + `"}`
+		adaptor, c, info := prepareRequestWithoutValidation(t, body)
 
-	t.Run("special explicit resolution must match model", func(t *testing.T) {
-		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"sd_2.0_special_1080p",
-			"prompt":"p",
-			"resolution":"720p",
-			"duration":5
-		}`)
 		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
 		require.NotNil(t, taskErr)
 		assert.Equal(t, "invalid_request", taskErr.Code)
+		assert.Contains(t, taskErr.Message, "5000")
 	})
 }
 
-func TestConfiguredModelMappingControlsUpstreamModelWithoutChangingSpecialRoute(t *testing.T) {
+func TestConfiguredModelMappingControlsVideosModel(t *testing.T) {
 	tests := []struct {
-		name        string
-		body        string
-		mapping     string
-		wantModel   string
-		wantURLPath string
+		name      string
+		body      string
+		mapping   string
+		wantModel string
 	}{
 		{
-			name:        "custom mapped model",
-			body:        `{"model":"public-seedance","prompt":"p","duration":5,"images":["https://example.com/1.jpg"]}`,
-			mapping:     `{"public-seedance":"managed-seedance","managed-seedance":"custom_upstream_model"}`,
-			wantModel:   "custom_upstream_model",
-			wantURLPath: "/v1/seedance-special/videos",
+			name:      "public stable fast alias",
+			body:      `{"model":"public-fast","prompt":"p","duration":10}`,
+			mapping:   `{"public-fast":"videos_stable_fast"}`,
+			wantModel: "videos_stable_fast",
 		},
 		{
-			name:        "documented special model through channel mapping",
-			body:        `{"model":"public-special","prompt":"p","duration":5,"images":["https://example.com/1.jpg"]}`,
-			mapping:     `{"public-special":"sd_2.1_special_custom"}`,
-			wantModel:   "sd_2.1_special_custom",
-			wantURLPath: "/v1/seedance-special/videos",
+			name:      "public pro alias",
+			body:      `{"model":"public-pro","prompt":"p","duration":15,"images":["i1"],"audios":["a1"]}`,
+			mapping:   `{"public-pro":"videos_pro"}`,
+			wantModel: "videos_pro",
 		},
 	}
 
@@ -188,7 +183,7 @@ func TestConfiguredModelMappingControlsUpstreamModelWithoutChangingSpecialRoute(
 
 			requestURL, err := adaptor.BuildRequestURL(info)
 			require.NoError(t, err)
-			assert.Equal(t, "https://provider.example"+tc.wantURLPath, requestURL)
+			assert.Equal(t, "https://provider.example/v1/videos/videos", requestURL)
 
 			payload := buildPayload(t, adaptor, c, info)
 			assert.Equal(t, tc.wantModel, payload["model"])
@@ -196,158 +191,153 @@ func TestConfiguredModelMappingControlsUpstreamModelWithoutChangingSpecialRoute(
 	}
 }
 
-func TestBuildRequestBodyNormalizesFlatSpecialRequest(t *testing.T) {
-	adaptor, c, info := prepareRequestWithoutValidation(t, `{
-		"model":"seedance-public",
-		"prompt":"first person fruit tea ad",
-		"input_reference":"https://example.com/first.jpg",
-		"last_frame_image":"https://example.com/last.jpg",
-		"aspect_ratio":"9:16",
-		"return_last_frame":true,
-		"generation_type":"compat"
-	}`)
-	c.Set("model_mapping", `{"seedance-public":"sd_2.0_fast_special_720p"}`)
-	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
-
-	payload := buildPayload(t, adaptor, c, info)
-
-	assert.Equal(t, "sd_2.0_fast_special_720p", payload["model"])
-	assert.Equal(t, "9:16", payload["ratio"])
-	assert.Equal(t, true, payload["return_last_frame"])
-	assert.NotContains(t, payload, "prompt")
-	assert.NotContains(t, payload, "first_image")
-	assert.NotContains(t, payload, "last_image")
-	assert.NotContains(t, payload, "image")
-	assert.NotContains(t, payload, "input_reference")
-	assert.NotContains(t, payload, "lastFrameImage")
-	assert.NotContains(t, payload, "last_frame_image")
-	assert.NotContains(t, payload, "aspect_ratio")
-	assert.NotContains(t, payload, "generation_type")
-
-	content, ok := payload["content"].([]any)
-	require.True(t, ok)
-	require.Len(t, content, 3)
-	assert.Equal(t, map[string]any{
-		"type": "text",
-		"text": "first person fruit tea ad",
-	}, content[0])
-	assert.Equal(t, map[string]any{
-		"type":      "image_url",
-		"role":      "first_frame",
-		"image_url": map[string]any{"url": "https://example.com/first.jpg"},
-	}, content[1])
-	assert.Equal(t, map[string]any{
-		"type":      "image_url",
-		"role":      "last_frame",
-		"image_url": map[string]any{"url": "https://example.com/last.jpg"},
-	}, content[2])
-}
-
-func TestBuildRequestBodyNormalizesReferenceMaterialsToDocumentedContent(t *testing.T) {
+func TestValidateRejectsUnsupportedMappedModel(t *testing.T) {
 	adaptor, c, info := prepareRequestWithoutValidation(t, `{
 		"model":"public-special",
-		"prompt":"use all references",
-		"images":["https://example.com/reference.jpg"],
-		"videos":["https://example.com/reference.mp4"],
-		"audios":["https://example.com/reference.mp3"],
-		"duration":5
-	}`)
-	c.Set("model_mapping", `{"public-special":"sd_2.0_special_720p_with_video_ref"}`)
-	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
-
-	payload := buildPayload(t, adaptor, c, info)
-
-	assert.Equal(t, "sd_2.0_special_720p_with_video_ref", payload["model"])
-	assert.Equal(t, []any{
-		map[string]any{"type": "text", "text": "use all references"},
-		map[string]any{"type": "image_url", "role": "reference_image", "image_url": map[string]any{"url": "https://example.com/reference.jpg"}},
-		map[string]any{"type": "video_url", "role": "reference_video", "video_url": map[string]any{"url": "https://example.com/reference.mp4"}},
-		map[string]any{"type": "audio_url", "role": "reference_audio", "audio_url": map[string]any{"url": "https://example.com/reference.mp3"}},
-	}, payload["content"])
-}
-
-func TestBuildRequestBodyPreservesNativeSpecialContent(t *testing.T) {
-	t.Run("content payload", func(t *testing.T) {
-		adaptor, c, info := prepareRequestWithoutValidation(t, `{
-			"model":"seedance-public",
-			"duration":5,
-			"content":[
-				{"type":"text","text":"真人口播广告"},
-				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/1.jpg"}}
-			]
-		}`)
-		c.Set("model_mapping", `{"seedance-public":"sd_2.0_special_720p"}`)
-		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
-
-		payload := buildPayload(t, adaptor, c, info)
-		assert.Equal(t, "sd_2.0_special_720p", payload["model"])
-		content, ok := payload["content"].([]any)
-		require.True(t, ok)
-		require.Len(t, content, 2)
-	})
-}
-
-func TestBuildRequestBodySanitizesNativeSpecialCompatibilityFields(t *testing.T) {
-	adaptor, c, info := prepareRequest(t, `{
-		"model":"sd_2.0_special_720p",
-		"prompt":"compatibility prompt must not leak",
-		"image":"https://example.com/compatibility.jpg",
-		"aspect_ratio":"9:16",
-		"seconds":5,
-		"callback_url":"https://example.com/callback",
-		"priority":"high",
-		"watermark":true,
-		"content":[{"type":"text","text":"native prompt"}]
-	}`)
-
-	payload := buildPayload(t, adaptor, c, info)
-
-	assert.Equal(t, "9:16", payload["ratio"])
-	assert.Equal(t, float64(5), payload["duration"])
-	assert.Equal(t, []any{map[string]any{"type": "text", "text": "native prompt"}}, payload["content"])
-	assert.NotContains(t, payload, "prompt")
-	assert.NotContains(t, payload, "image")
-	assert.NotContains(t, payload, "aspect_ratio")
-	assert.NotContains(t, payload, "seconds")
-	assert.NotContains(t, payload, "callback_url")
-	assert.NotContains(t, payload, "priority")
-	assert.NotContains(t, payload, "watermark")
-}
-
-func TestEstimateBillingUsesBaseNoop(t *testing.T) {
-	adaptor, c, info := prepareRequest(t, `{
-		"model":"sd_2.0_special_720p",
 		"prompt":"p",
 		"duration":10
 	}`)
-	require.Nil(t, adaptor.EstimateBilling(c, info))
+	c.Set("model_mapping", `{"public-special":"sd_2.0_fast_special_720p"}`)
+
+	taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "invalid_model", taskErr.Code)
+	assert.Contains(t, taskErr.Message, "configure model mapping")
 }
 
-func TestBuildRequestURLAndHeader(t *testing.T) {
-	t.Run("route is always seedance special", func(t *testing.T) {
-		adaptor := &TaskAdaptor{}
-		info := testRelayInfo("https://provider.example/v1/", "custom_upstream_model")
-		adaptor.Init(info)
-		got, err := adaptor.BuildRequestURL(info)
-		require.NoError(t, err)
-		assert.Equal(t, "https://provider.example/v1/seedance-special/videos", got)
-	})
+func TestBuildRequestBodyUsesVideosContractForFlatMultimodalRequest(t *testing.T) {
+	adaptor, c, info := prepareRequestWithoutValidation(t, `{
+		"model":"public-videos-fast",
+		"prompt":"Use image one, video one, and audio one",
+		"duration":10,
+		"size":"16:9",
+		"resolution":"720p",
+		"images":["https://example.com/reference.jpg"],
+		"videos":["https://example.com/reference.mp4"],
+		"audios":["https://example.com/reference.mp3"]
+	}`)
+	c.Set("model_mapping", `{"public-videos-fast":"videos_stable_fast"}`)
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
 
-	t.Run("route does not depend on relay model", func(t *testing.T) {
-		adaptor := &TaskAdaptor{baseURL: "https://provider.example"}
-		got, err := adaptor.BuildRequestURL(nil)
-		require.NoError(t, err)
-		assert.Equal(t, "https://provider.example/v1/seedance-special/videos", got)
-	})
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, "videos_stable_fast", payload["model"])
+	assert.Equal(t, "Use image one, video one, and audio one", payload["prompt"])
+	assert.Equal(t, float64(10), payload["duration"])
+	assert.Equal(t, "16:9", payload["ratio"])
+	assert.Equal(t, "720p", payload["resolution"])
+	assert.Equal(t, []any{"https://example.com/reference.jpg"}, payload["referenceImages"])
+	assert.Equal(t, []any{"https://example.com/reference.mp4"}, payload["referenceVideos"])
+	assert.Equal(t, []any{"https://example.com/reference.mp3"}, payload["referenceAudios"])
+	assert.NotContains(t, payload, "content")
+	assert.NotContains(t, payload, "images")
+	assert.NotContains(t, payload, "videos")
+	assert.NotContains(t, payload, "audios")
+}
+
+func TestBuildRequestBodyMapsVideosAliases(t *testing.T) {
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"videos",
+		"prompt":"map historical URL aliases",
+		"seconds":"8",
+		"aspect_ratio":"9:16",
+		"size":"720p",
+		"image_urls":["https://example.com/reference.jpg"],
+		"video_urls":["https://example.com/reference.mp4"],
+		"audio_urls":["https://example.com/reference.mp3"],
+		"autoFace":false
+	}`)
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, float64(8), payload["duration"])
+	assert.Equal(t, "9:16", payload["ratio"])
+	assert.Equal(t, "720p", payload["resolution"])
+	assert.Equal(t, []any{"https://example.com/reference.jpg"}, payload["referenceImages"])
+	assert.Equal(t, []any{"https://example.com/reference.mp4"}, payload["referenceVideos"])
+	assert.Equal(t, []any{"https://example.com/reference.mp3"}, payload["referenceAudios"])
+	assert.Equal(t, false, payload["autoFace"])
+	assert.NotContains(t, payload, "seconds")
+	assert.NotContains(t, payload, "aspect_ratio")
+	assert.NotContains(t, payload, "image_urls")
+	assert.NotContains(t, payload, "video_urls")
+	assert.NotContains(t, payload, "audio_urls")
+}
+
+func TestBuildRequestBodyMapsSinglePublicImage(t *testing.T) {
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"videos_stable_fast",
+		"prompt":"map the existing singular image field",
+		"duration":10,
+		"image":"https://example.com/reference.jpg"
+	}`)
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, []any{"https://example.com/reference.jpg"}, payload["referenceImages"])
+	assert.NotContains(t, payload, "first_image")
+	assert.NotContains(t, payload, "image")
+}
+
+func TestBuildRequestBodyMapsLegacyContentToVideosFields(t *testing.T) {
+	adaptor, c, info := prepareRequestWithoutValidation(t, `{
+		"model":"public-videos",
+		"duration":8,
+		"ratio":"9:16",
+		"content":[
+			{"type":"text","text":"Keep the subject and rhythm"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/reference.jpg"}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://example.com/reference.mp4"}},
+			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://example.com/reference.mp3"}}
+		]
+	}`)
+	c.Set("model_mapping", `{"public-videos":"videos"}`)
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, "videos", payload["model"])
+	assert.Equal(t, "Keep the subject and rhythm", payload["prompt"])
+	assert.Equal(t, []any{"https://example.com/reference.jpg"}, payload["referenceImages"])
+	assert.Equal(t, []any{"https://example.com/reference.mp4"}, payload["referenceVideos"])
+	assert.Equal(t, []any{"https://example.com/reference.mp3"}, payload["referenceAudios"])
+	assert.NotContains(t, payload, "content")
+}
+
+func TestBuildRequestBodyMapsFrameAliasesToVideosFields(t *testing.T) {
+	adaptor, c, info := prepareRequestWithoutValidation(t, `{
+		"model":"public-videos-fast",
+		"prompt":"Create a smooth transition",
+		"duration":10,
+		"image":"https://example.com/first.jpg",
+		"lastFrameImage":"https://example.com/last.jpg"
+	}`)
+	c.Set("model_mapping", `{"public-videos-fast":"videos_stable_fast"}`)
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, "https://example.com/first.jpg", payload["first_image"])
+	assert.Equal(t, "https://example.com/last.jpg", payload["last_image"])
+	assert.NotContains(t, payload, "image")
+	assert.NotContains(t, payload, "lastFrameImage")
+	assert.NotContains(t, payload, "content")
+}
+
+func TestBuildRequestHeaderAndURL(t *testing.T) {
+	adaptor := &TaskAdaptor{baseURL: "https://provider.example"}
+	got, err := adaptor.BuildRequestURL(nil)
+	require.NoError(t, err)
+	assert.Equal(t, "https://provider.example/v1/videos/videos", got)
 
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	req := httptest.NewRequest(http.MethodPost, "https://provider.example/v1/seedance-special/videos", nil)
-	info := testRelayInfo("https://provider.example", "sd_2.0_special_720p")
-	require.NoError(t, (&TaskAdaptor{}).BuildRequestHeader(c, req, info))
+	req := httptest.NewRequest(http.MethodPost, got, nil)
+	info := testRelayInfo("https://provider.example", "videos_stable_fast")
+	require.NoError(t, adaptor.BuildRequestHeader(c, req, info))
 	assert.Equal(t, "Bearer test-key", req.Header.Get("Authorization"))
 	assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
-	assert.Equal(t, "", req.Header.Get("X-MR-Async"))
 	assert.Equal(t, "task_public", req.Header.Get("Idempotency-Key"))
 }
 
@@ -356,20 +346,29 @@ func TestBuildRequestHeaderPreservesClientIdempotencyKeyAcrossAttempts(t *testin
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 	c.Request.Header.Set("Idempotency-Key", "client-request-123")
-	info := testRelayInfo("https://provider.example", "sd_2.0_special_720p")
+	info := testRelayInfo("https://provider.example", "videos_stable_fast")
 
 	for range 2 {
-		req := httptest.NewRequest(http.MethodPost, "https://provider.example/v1/seedance-special/videos", nil)
+		req := httptest.NewRequest(http.MethodPost, "https://provider.example/v1/videos/videos", nil)
 		require.NoError(t, (&TaskAdaptor{}).BuildRequestHeader(c, req, info))
 		assert.Equal(t, "client-request-123", req.Header.Get("Idempotency-Key"))
 	}
 }
 
+func TestEstimateBillingUsesBaseNoop(t *testing.T) {
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"videos_stable_fast",
+		"prompt":"p",
+		"duration":10
+	}`)
+
+	require.Nil(t, adaptor.EstimateBilling(c, info))
+}
+
 func TestDoRequestNormalizesAcceptedStatus(t *testing.T) {
 	service.InitHttpClient()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/v1/seedance-special/videos", r.URL.Path)
-		assert.Equal(t, "", r.Header.Get("X-MR-Async"))
+		assert.Equal(t, "/v1/videos/videos", r.URL.Path)
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(`{"id":"vendor_task"}`))
 	}))
@@ -378,11 +377,11 @@ func TestDoRequestNormalizesAcceptedStatus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
-	info := testRelayInfo(server.URL, "sd_2.0_special_720p")
+	info := testRelayInfo(server.URL, "videos_stable_fast")
 	adaptor := &TaskAdaptor{}
 	adaptor.Init(info)
 
-	resp, err := adaptor.DoRequest(c, info, strings.NewReader(`{"model":"sd_2.0_special_720p","content":[{"type":"text","text":"p"}],"duration":4}`))
+	resp, err := adaptor.DoRequest(c, info, strings.NewReader(`{"model":"videos_stable_fast","prompt":"p","duration":10}`))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -396,19 +395,19 @@ func TestDoResponseReadsFlatTaskIDAndHidesItFromClient(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body: io.NopCloser(strings.NewReader(`{
-			"id":"seedance_vendor_task_123",
+			"id":"videos_vendor_task_123",
 			"status":"queued"
 		}`)),
 	}
-	info := testRelayInfo("https://provider.example", "sd_2.0_special_720p")
+	info := testRelayInfo("https://provider.example", "videos_stable_fast")
 
 	taskID, taskData, taskErr := (&TaskAdaptor{}).DoResponse(c, resp, info)
 
 	require.Nil(t, taskErr)
-	assert.Equal(t, "seedance_vendor_task_123", taskID)
-	assert.Contains(t, string(taskData), "seedance_vendor_task_123")
+	assert.Equal(t, "videos_vendor_task_123", taskID)
+	assert.Contains(t, string(taskData), "videos_vendor_task_123")
 	assert.Contains(t, writer.Body.String(), `"id":"task_public"`)
-	assert.NotContains(t, writer.Body.String(), "seedance_vendor_task_123")
+	assert.NotContains(t, writer.Body.String(), "videos_vendor_task_123")
 }
 
 func TestDoResponseTreatsFailedStatusAsSubmitFailure(t *testing.T) {
@@ -418,17 +417,17 @@ func TestDoResponseTreatsFailedStatusAsSubmitFailure(t *testing.T) {
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body: io.NopCloser(strings.NewReader(`{
-			"id":"seedance_vendor_task_123",
+			"id":"videos_vendor_task_123",
 			"status":"failed",
 			"error":"provider rejected prompt"
 		}`)),
 	}
-	info := testRelayInfo("https://provider.example", "sd_2.0_special_720p")
+	info := testRelayInfo("https://provider.example", "videos_stable_fast")
 
 	taskID, taskData, taskErr := (&TaskAdaptor{}).DoResponse(c, resp, info)
 
 	require.NotNil(t, taskErr)
-	assert.Equal(t, "", taskID)
+	assert.Empty(t, taskID)
 	assert.Nil(t, taskData)
 	assert.Equal(t, "task_submit_failed", taskErr.Code)
 }
@@ -436,16 +435,16 @@ func TestDoResponseTreatsFailedStatusAsSubmitFailure(t *testing.T) {
 func TestFetchTaskUsesResultPath(t *testing.T) {
 	service.InitHttpClient()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/v1/result/seedance_vendor_task_123", r.URL.Path)
+		assert.Equal(t, "/v1/result/videos_vendor_task_123", r.URL.Path)
 		assert.Equal(t, "Bearer poll-key", r.Header.Get("Authorization"))
-		_, _ = w.Write([]byte(`{"id":"seedance_vendor_task_123","status":"processing"}`))
+		_, _ = w.Write([]byte(`{"id":"videos_vendor_task_123","status":"processing"}`))
 	}))
 	t.Cleanup(server.Close)
 
 	resp, err := (&TaskAdaptor{}).FetchTask(
 		server.URL+"/v1",
 		"poll-key",
-		map[string]any{"task_id": "seedance_vendor_task_123"},
+		map[string]any{"task_id": "videos_vendor_task_123"},
 		"",
 	)
 	require.NoError(t, err)
@@ -474,7 +473,13 @@ func TestParseTaskResultStatusesAndURLs(t *testing.T) {
 		})
 	}
 
-	got, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{"id":"t","status":"completed","video_url":"https://cdn.example/1.mp4"}`))
+	got, err := (&TaskAdaptor{}).ParseTaskResult([]byte(`{
+		"id":"t",
+		"status":"completed",
+		"video_url":"https://cdn.example/1.mp4",
+		"actualDuration":10,
+		"amount":5
+	}`))
 	require.NoError(t, err)
 	assert.Equal(t, string(model.TaskStatusSuccess), got.Status)
 	assert.Equal(t, "https://cdn.example/1.mp4", got.Url)
@@ -498,7 +503,7 @@ func TestConvertToOpenAIVideoUsesPersistedTaskState(t *testing.T) {
 		CreatedAt: 10,
 		UpdatedAt: 20,
 		Properties: model.Properties{
-			OriginModelName: "sd_2.0_special_720p",
+			OriginModelName: "public-videos-fast",
 		},
 		PrivateData: model.TaskPrivateData{ResultURL: "https://cdn.example/result.mp4"},
 	}
@@ -533,7 +538,7 @@ func prepareRequestWithoutValidation(t *testing.T, body string) (*TaskAdaptor, *
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	info := testRelayInfo("https://provider.example", "sd_2.0_special_720p")
+	info := testRelayInfo("https://provider.example", "videos_stable_fast")
 	adaptor := &TaskAdaptor{}
 	adaptor.Init(info)
 	return adaptor, c, info

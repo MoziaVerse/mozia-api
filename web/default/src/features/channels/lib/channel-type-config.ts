@@ -56,9 +56,9 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       baseUrl: 'Default: https://zcbservice.aizfw.cn/kyyReactApiServer',
       key: 'Globalaiopc 控制台分发的 API Key',
       models:
-        '模型列表填写你希望对外暴露的名称，并在渠道“模型映射”中自行映射到 Globalaiopc Seedance2.0 特价版完整模型编码（sd_2.0_*_special*）',
+        '模型列表填写对外名称，并在“模型映射”中映射到 Globalaiopc Videos 模型：videos、videos_stable、videos_stable_fast、videos_pro 或 videos_pro_fast',
       other:
-        '客户端统一调用 /v1/videos 或 /v1/video/generations；上游固定转发到 /v1/seedance-special/videos，查询固定使用 /v1/result/{id}；模型价格按次填写',
+        '客户端统一调用 /v1/videos 或 /v1/video/generations；上游提交使用 /v1/videos/videos，查询使用 /v1/result/{id}；支持图片、视频、音频参考素材映射，模型价格按次填写',
     },
   },
   201: {

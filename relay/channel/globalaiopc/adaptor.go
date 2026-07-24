@@ -12,15 +12,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Adaptor 适配 GlobalAiOpc Seedance2.0 特价版渠道。
+// Adaptor 适配 GlobalAiOpc Videos 系列异步视频渠道。
 //
 // 当前默认视频服务基址为 https://zcbservice.aizfw.cn/kyyReactApiServer，
-// 该地址已核实用于 Seedance-special 异步视频任务。非视频任务接口会在
+// 该地址已核实用于 Videos 异步视频任务。非视频任务接口会在
 // 本地拒绝，不会被误转发到上游。
 //
 // 默认视频任务由 TaskAdaptor 处理：
 //
-//	POST /v1/seedance-special/videos
+//	POST /v1/videos/videos
 //	GET  /v1/result/{task_id}
 var errTaskOnly = errors.New("Globalaiopc only supports video task endpoints; use /v1/videos or /v1/video/generations")
 
