@@ -89,7 +89,8 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       key: 'Cool API Key（sk- 前缀走自动扣费/退费）',
       models:
         '图片：gpt_image_2, midjourney_v7, flux_kontext_pro ...; 视频：seedance_2_fast, kling_3_omni, vidu_q3_pro ...',
-      other: 'Cool 是异步任务接口（提交 → 轮询），请通过 /v1/cool/* 路径调用',
+      other:
+        'Cool 走异步视频任务入口：提交使用 /v1/video/generations 或 /v1/videos，查询使用 GET /v1/video/generations/{task_id} 或 GET /v1/videos/{task_id}',
     },
   },
   203: {
