@@ -15,14 +15,24 @@ import (
 const (
 	ResellerErrorInvalidRequest      = "reseller_invalid_request"
 	ResellerErrorInvalidRequestID    = "reseller_invalid_request_id"
+	ResellerErrorConflict            = "reseller_conflict"
+	ResellerErrorNotFound            = "reseller_not_found"
 	ResellerErrorServiceUnauthorized = "reseller_service_unauthorized"
 	ResellerErrorContextNotFound     = "reseller_context_not_found"
 	ResellerErrorInternal            = "reseller_internal_error"
 )
 
 func ResellerServiceAuth() gin.HandlerFunc {
+	return resellerServiceAuthForEnv("MATRIX_RESELLER_SERVICE_TOKEN")
+}
+
+func ResellerAdminServiceAuth() gin.HandlerFunc {
+	return resellerServiceAuthForEnv("MOZIA_MEGA_SERVICE_TOKEN")
+}
+
+func resellerServiceAuthForEnv(envKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		expectedToken := os.Getenv("MATRIX_RESELLER_SERVICE_TOKEN")
+		expectedToken := os.Getenv(envKey)
 		authorizations := c.Request.Header.Values("Authorization")
 		authorization := ""
 		if len(authorizations) == 1 {
@@ -42,6 +52,8 @@ func ResellerServiceAuth() gin.HandlerFunc {
 		}
 		if len(requestIDs) == 1 {
 			setResellerRequestID(c, requestIDs[0])
+		} else {
+			setResellerRequestID(c, common.NewRequestId())
 		}
 		c.Next()
 	}
