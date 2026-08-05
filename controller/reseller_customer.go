@@ -1,0 +1,346 @@
+package controller
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strconv"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
+)
+
+const resellerManagementBodyLimit = 4 << 10
+
+type resellerCustomerStatusRequest struct {
+	Status     string          `json:"status"`
+	ResellerId json.RawMessage `json:"reseller_id"`
+}
+
+type resellerInvitationCreateRequest struct {
+	ExpiresInHours *int            `json:"expires_in_hours"`
+	ResellerId     json.RawMessage `json:"reseller_id"`
+}
+
+type resellerInvitationConsumeRequest struct {
+	Token      string          `json:"token"`
+	Subject    string          `json:"subject"`
+	ResellerId json.RawMessage `json:"reseller_id"`
+}
+
+type resellerCustomerTransferRequest struct {
+	TargetResellerId int `json:"target_reseller_id"`
+}
+
+func GetResellerManagementProfile(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	permissions, knownRole := resellerRolePermissions[resellerContext.Role]
+	if !knownRole {
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorContextNotFound, "reseller context not found")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
+		"reseller_id":   resellerContext.ResellerId,
+		"reseller_name": resellerContext.ResellerName,
+		"host":          resellerContext.Host,
+		"subject":       resellerContext.Subject,
+		"role":          resellerContext.Role,
+		"permissions":   permissions,
+	})
+}
+
+func ListResellerManagementMembers(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	records, err := model.ListResellerMemberRecords(resellerContext.ResellerId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "ListResellerMemberRecords database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, records)
+}
+
+func ListResellerManagementCustomers(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	records, err := model.ListResellerCustomerRecords(resellerContext.ResellerId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "ListResellerCustomerRecords database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, records)
+}
+
+func GetResellerManagementCustomer(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	customerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	record, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId)
+	if errors.Is(err, model.ErrResellerCustomerNotFound) {
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+		return
+	}
+	if err != nil {
+		logger.LogError(c.Request.Context(), "GetResellerCustomerRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, record)
+}
+
+func UpdateResellerManagementCustomerStatus(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if !resellerManagementWriteAllowed(resellerContext.Role) {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
+		return
+	}
+	customerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerCustomerStatusRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	record, err := model.UpdateResellerCustomerRecordStatus(resellerContext.ResellerId, customerId, request.Status)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrInvalidResellerCustomerStatus):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	case errors.Is(err, model.ErrResellerCustomerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerCustomerRecordStatus database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func ListResellerManagementInvitations(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	records, err := model.ListResellerInvitationRecords(resellerContext.ResellerId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "ListResellerInvitationRecords database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, records)
+}
+
+func CreateResellerManagementInvitation(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if !resellerManagementWriteAllowed(resellerContext.Role) {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerInvitationCreateRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	expiresInHours := 72
+	if request.ExpiresInHours != nil {
+		expiresInHours = *request.ExpiresInHours
+	}
+	record, err := model.CreateResellerInvitationRecord(resellerContext.ResellerId, resellerContext.Subject, expiresInHours)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusCreated, record)
+	case errors.Is(err, model.ErrInvalidResellerInvitation), errors.Is(err, model.ErrInvalidResellerSubject):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	case errors.Is(err, model.ErrResellerConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "duplicate reseller invitation")
+	default:
+		logger.LogError(c.Request.Context(), "CreateResellerInvitationRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func RevokeResellerManagementInvitation(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if !resellerManagementWriteAllowed(resellerContext.Role) {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
+		return
+	}
+	invitationId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	record, err := model.RevokeResellerInvitationRecord(resellerContext.ResellerId, invitationId)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrResellerInvitationNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller invitation not found")
+	case errors.Is(err, model.ErrResellerInvitationExpired):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorInvitationExpired, "reseller invitation expired")
+	case errors.Is(err, model.ErrResellerInvitationRevoked):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorInvitationRevoked, "reseller invitation revoked")
+	case errors.Is(err, model.ErrResellerInvitationConsumed):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorInvitationConsumed, "reseller invitation consumed")
+	default:
+		logger.LogError(c.Request.Context(), "RevokeResellerInvitationRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func ConsumeResellerRegistrationInvitation(c *gin.Context) {
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerInvitationConsumeRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	record, err := model.ConsumeResellerInvitationRecord(request.Token, request.Subject)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusCreated, record)
+	case errors.Is(err, model.ErrInvalidResellerInvitation):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	case errors.Is(err, model.ErrResellerInvitationNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller invitation not found")
+	case errors.Is(err, model.ErrResellerInvitationExpired):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorInvitationExpired, "reseller invitation expired")
+	case errors.Is(err, model.ErrResellerInvitationRevoked):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorInvitationRevoked, "reseller invitation revoked")
+	case errors.Is(err, model.ErrResellerInvitationConsumed):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorInvitationConsumed, "reseller invitation consumed")
+	case errors.Is(err, model.ErrResellerCustomerConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller customer already assigned")
+	case errors.Is(err, model.ErrResellerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
+	default:
+		logger.LogError(c.Request.Context(), "ConsumeResellerInvitationRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func ListResellerAdminCustomers(c *gin.Context) {
+	resellerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	if _, err := model.GetResellerAdminRecord(resellerId); errors.Is(err, model.ErrResellerNotFound) {
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
+		return
+	} else if err != nil {
+		logger.LogError(c.Request.Context(), "GetResellerAdminRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	records, err := model.ListResellerCustomerRecords(resellerId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "ListResellerCustomerRecords database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, records)
+}
+
+func TransferResellerAdminCustomer(c *gin.Context) {
+	customerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerCustomerTransferRequest
+	if common.Unmarshal(body, &request) != nil || request.TargetResellerId < 1 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	record, err := model.TransferResellerCustomerRecord(customerId, request.TargetResellerId)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrResellerCustomerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+	case errors.Is(err, model.ErrResellerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
+	case errors.Is(err, model.ErrResellerCustomerConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller customer already assigned to target reseller")
+	default:
+		logger.LogError(c.Request.Context(), "TransferResellerCustomerRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func resellerManagementContext(c *gin.Context) (*model.ResellerContext, bool) {
+	resellerContext, ok := middleware.GetResellerContext(c)
+	if !ok {
+		logger.LogError(c.Request.Context(), "missing reseller management context")
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return nil, false
+	}
+	if _, knownRole := resellerRolePermissions[resellerContext.Role]; !knownRole {
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorContextNotFound, "reseller context not found")
+		return nil, false
+	}
+	return resellerContext, true
+}
+
+func resellerManagementWriteAllowed(role string) bool {
+	return role == model.ResellerRoleOwner || role == model.ResellerRoleAdmin
+}
+
+func resellerRequestBody(c *gin.Context, limit int64) ([]byte, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, limit))
+	if err != nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return nil, false
+	}
+	return body, true
+}
+
+func positivePathID(c *gin.Context) (int, bool) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id < 1 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return 0, false
+	}
+	return id, true
+}
