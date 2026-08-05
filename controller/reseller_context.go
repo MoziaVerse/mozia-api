@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -32,7 +31,7 @@ type resellerContextRequest struct {
 func GetResellerContext(c *gin.Context) {
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerContextBodyLimit))
 	var request resellerContextRequest
-	if err != nil || common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || !validResellerSubject(request.Subject) {
+	if err != nil || common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || !model.ValidResellerSubject(request.Subject) {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
@@ -70,16 +69,4 @@ func GetResellerContext(c *gin.Context) {
 		},
 		"request_id": c.GetString(common.RequestIdKey),
 	})
-}
-
-func validResellerSubject(subject string) bool {
-	if subject == "" || len(subject) > 255 || strings.TrimSpace(subject) != subject {
-		return false
-	}
-	for _, character := range subject {
-		if character < 0x20 || character == 0x7f {
-			return false
-		}
-	}
-	return true
 }
