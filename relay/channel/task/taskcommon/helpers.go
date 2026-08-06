@@ -1,14 +1,22 @@
 package taskcommon
 
 import (
+	"crypto/hmac"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"net/url"
+	"path"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 // UnmarshalMetadata converts a map[string]any metadata to a typed struct via JSON round-trip.
@@ -64,6 +72,80 @@ func DecodeLocalTaskID(id string) (string, error) {
 // e.g., "https://your-server.com/v1/videos/task_xxxx/content"
 func BuildProxyURL(taskID string) string {
 	return fmt.Sprintf("%s/v1/videos/%s/content", system_setting.ServerAddress, taskID)
+}
+
+const SignedVideoURLTTL = 15 * time.Minute
+
+var (
+	ErrSignedVideoExpired          = errors.New("signed video url expired")
+	ErrSignedVideoInvalidSignature = errors.New("invalid signed video url signature")
+)
+
+func SanitizeVideoFilename(filename, taskID string) string {
+	filename = strings.TrimSpace(filename)
+	filename = strings.ReplaceAll(filename, "\\", "/")
+	filename = strings.TrimSpace(path.Base(filename))
+	if filename == "" || filename == "." || filename == ".." || filename == "/" {
+		taskID = strings.TrimSpace(taskID)
+		taskID = strings.TrimSpace(path.Base(strings.ReplaceAll(taskID, "\\", "/")))
+		if taskID == "" || taskID == "." || taskID == ".." || taskID == "/" {
+			taskID = "video"
+		}
+		return taskID + ".mp4"
+	}
+	if path.Ext(filename) == "" {
+		filename += ".mp4"
+	}
+	return filename
+}
+
+func TaskVideoFilename(task *model.Task) string {
+	if task == nil {
+		return SanitizeVideoFilename("", "")
+	}
+	return SanitizeVideoFilename(gjson.GetBytes(task.Data, "output.filename").String(), task.TaskID)
+}
+
+func BuildSignedVideoProxyURL(userID int, taskID, filename string) string {
+	return BuildSignedVideoProxyURLAt(time.Now(), userID, taskID, filename)
+}
+
+func BuildSignedVideoProxyURLAt(now time.Time, userID int, taskID, filename string) string {
+	filename = SanitizeVideoFilename(filename, taskID)
+	expires := now.Add(SignedVideoURLTTL).Unix()
+	signature := signedVideoSignature(userID, taskID, filename, expires)
+	values := url.Values{}
+	values.Set("uid", strconv.Itoa(userID))
+	values.Set("expires", strconv.FormatInt(expires, 10))
+	values.Set("signature", signature)
+	return fmt.Sprintf("%s/v1/videos/%s/content/%s?%s",
+		strings.TrimRight(system_setting.ServerAddress, "/"),
+		url.PathEscape(taskID),
+		url.PathEscape(filename),
+		values.Encode(),
+	)
+}
+
+func VerifySignedVideoProxy(userID int, taskID, filename string, expires int64, signature string, now time.Time) error {
+	if now.Unix() > expires {
+		return ErrSignedVideoExpired
+	}
+	expected := signedVideoSignature(userID, taskID, SanitizeVideoFilename(filename, taskID), expires)
+	if !hmac.Equal([]byte(signature), []byte(expected)) {
+		return ErrSignedVideoInvalidSignature
+	}
+	return nil
+}
+
+func signedVideoSignature(userID int, taskID, filename string, expires int64) string {
+	payload := strings.Join([]string{
+		"video-download:v1",
+		strconv.Itoa(userID),
+		taskID,
+		filename,
+		strconv.FormatInt(expires, 10),
+	}, "\n")
+	return common.GenerateHMAC(payload)
 }
 
 // Status-to-progress mapping constants for polling updates.

@@ -3,10 +3,13 @@ package controller
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
@@ -31,12 +35,58 @@ func videoProxyError(c *gin.Context, status int, errType, message string) {
 }
 
 func VideoProxy(c *gin.Context) {
+	serveVideoProxy(c, "")
+}
+
+func SignedVideoProxy(c *gin.Context) {
+	userID, filename, ok := verifySignedVideoProxyRequest(c)
+	if !ok {
+		return
+	}
+	c.Set("id", userID)
+	serveVideoProxy(c, filename)
+}
+
+func verifySignedVideoProxyRequest(c *gin.Context) (int, string, bool) {
 	taskID := c.Param("task_id")
 	if taskID == "" {
 		videoProxyError(c, http.StatusBadRequest, "invalid_request_error", "task_id is required")
-		return
+		return 0, "", false
 	}
+	filename := taskcommon.SanitizeVideoFilename(c.Param("filename"), taskID)
+	userID, err := strconv.Atoi(strings.TrimSpace(c.Query("uid")))
+	if err != nil || userID <= 0 {
+		videoProxyError(c, http.StatusBadRequest, "invalid_request_error", "uid is required")
+		return 0, "", false
+	}
+	expires, err := strconv.ParseInt(strings.TrimSpace(c.Query("expires")), 10, 64)
+	if err != nil || expires <= 0 {
+		videoProxyError(c, http.StatusBadRequest, "invalid_request_error", "expires is required")
+		return 0, "", false
+	}
+	now := time.Now()
+	if now.Unix() > expires {
+		videoProxyError(c, http.StatusForbidden, "permission_error", "Signature expired")
+		return 0, "", false
+	}
+	signature := strings.TrimSpace(c.Query("signature"))
+	if signature == "" {
+		videoProxyError(c, http.StatusBadRequest, "invalid_request_error", "signature is required")
+		return 0, "", false
+	}
+	if err := taskcommon.VerifySignedVideoProxy(userID, taskID, filename, expires, signature, now); err != nil {
+		if errors.Is(err, taskcommon.ErrSignedVideoExpired) {
+			videoProxyError(c, http.StatusForbidden, "permission_error", "Signature expired")
+		} else {
+			videoProxyError(c, http.StatusForbidden, "permission_error", "Invalid signature")
+		}
+		return 0, "", false
+	}
+	return userID, filename, true
+}
 
+func serveVideoProxy(c *gin.Context, attachmentFilename string) {
+	taskID := c.Param("task_id")
 	userID := c.GetInt("id")
 	task, exists, err := model.GetByTaskId(userID, taskID)
 	if err != nil {
@@ -128,7 +178,7 @@ func VideoProxy(c *gin.Context) {
 	}
 
 	if strings.HasPrefix(videoURL, "data:") {
-		if err := writeVideoDataURL(c, videoURL); err != nil {
+		if err := writeVideoDataURL(c, videoURL, attachmentFilename); err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to decode video data URL for task %s: %s", taskID, err.Error()))
 			videoProxyError(c, http.StatusBadGateway, "server_error", "Failed to fetch video content")
 		}
@@ -165,12 +215,26 @@ func VideoProxy(c *gin.Context) {
 	}
 
 	for key, values := range resp.Header {
+		if attachmentFilename != "" {
+			switch http.CanonicalHeaderKey(key) {
+			case "Accept-Ranges", "Content-Encoding", "Content-Length", "Content-Range", "Content-Type", "Etag", "Last-Modified":
+			default:
+				continue
+			}
+		}
 		for _, value := range values {
 			c.Writer.Header().Add(key, value)
 		}
 	}
 
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	if attachmentFilename != "" {
+		c.Writer.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
+			"filename": attachmentFilename,
+		}))
+		c.Writer.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", int(taskcommon.SignedVideoURLTTL/time.Second)))
+	} else {
+		c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	}
 	c.Writer.WriteHeader(resp.StatusCode)
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
@@ -196,7 +260,7 @@ func resolveMoziaVideoContentURL(channelType int, baseURL string, task *model.Ta
 	return baseURL + resourcePath + url.PathEscape(task.GetUpstreamTaskID()) + "/content", true
 }
 
-func writeVideoDataURL(c *gin.Context, dataURL string) error {
+func writeVideoDataURL(c *gin.Context, dataURL, attachmentFilename string) error {
 	parts := strings.SplitN(dataURL, ",", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("invalid data url")
@@ -223,7 +287,14 @@ func writeVideoDataURL(c *gin.Context, dataURL string) error {
 	}
 
 	c.Writer.Header().Set("Content-Type", mimeType)
-	c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	if attachmentFilename != "" {
+		c.Writer.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
+			"filename": attachmentFilename,
+		}))
+		c.Writer.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d", int(taskcommon.SignedVideoURLTTL/time.Second)))
+	} else {
+		c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
+	}
 	c.Writer.WriteHeader(http.StatusOK)
 	_, err = c.Writer.Write(videoBytes)
 	return err
