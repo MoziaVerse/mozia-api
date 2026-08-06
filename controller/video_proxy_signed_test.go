@@ -91,6 +91,78 @@ func TestSignedVideoProxyStreamsAttachment(t *testing.T) {
 	assert.Equal(t, "private, max-age=86400", dataRecorder.Header().Get("Cache-Control"))
 }
 
+func TestSignedVideoProxyAllowsConfiguredChannelOriginOnly(t *testing.T) {
+	prepareVideoProxyTestDB(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/videos/upstream-port-task/content", r.URL.Path)
+		assert.Equal(t, "Bearer provider-key", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte("video-bytes"))
+	}))
+	defer upstream.Close()
+
+	baseURL := upstream.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      1001,
+		Type:    constant.ChannelTypeMoziaSeedanceVideos,
+		Key:     "provider-key",
+		BaseURL: &baseURL,
+	}).Error)
+	for _, task := range []*model.Task{
+		{
+			TaskID:    "task_channel_port",
+			UserId:    84,
+			ChannelId: 1001,
+			Status:    model.TaskStatusSuccess,
+			PrivateData: model.TaskPrivateData{
+				UpstreamTaskID: "upstream-port-task",
+			},
+		},
+		{
+			TaskID:    "task_result_port",
+			UserId:    84,
+			ChannelId: 1001,
+			Status:    model.TaskStatusSuccess,
+			PrivateData: model.TaskPrivateData{
+				ResultURL: upstream.URL + "/untrusted.mp4",
+			},
+		},
+	} {
+		require.NoError(t, model.DB.Create(task).Error)
+	}
+
+	fetchSetting := system_setting.GetFetchSetting()
+	originalFetchSetting := *fetchSetting
+	fetchSetting.EnableSSRFProtection = true
+	fetchSetting.AllowPrivateIp = false
+	fetchSetting.DomainFilterMode = false
+	fetchSetting.IpFilterMode = false
+	fetchSetting.DomainList = nil
+	fetchSetting.IpList = nil
+	fetchSetting.AllowedPorts = []string{"443"}
+	t.Cleanup(func() { *fetchSetting = originalFetchSetting })
+	service.InitHttpClient()
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/v1/videos/:task_id/content/:filename", SignedVideoProxy)
+	now := time.Now()
+
+	channelURL := taskcommon.BuildSignedVideoProxyURLAt(now, 84, "task_channel_port", "clip.mp4")
+	channelRequest := httptest.NewRequest(http.MethodGet, mustRequestURI(t, channelURL), nil)
+	channelRecorder := httptest.NewRecorder()
+	r.ServeHTTP(channelRecorder, channelRequest)
+	assert.Equal(t, http.StatusOK, channelRecorder.Code)
+	assert.Equal(t, "video-bytes", channelRecorder.Body.String())
+
+	resultURL := taskcommon.BuildSignedVideoProxyURLAt(now, 84, "task_result_port", "clip.mp4")
+	resultRequest := httptest.NewRequest(http.MethodGet, mustRequestURI(t, resultURL), nil)
+	resultRecorder := httptest.NewRecorder()
+	r.ServeHTTP(resultRecorder, resultRequest)
+	assert.Equal(t, http.StatusForbidden, resultRecorder.Code)
+	assert.Contains(t, resultRecorder.Body.String(), "port ")
+	assert.Contains(t, resultRecorder.Body.String(), "is not allowed")
+}
+
 func TestSignedVideoProxyRejectsExpiredAndTamperedURLs(t *testing.T) {
 	r := buildVideoProxyTestRouter(t)
 	now := time.Now()

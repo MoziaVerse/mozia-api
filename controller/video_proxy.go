@@ -114,6 +114,7 @@ func serveVideoProxy(c *gin.Context, attachmentFilename string) {
 	baseURL := strings.TrimSpace(channel.GetBaseURL())
 
 	var videoURL string
+	videoURLFromChannelBase := false
 	proxy := channel.GetSetting().Proxy
 	client, err := service.GetHttpClientWithProxy(proxy)
 	if err != nil {
@@ -160,9 +161,8 @@ func serveVideoProxy(c *gin.Context, attachmentFilename string) {
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
 	case constant.ChannelTypeMoziaSeedanceGen, constant.ChannelTypeMoziaSeedanceVideos:
-		shouldAuthorize := false
-		videoURL, shouldAuthorize = resolveMoziaVideoContentURL(channel.Type, baseURL, task)
-		if shouldAuthorize {
+		videoURL, videoURLFromChannelBase = resolveMoziaVideoContentURL(channel.Type, baseURL, task)
+		if videoURLFromChannelBase {
 			req.Header.Set("Authorization", "Bearer "+channel.Key)
 		}
 	default:
@@ -186,7 +186,14 @@ func serveVideoProxy(c *gin.Context, attachmentFilename string) {
 	}
 
 	fetchSetting := system_setting.GetFetchSetting()
-	if err := common.ValidateURLWithFetchSetting(videoURL, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+	allowedPorts := fetchSetting.AllowedPorts
+	allowPrivateIP := fetchSetting.AllowPrivateIp || videoURLFromChannelBase
+	if videoURLFromChannelBase {
+		if parsedURL, parseErr := url.Parse(videoURL); parseErr == nil && parsedURL.Port() != "" {
+			allowedPorts = append(append([]string(nil), allowedPorts...), parsedURL.Port())
+		}
+	}
+	if err := common.ValidateURLWithFetchSetting(videoURL, fetchSetting.EnableSSRFProtection, allowPrivateIP, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, allowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Video URL blocked for task %s: %v", taskID, err))
 		videoProxyError(c, http.StatusForbidden, "server_error", fmt.Sprintf("request blocked: %v", err))
 		return
