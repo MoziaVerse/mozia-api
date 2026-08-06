@@ -327,5 +327,16 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
 		return nil, errors.Wrap(err, "set id failed")
 	}
+	if data, err = sjson.SetBytes(data, "task_id", task.TaskID); err != nil {
+		return nil, errors.Wrap(err, "set task_id failed")
+	}
+	if resultURL := task.GetResultURL(); task.Status == model.TaskStatusSuccess && resultURL != "" {
+		if data, err = sjson.SetBytes(data, "content_url", resultURL); err != nil {
+			return nil, errors.Wrap(err, "set content_url failed")
+		}
+		if data, err = sjson.SetBytes(data, "metadata.url", resultURL); err != nil {
+			return nil, errors.Wrap(err, "set metadata url failed")
+		}
+	}
 	return data, nil
 }
