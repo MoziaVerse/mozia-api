@@ -1,5 +1,5 @@
 package seedance
 
 const (
-	channelName = "seedance-compatible"
+	channelName = "seedance-compatible-gen"
 )

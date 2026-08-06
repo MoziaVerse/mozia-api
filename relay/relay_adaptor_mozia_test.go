@@ -25,3 +25,18 @@ func TestGlobalaiopcChannelRegistration(t *testing.T) {
 	require.NotNil(t, taskAdaptor)
 	assert.Equal(t, "globalaiopc", taskAdaptor.GetChannelName())
 }
+
+func TestSeedanceCompatibleChannelRegistration(t *testing.T) {
+	assert.Equal(t, "SeedanceCompatible-Gen", constant.ChannelTypeNames[constant.ChannelTypeMoziaSeedanceGen])
+	assert.Equal(t, "SeedanceCompatible-Videos", constant.ChannelTypeNames[constant.ChannelTypeMoziaSeedanceVideos])
+	require.Greater(t, len(constant.ChannelBaseURLs), constant.ChannelTypeMoziaSeedanceVideos)
+
+	seedanceAdaptor := GetMoziaTaskAdaptor(constant.ChannelTypeMoziaSeedanceGen)
+	require.NotNil(t, seedanceAdaptor)
+	assert.Equal(t, "seedance-compatible-gen", seedanceAdaptor.GetChannelName())
+
+	videosAdaptor := GetMoziaTaskAdaptor(constant.ChannelTypeMoziaSeedanceVideos)
+	require.NotNil(t, videosAdaptor)
+	assert.Equal(t, "seedance-compatible-videos", videosAdaptor.GetChannelName())
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("204")))
+}

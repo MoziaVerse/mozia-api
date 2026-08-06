@@ -110,6 +110,50 @@ func TestBuildRequestURLAcceptsRootOrV1BaseURL(t *testing.T) {
 	}
 }
 
+func TestSeedanceVideosBuildRequestURLUsesVideosResource(t *testing.T) {
+	for _, baseURL := range []string{"https://provider.example", "https://provider.example/v1/"} {
+		t.Run(baseURL, func(t *testing.T) {
+			adaptor := NewSeedanceVideosTaskAdaptor()
+			adaptor.Init(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: baseURL}})
+
+			got, err := adaptor.BuildRequestURL(nil)
+
+			require.NoError(t, err)
+			assert.Equal(t, "https://provider.example/v1/videos", got)
+			assert.Equal(t, "seedance-compatible-videos", adaptor.GetChannelName())
+		})
+	}
+}
+
+func TestTaskAdaptorsPollTheirConfiguredResource(t *testing.T) {
+	tests := []struct {
+		name    string
+		adaptor *TaskAdaptor
+		want    string
+	}{
+		{name: "seedance compatible", adaptor: &TaskAdaptor{}, want: "/v1/video/generations/upstream-task"},
+		{name: "seedance compatible videos", adaptor: NewSeedanceVideosTaskAdaptor(), want: "/v1/videos/upstream-task"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			service.InitHttpClient()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, tc.want, r.URL.Path)
+				assert.Equal(t, "Bearer masked-key", r.Header.Get("Authorization"))
+				_, _ = w.Write([]byte(`{"status":"running"}`))
+			}))
+			t.Cleanup(server.Close)
+			tc.adaptor.Init(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: server.URL}})
+
+			resp, err := tc.adaptor.FetchTask(server.URL+"/v1", "masked-key", map[string]any{"task_id": "upstream-task"}, "")
+
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+			_ = resp.Body.Close()
+		})
+	}
+}
+
 func TestBuildRequestHeaderUsesStablePublicTaskID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -220,6 +264,29 @@ func TestParseTaskResultSupportsCommonSuccessURLShapes(t *testing.T) {
 			assert.Equal(t, "https://cdn.example/result.mp4", got.Url)
 		})
 	}
+}
+
+func TestParseTaskResultAllowsContentEndpointFallback(t *testing.T) {
+	tests := []string{
+		`{"id":"upstream-task","status":"completed"}`,
+		`{"id":"upstream-task","status":"completed","output":{"filename":"result.mp4","subfolder":"","type":"output"}}`,
+	}
+	for _, body := range tests {
+		t.Run(body, func(t *testing.T) {
+			got, err := NewSeedanceVideosTaskAdaptor().ParseTaskResult([]byte(body))
+
+			require.NoError(t, err)
+			assert.Equal(t, string(model.TaskStatusSuccess), got.Status)
+			assert.Equal(t, "upstream-task", got.TaskID)
+			assert.Empty(t, got.Url)
+		})
+	}
+}
+
+func TestSeedanceVideosBillingMatchesSeedanceGen(t *testing.T) {
+	seedanceAdaptor, c, info := prepareRequest(t, `{"model":"video-1","prompt":"hello","duration":5}`)
+
+	assert.Equal(t, seedanceAdaptor.EstimateBilling(c, info), NewSeedanceVideosTaskAdaptor().EstimateBilling(c, info))
 }
 
 func TestParseTaskResultTreatsTerminalErrorsAsFailure(t *testing.T) {

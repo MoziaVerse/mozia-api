@@ -16,11 +16,12 @@ func TestConvertToOpenAIVideoSeparatesSuccessURLAndFailureReason(t *testing.T) {
 		task.Properties.OriginModelName = "public-model"
 		task.PrivateData.ResultURL = "https://cdn.example/result.mp4"
 
-		data, err := (&TaskAdaptor{}).ConvertToOpenAIVideo(task)
+		data, err := NewSeedanceVideosTaskAdaptor().ConvertToOpenAIVideo(task)
 		require.NoError(t, err)
 		var video dto.OpenAIVideo
 		require.NoError(t, common.Unmarshal(data, &video))
 		assert.Equal(t, dto.VideoStatusCompleted, video.Status)
+		assert.Equal(t, "https://cdn.example/result.mp4", video.ContentURL)
 		assert.Equal(t, "https://cdn.example/result.mp4", video.Metadata["url"])
 		assert.Nil(t, video.Error)
 	})

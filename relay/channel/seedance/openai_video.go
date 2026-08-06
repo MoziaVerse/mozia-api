@@ -19,6 +19,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	switch originTask.Status {
 	case model.TaskStatusSuccess:
 		if resultURL := originTask.GetResultURL(); resultURL != "" {
+			video.ContentURL = resultURL
 			video.SetMetadata("url", resultURL)
 		}
 	case model.TaskStatusFailure:

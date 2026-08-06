@@ -37,7 +37,12 @@ export const CHANNEL_OPTIONS = [
   {
     value: 203,
     color: 'cyan',
-    label: 'Seedance 2.0 Compatible（异步视频）',
+    label: 'SeedanceCompatible-Gen（异步视频）',
+  },
+  {
+    value: 204,
+    color: 'teal',
+    label: 'SeedanceCompatible-Videos（异步视频）',
   },
   { value: 1, color: 'green', label: 'OpenAI' },
   {

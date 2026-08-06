@@ -35,18 +35,19 @@ type resultItem struct {
 }
 
 type taskStatusResponse struct {
-	TaskID   string            `json:"task_id"`
-	Status   string            `json:"status"`
-	Progress *int              `json:"progress,omitempty"`
-	Result   *taskResult       `json:"result,omitempty"`
-	Data     []resultItem      `json:"data,omitempty"`
-	Output   []json.RawMessage `json:"output,omitempty"`
-	Video    *resultItem       `json:"video,omitempty"`
-	URL      string            `json:"url,omitempty"`
-	VideoURL string            `json:"video_url,omitempty"`
-	Message  string            `json:"message,omitempty"`
-	Reason   string            `json:"reason,omitempty"`
-	Error    json.RawMessage   `json:"error,omitempty"`
+	TaskID   string          `json:"task_id"`
+	ID       string          `json:"id"`
+	Status   string          `json:"status"`
+	Progress *int            `json:"progress,omitempty"`
+	Result   *taskResult     `json:"result,omitempty"`
+	Data     []resultItem    `json:"data,omitempty"`
+	Output   json.RawMessage `json:"output,omitempty"`
+	Video    *resultItem     `json:"video,omitempty"`
+	URL      string          `json:"url,omitempty"`
+	VideoURL string          `json:"video_url,omitempty"`
+	Message  string          `json:"message,omitempty"`
+	Reason   string          `json:"reason,omitempty"`
+	Error    json.RawMessage `json:"error,omitempty"`
 }
 
 type taskResult struct {
@@ -56,7 +57,13 @@ type taskResult struct {
 
 type TaskAdaptor struct {
 	taskcommon.BaseBilling
-	baseURL string
+	baseURL        string
+	resourcePath   string
+	configuredName string
+}
+
+func NewSeedanceVideosTaskAdaptor() *TaskAdaptor {
+	return &TaskAdaptor{resourcePath: "/videos", configuredName: "seedance-compatible-videos"}
 }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
@@ -95,7 +102,7 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, _ *relaycommon.RelayInfo) 
 }
 
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
-	return apiBaseURL(a.baseURL) + "/video/generations", nil
+	return apiBaseURL(a.baseURL) + a.taskResourcePath(), nil
 }
 
 func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
@@ -180,11 +187,11 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	}
 	var submitted submitResponse
 	if err := common.Unmarshal(responseBody, &submitted); err != nil {
-		return "", nil, service.TaskErrorWrapper(fmt.Errorf("decode seedance-compatible response: %w", err), "unmarshal_response_failed", http.StatusInternalServerError)
+		return "", nil, service.TaskErrorWrapper(fmt.Errorf("decode %s response: %w", a.GetChannelName(), err), "unmarshal_response_failed", http.StatusInternalServerError)
 	}
 	upstreamTaskID := firstNonEmpty(submitted.TaskID, submitted.ID)
 	if upstreamTaskID == "" {
-		return "", nil, service.TaskErrorWrapperLocal(fmt.Errorf("empty task_id from seedance-compatible upstream"), "task_submit_failed", resp.StatusCode)
+		return "", nil, service.TaskErrorWrapperLocal(fmt.Errorf("empty task_id from %s upstream", a.GetChannelName()), "task_submit_failed", resp.StatusCode)
 	}
 
 	video := dto.NewOpenAIVideo()
@@ -201,7 +208,7 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 	if !ok || strings.TrimSpace(taskID) == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
-	requestURL := apiBaseURL(baseURL) + "/video/generations/" + url.PathEscape(taskID)
+	requestURL := apiBaseURL(baseURL) + a.taskResourcePath() + "/" + url.PathEscape(taskID)
 	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, err
@@ -218,9 +225,9 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
 	var resp taskStatusResponse
 	if err := common.Unmarshal(respBody, &resp); err != nil {
-		return nil, fmt.Errorf("decode seedance-compatible task response: %w", err)
+		return nil, fmt.Errorf("decode %s task response: %w", a.GetChannelName(), err)
 	}
-	taskInfo := &relaycommon.TaskInfo{TaskID: resp.TaskID}
+	taskInfo := &relaycommon.TaskInfo{TaskID: firstNonEmpty(resp.TaskID, resp.ID)}
 	if resp.Progress != nil {
 		taskInfo.Progress = strconv.Itoa(*resp.Progress) + "%"
 	}
@@ -235,14 +242,11 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	case "succeeded", "completed", "success", "done":
 		taskInfo.Status = model.TaskStatusSuccess
 		taskInfo.Url = taskResultURL(&resp)
-		if taskInfo.Url == "" {
-			return nil, fmt.Errorf("seedance-compatible task succeeded without result URL")
-		}
 	case "failed", "error", "timeout", "timed_out", "expired", "cancelled", "canceled":
 		taskInfo.Status = model.TaskStatusFailure
-		taskInfo.Reason = parseFailureReason(resp.Error, firstNonEmpty(resp.Message, resp.Reason), resp.Status)
+		taskInfo.Reason = parseFailureReason(resp.Error, firstNonEmpty(resp.Message, resp.Reason), resp.Status, a.GetChannelName())
 	default:
-		return nil, fmt.Errorf("unknown seedance-compatible task status: %s", resp.Status)
+		return nil, fmt.Errorf("unknown %s task status: %s", a.GetChannelName(), resp.Status)
 	}
 	return taskInfo, nil
 }
@@ -252,7 +256,17 @@ func (a *TaskAdaptor) GetModelList() []string {
 }
 
 func (a *TaskAdaptor) GetChannelName() string {
+	if a.configuredName != "" {
+		return a.configuredName
+	}
 	return channelName
+}
+
+func (a *TaskAdaptor) taskResourcePath() string {
+	if a.resourcePath != "" {
+		return a.resourcePath
+	}
+	return "/video/generations"
 }
 
 func apiBaseURL(baseURL string) string {
@@ -337,20 +351,33 @@ func taskResultURL(resp *taskStatusResponse) string {
 	if directURL := firstNonEmpty(resp.URL, resp.VideoURL); directURL != "" {
 		return directURL
 	}
-	for _, raw := range resp.Output {
-		var directURL string
-		if err := common.Unmarshal(raw, &directURL); err == nil && strings.TrimSpace(directURL) != "" {
-			return strings.TrimSpace(directURL)
-		}
-		var item resultItem
-		if err := common.Unmarshal(raw, &item); err == nil && strings.TrimSpace(item.URL) != "" {
-			return strings.TrimSpace(item.URL)
+	if url := rawResultURL(resp.Output); url != "" {
+		return url
+	}
+	var outputs []json.RawMessage
+	if err := common.Unmarshal(resp.Output, &outputs); err == nil {
+		for _, raw := range outputs {
+			if url := rawResultURL(raw); url != "" {
+				return url
+			}
 		}
 	}
 	return ""
 }
 
-func parseFailureReason(raw json.RawMessage, fallback, status string) string {
+func rawResultURL(raw json.RawMessage) string {
+	var directURL string
+	if err := common.Unmarshal(raw, &directURL); err == nil && strings.TrimSpace(directURL) != "" {
+		return strings.TrimSpace(directURL)
+	}
+	var item resultItem
+	if err := common.Unmarshal(raw, &item); err == nil {
+		return strings.TrimSpace(item.URL)
+	}
+	return ""
+}
+
+func parseFailureReason(raw json.RawMessage, fallback, status, adaptorName string) string {
 	if len(raw) > 0 && string(raw) != "null" {
 		var message string
 		if err := common.Unmarshal(raw, &message); err == nil && strings.TrimSpace(message) != "" {
@@ -366,7 +393,7 @@ func parseFailureReason(raw json.RawMessage, fallback, status string) string {
 	if strings.TrimSpace(fallback) != "" {
 		return strings.TrimSpace(fallback)
 	}
-	return "seedance-compatible task " + strings.ToLower(strings.TrimSpace(status))
+	return adaptorName + " task " + strings.ToLower(strings.TrimSpace(status))
 }
 
 func firstNonEmpty(values ...string) string {

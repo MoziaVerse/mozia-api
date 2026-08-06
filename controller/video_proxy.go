@@ -61,10 +61,7 @@ func VideoProxy(c *gin.Context) {
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to retrieve channel information")
 		return
 	}
-	baseURL := channel.GetBaseURL()
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
-	}
+	baseURL := strings.TrimSpace(channel.GetBaseURL())
 
 	var videoURL string
 	proxy := channel.GetSetting().Proxy
@@ -107,8 +104,17 @@ func VideoProxy(c *gin.Context) {
 			return
 		}
 	case constant.ChannelTypeOpenAI, constant.ChannelTypeSora:
+		if baseURL == "" {
+			baseURL = "https://api.openai.com"
+		}
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
+	case constant.ChannelTypeMoziaSeedanceGen, constant.ChannelTypeMoziaSeedanceVideos:
+		shouldAuthorize := false
+		videoURL, shouldAuthorize = resolveMoziaVideoContentURL(channel.Type, baseURL, task)
+		if shouldAuthorize {
+			req.Header.Set("Authorization", "Bearer "+channel.Key)
+		}
 	default:
 		// Video URL is stored in PrivateData.ResultURL (fallback to FailReason for old data)
 		videoURL = task.GetResultURL()
@@ -169,6 +175,25 @@ func VideoProxy(c *gin.Context) {
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
+}
+
+func resolveMoziaVideoContentURL(channelType int, baseURL string, task *model.Task) (string, bool) {
+	if resultURL := strings.TrimSpace(task.GetResultURL()); resultURL != "" && !isTaskProxyContentURL(resultURL, task.TaskID) {
+		return resultURL, false
+	}
+
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return "", false
+	}
+	if !strings.HasSuffix(baseURL, "/v1") {
+		baseURL += "/v1"
+	}
+	resourcePath := "/video/generations/"
+	if channelType == constant.ChannelTypeMoziaSeedanceVideos {
+		resourcePath = "/videos/"
+	}
+	return baseURL + resourcePath + url.PathEscape(task.GetUpstreamTaskID()) + "/content", true
 }
 
 func writeVideoDataURL(c *gin.Context, dataURL string) error {

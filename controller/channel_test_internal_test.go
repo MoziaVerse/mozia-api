@@ -85,11 +85,13 @@ func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 	require.Equal(t, 2, userID)
 }
 
-func TestSeedanceCompatibleChannelSkipsChatCompletionTest(t *testing.T) {
-	result := testChannel(nil, &model.Channel{Type: constant.ChannelTypeMoziaSeedance}, 0, "", "", false)
+func TestSeedanceCompatibleChannelsSkipChatCompletionTest(t *testing.T) {
+	for _, channelType := range []int{constant.ChannelTypeMoziaSeedanceGen, constant.ChannelTypeMoziaSeedanceVideos} {
+		result := testChannel(nil, &model.Channel{Type: channelType}, 0, "", "", false)
 
-	require.Error(t, result.localErr)
-	require.Contains(t, result.localErr.Error(), "channel test is not supported")
+		require.Error(t, result.localErr)
+		require.Contains(t, result.localErr.Error(), "channel test is not supported")
+	}
 }
 
 func TestGlobalaiopcChannelSkipsChatCompletionTest(t *testing.T) {
