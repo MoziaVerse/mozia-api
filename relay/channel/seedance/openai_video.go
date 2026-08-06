@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
+	"github.com/tidwall/sjson"
 )
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error) {
@@ -34,5 +35,12 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 			Code:    "task_failed",
 		}
 	}
-	return common.Marshal(video)
+	data, err := common.Marshal(video)
+	if err != nil || video.ContentURL == "" {
+		return data, err
+	}
+	if data, err = sjson.SetBytes(data, "content_url", video.ContentURL); err != nil {
+		return nil, err
+	}
+	return sjson.SetBytes(data, "metadata.url", video.ContentURL)
 }

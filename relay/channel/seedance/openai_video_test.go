@@ -48,6 +48,8 @@ func TestConvertToOpenAIVideoSeparatesSuccessURLAndFailureReason(t *testing.T) {
 
 		data, err := NewSeedanceVideosTaskAdaptor().ConvertToOpenAIVideo(task)
 		require.NoError(t, err)
+		assert.Contains(t, string(data), "&signature=")
+		assert.NotContains(t, string(data), `\u0026`)
 		var video dto.OpenAIVideo
 		require.NoError(t, common.Unmarshal(data, &video))
 		downloadURL, err := url.Parse(video.ContentURL)
