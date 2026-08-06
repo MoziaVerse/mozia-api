@@ -74,7 +74,7 @@ func BuildProxyURL(taskID string) string {
 	return fmt.Sprintf("%s/v1/videos/%s/content", system_setting.ServerAddress, taskID)
 }
 
-const SignedVideoURLTTL = 15 * time.Minute
+const SignedVideoURLTTL = 24 * time.Hour
 
 var (
 	ErrSignedVideoExpired          = errors.New("signed video url expired")

@@ -64,7 +64,7 @@ func TestSignedVideoProxyStreamsAttachment(t *testing.T) {
 	assert.Empty(t, recorder.Header().Get("Set-Cookie"))
 	assert.Contains(t, recorder.Header().Get("Content-Disposition"), "attachment")
 	assert.Contains(t, recorder.Header().Get("Content-Disposition"), "clip.mp4")
-	assert.Equal(t, "private, max-age=900", recorder.Header().Get("Cache-Control"))
+	assert.Equal(t, "private, max-age=86400", recorder.Header().Get("Cache-Control"))
 
 	require.NoError(t, model.DB.Create(&model.Channel{
 		Id:   2,
@@ -88,7 +88,7 @@ func TestSignedVideoProxyStreamsAttachment(t *testing.T) {
 	assert.Equal(t, http.StatusOK, dataRecorder.Code)
 	assert.Equal(t, "video-bytes", dataRecorder.Body.String())
 	assert.Contains(t, dataRecorder.Header().Get("Content-Disposition"), "inline.mp4")
-	assert.Equal(t, "private, max-age=900", dataRecorder.Header().Get("Cache-Control"))
+	assert.Equal(t, "private, max-age=86400", dataRecorder.Header().Get("Cache-Control"))
 }
 
 func TestSignedVideoProxyRejectsExpiredAndTamperedURLs(t *testing.T) {

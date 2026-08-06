@@ -33,7 +33,7 @@ func TestBuildSignedVideoProxyURLAndVerify(t *testing.T) {
 	expires, err := strconv.ParseInt(query.Get("expires"), 10, 64)
 	require.NoError(t, err)
 
-	err = VerifySignedVideoProxy(userID, "task_public", "final clip.mp4", expires, query.Get("signature"), now.Add(14*time.Minute))
+	err = VerifySignedVideoProxy(userID, "task_public", "final clip.mp4", expires, query.Get("signature"), now.Add(23*time.Hour))
 	require.NoError(t, err)
 }
 
@@ -48,7 +48,7 @@ func TestVerifySignedVideoProxyRejectsExpiredAndTamperedFields(t *testing.T) {
 	require.NoError(t, err)
 	signature := query.Get("signature")
 
-	assert.ErrorIs(t, VerifySignedVideoProxy(7, "task_alpha", "video.mp4", expires, signature, now.Add(16*time.Minute)), ErrSignedVideoExpired)
+	assert.ErrorIs(t, VerifySignedVideoProxy(7, "task_alpha", "video.mp4", expires, signature, now.Add(25*time.Hour)), ErrSignedVideoExpired)
 	assert.ErrorIs(t, VerifySignedVideoProxy(8, "task_alpha", "video.mp4", expires, signature, now), ErrSignedVideoInvalidSignature)
 	assert.ErrorIs(t, VerifySignedVideoProxy(7, "task_beta", "video.mp4", expires, signature, now), ErrSignedVideoInvalidSignature)
 	assert.ErrorIs(t, VerifySignedVideoProxy(7, "task_alpha", "other.mp4", expires, signature, now), ErrSignedVideoInvalidSignature)
