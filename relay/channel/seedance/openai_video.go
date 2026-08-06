@@ -1,9 +1,12 @@
 package seedance
 
 import (
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 )
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error) {
@@ -19,6 +22,9 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	switch originTask.Status {
 	case model.TaskStatusSuccess:
 		if resultURL := originTask.GetResultURL(); resultURL != "" {
+			if strings.TrimRight(resultURL, "/") == strings.TrimRight(taskcommon.BuildProxyURL(originTask.TaskID), "/") {
+				resultURL = taskcommon.BuildSignedVideoProxyURL(originTask.UserId, originTask.TaskID, taskcommon.TaskVideoFilename(originTask))
+			}
 			video.ContentURL = resultURL
 			video.SetMetadata("url", resultURL)
 		}
