@@ -134,12 +134,27 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	for _, key := range []string{"model", "prompt", "duration", "seconds", "async"} {
 		delete(payload, key)
 	}
-	if _, hasRatio := payload["ratio"]; !hasRatio && req.Size != "" {
+	modelName := upstreamModel(info)
+	if modelName == "" {
+		return nil, fmt.Errorf("model is required; configure the channel model list and model mapping")
+	}
+	isMiniMaxH3 := false
+	switch modelName {
+	case "minimax/minimax-h3-fl2va", "minimax/minimax-h3-ref2va",
+		"minimax-h3-fl2va-int8", "minimax-h3-ref2va-int8":
+		isMiniMaxH3 = true
+	}
+	delete(payload, "size")
+	if isMiniMaxH3 {
+		delete(payload, "ratio")
+		if req.Size != "" {
+			payload["size"] = strings.ReplaceAll(strings.TrimSpace(req.Size), ":", "x")
+		}
+	} else if _, hasRatio := payload["ratio"]; !hasRatio && req.Size != "" {
 		if _, hasAspectRatio := payload["aspect_ratio"]; !hasAspectRatio {
 			payload["ratio"] = req.Size
 		}
 	}
-	delete(payload, "size")
 	delete(payload, "input_reference")
 	_, hasImage := payload["image"]
 	_, hasImages := payload["images"]
@@ -154,10 +169,6 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	}
 
 	duration := resolveDuration(&req)
-	modelName := upstreamModel(info)
-	if modelName == "" {
-		return nil, fmt.Errorf("model is required; configure the channel model list and model mapping")
-	}
 	payload["prompt"] = req.Prompt
 	payload["model"] = modelName
 	payload["duration"] = duration

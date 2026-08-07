@@ -58,6 +58,74 @@ func TestBuildRequestBodyForwardsOriginModelWithoutMapping(t *testing.T) {
 	assert.Equal(t, float64(7), payload["duration"])
 }
 
+func TestBuildRequestBodyMapsSizeForProvider(t *testing.T) {
+	t.Run("MiniMax H3 keeps exact size", func(t *testing.T) {
+		adaptor, c, info := prepareRequest(t, `{
+			"model":"minimax/minimax-h3-fl2va",
+			"prompt":"camera moves forward",
+			"duration":5,
+			"size":"1024x576"
+		}`)
+		info.OriginModelName = "minimax-h3-fl2va-int8"
+		info.UpstreamModelName = info.OriginModelName
+
+		payload := buildPayload(t, adaptor, c, info)
+
+		assert.Equal(t, "1024x576", payload["size"])
+		assert.NotContains(t, payload, "ratio")
+	})
+
+	t.Run("MiniMax H3 accepts colon size separator", func(t *testing.T) {
+		adaptor, c, info := prepareRequest(t, `{
+			"model":"minimax/minimax-h3-fl2va",
+			"prompt":"camera moves forward",
+			"duration":5,
+			"size":"768:448"
+		}`)
+		info.OriginModelName = "minimax-h3-fl2va-int8"
+		info.UpstreamModelName = info.OriginModelName
+
+		payload := buildPayload(t, adaptor, c, info)
+
+		assert.Equal(t, "768x448", payload["size"])
+		assert.NotContains(t, payload, "ratio")
+	})
+
+	t.Run("Seedance converts size to ratio", func(t *testing.T) {
+		adaptor, c, info := prepareRequest(t, `{
+			"model":"provider-native-seedance",
+			"prompt":"camera moves forward",
+			"duration":5,
+			"size":"1280x720"
+		}`)
+		info.OriginModelName = "provider-native-seedance"
+		info.UpstreamModelName = info.OriginModelName
+
+		payload := buildPayload(t, adaptor, c, info)
+
+		assert.Equal(t, "1280x720", payload["ratio"])
+		assert.NotContains(t, payload, "size")
+	})
+}
+
+func TestBuildRequestBodyPreservesMiniMaxH3ReferenceImageURL(t *testing.T) {
+	imageURL := "https://dimg04.c-ctrip.com/images/reference.jpg?proc=autoorient"
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"minimax/minimax-h3-ref2va",
+		"prompt":"animate this image",
+		"duration":5,
+		"images":["`+imageURL+`"]
+	}`)
+	info.OriginModelName = "minimax-h3-ref2va-int8"
+	info.UpstreamModelName = info.OriginModelName
+
+	payload := buildPayload(t, adaptor, c, info)
+	images, ok := payload["images"].([]any)
+	require.True(t, ok)
+	require.Len(t, images, 1)
+	assert.Equal(t, imageURL, images[0])
+}
+
 func TestValidateRequestRequiresExplicitPositiveDuration(t *testing.T) {
 	tests := []struct {
 		name string
