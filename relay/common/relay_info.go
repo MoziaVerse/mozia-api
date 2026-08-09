@@ -129,6 +129,9 @@ type RelayInfo struct {
 	// Billing 是计费会话，封装了预扣费/结算/退款的统一生命周期。
 	// 免费模型时为 nil。
 	Billing BillingSettler
+	// ResellerBilling points at the immutable main-database settlement snapshot
+	// for an assigned reseller customer. It is nil for ordinary users.
+	ResellerBilling *ResellerBillingContext
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
 	BillingSource string

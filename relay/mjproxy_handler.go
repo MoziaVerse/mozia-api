@@ -202,19 +202,18 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(info.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
+	billingPrepared := false
+	billingSettled := false
+	if !priceData.FreeModel {
+		if apiErr := service.PreConsumeBilling(c, priceData.Quota, info); apiErr != nil {
+			return &dto.MidjourneyResponse{Code: 4, Description: apiErr.Error()}
 		}
-	}
-
-	if userQuota-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
-		}
+		billingPrepared = true
+		defer func() {
+			if !billingSettled && info.Billing != nil {
+				info.Billing.Refund(c)
+			}
+		}()
 	}
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	baseURL := c.GetString("base_url")
@@ -225,9 +224,16 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	}
 	defer func() {
 		if mjResp.StatusCode == 200 && mjResp.Response.Code == 1 {
-			err := service.PostConsumeQuota(info, priceData.Quota, 0, true)
-			if err != nil {
-				common.SysLog("error consuming token remain quota: " + err.Error())
+			chargedQuota := priceData.Quota
+			if billingPrepared {
+				if err := service.SettleBilling(c, info, priceData.Quota); err != nil {
+					common.SysLog("error settling Midjourney billing: " + err.Error())
+					return
+				}
+				billingSettled = true
+				if projected, err := service.CustomerQuotaForBase(info, priceData.Quota); err == nil {
+					chargedQuota = projected
+				}
 			}
 
 			tokenName := c.GetString("token_name")
@@ -237,13 +243,13 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 				ChannelId: info.ChannelId,
 				ModelName: modelName,
 				TokenName: tokenName,
-				Quota:     priceData.Quota,
+				Quota:     chargedQuota,
 				Content:   logContent,
 				TokenId:   info.TokenId,
 				Group:     info.UsingGroup,
 				Other:     other,
 			})
-			model.UpdateUserUsedQuotaAndRequestCount(info.UserId, priceData.Quota)
+			model.UpdateUserUsedQuotaAndRequestCount(info.UserId, chargedQuota)
 			model.UpdateChannelUsedQuota(info.ChannelId, priceData.Quota)
 		}
 	}()
@@ -509,19 +515,18 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: err.Error(),
+	billingPrepared := false
+	billingSettled := false
+	if consumeQuota && !priceData.FreeModel {
+		if apiErr := service.PreConsumeBilling(c, priceData.Quota, relayInfo); apiErr != nil {
+			return &dto.MidjourneyResponse{Code: 4, Description: apiErr.Error()}
 		}
-	}
-
-	if consumeQuota && userQuota-priceData.Quota < 0 {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "quota_not_enough",
-		}
+		billingPrepared = true
+		defer func() {
+			if !billingSettled && relayInfo.Billing != nil {
+				relayInfo.Billing.Refund(c)
+			}
+		}()
 	}
 
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
@@ -532,9 +537,16 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 
 	defer func() {
 		if consumeQuota && midjResponseWithStatus.StatusCode == 200 {
-			err := service.PostConsumeQuota(relayInfo, priceData.Quota, 0, true)
-			if err != nil {
-				common.SysLog("error consuming token remain quota: " + err.Error())
+			chargedQuota := priceData.Quota
+			if billingPrepared {
+				if err := service.SettleBilling(c, relayInfo, priceData.Quota); err != nil {
+					common.SysLog("error settling Midjourney billing: " + err.Error())
+					return
+				}
+				billingSettled = true
+				if projected, err := service.CustomerQuotaForBase(relayInfo, priceData.Quota); err == nil {
+					chargedQuota = projected
+				}
 			}
 			tokenName := c.GetString("token_name")
 			logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s，ID %s", priceData.ModelPrice, priceData.GroupRatioInfo.GroupRatio, midjRequest.Action, midjResponse.Result)
@@ -543,13 +555,13 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 				ChannelId: relayInfo.ChannelId,
 				ModelName: modelName,
 				TokenName: tokenName,
-				Quota:     priceData.Quota,
+				Quota:     chargedQuota,
 				Content:   logContent,
 				TokenId:   relayInfo.TokenId,
 				Group:     relayInfo.UsingGroup,
 				Other:     other,
 			})
-			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, priceData.Quota)
+			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, chargedQuota)
 			model.UpdateChannelUsedQuota(relayInfo.ChannelId, priceData.Quota)
 		}
 	}()

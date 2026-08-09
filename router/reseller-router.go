@@ -21,6 +21,9 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerManagementRoute.GET("/invitations", controller.ListResellerManagementInvitations)
 	resellerManagementRoute.POST("/invitations", controller.CreateResellerManagementInvitation)
 	resellerManagementRoute.POST("/invitations/:id/revoke", controller.RevokeResellerManagementInvitation)
+	resellerManagementRoute.GET("/pricing", controller.GetResellerManagementPricing)
+	resellerManagementRoute.POST("/pricing/retail", controller.CreateResellerManagementRetailPrice)
+	resellerManagementRoute.POST("/pricing/preview", controller.PreviewResellerManagementPricing)
 
 	resellerRegistrationRoute := apiRouter.Group("/internal/v1/reseller/registration")
 	resellerRegistrationRoute.Use(middleware.ResellerRegistrationServiceAuth())
@@ -32,6 +35,9 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerAdminRoute.POST("", controller.CreateResellerAdmin)
 	resellerAdminRoute.PATCH("/:id/status", controller.UpdateResellerAdminStatus)
 	resellerAdminRoute.GET("/:id/customers", controller.ListResellerAdminCustomers)
+	resellerAdminRoute.GET("/:id/pricing", controller.GetResellerPlatformPricing)
+	resellerAdminRoute.POST("/:id/pricing/wholesale", controller.CreateResellerPlatformWholesalePrice)
+	resellerAdminRoute.POST("/:id/pricing/preview", controller.PreviewResellerPlatformPricing)
 
 	resellerPlatformCustomerRoute := apiRouter.Group("/internal/v1/platform/reseller-customers")
 	resellerPlatformCustomerRoute.Use(middleware.ResellerAdminServiceAuth())

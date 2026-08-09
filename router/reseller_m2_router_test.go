@@ -342,7 +342,11 @@ func setupResellerM2Test(t *testing.T) (*gin.Engine, *gorm.DB, resellerM2Request
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=30000", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSSO{}, &model.MoziaWalletBalance{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}, &model.ResellerCustomer{}, &model.ResellerInvitation{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.User{}, &model.UserSSO{}, &model.MoziaWalletBalance{}, &model.Reseller{}, &model.ResellerDomain{},
+		&model.ResellerMember{}, &model.ResellerCustomer{}, &model.ResellerInvitation{},
+		&model.ResellerPriceRule{}, &model.ResellerRequestSettlement{},
+	))
 	model.DB = db
 	t.Setenv("MATRIX_RESELLER_SERVICE_TOKEN", "matrix-reseller-test-token")
 	t.Setenv("MATRIX_RESELLER_MANAGEMENT_TOKEN", "matrix-reseller-management-test-token")

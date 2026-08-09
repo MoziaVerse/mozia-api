@@ -361,15 +361,21 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if summary.ImageGenerationCallPrice > 0 {
 		extraContent = append(extraContent, fmt.Sprintf("Image Generation Call 花费 %s", decimal.NewFromFloat(summary.ImageGenerationCallPrice).Mul(decimal.NewFromFloat(summary.GroupRatio)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).String()))
 	}
+	customerQuota, customerQuotaErr := CustomerQuotaForBase(relayInfo, summary.Quota)
+	if customerQuotaErr != nil {
+		logger.LogError(ctx, "error calculating reseller customer quota: "+customerQuotaErr.Error())
+		customerQuota = summary.Quota
+	}
 
 	if summary.TotalTokens == 0 {
 		extraContent = append(extraContent, "上游没有返回计费信息，无法扣费（可能是上游超时）")
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, summary.ModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
+		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, customerQuota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
 	}
 
+	CaptureResellerBillingUsage(relayInfo, usage)
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
 	}
@@ -465,7 +471,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		CompletionTokens: summary.CompletionTokens,
 		ModelName:        logModel,
 		TokenName:        summary.TokenName,
-		Quota:            summary.Quota,
+		Quota:            customerQuota,
 		Content:          logContent,
 		TokenId:          relayInfo.TokenId,
 		UseTimeSeconds:   int(summary.UseTimeSeconds),

@@ -576,10 +576,17 @@ func RelayTask(c *gin.Context) {
 
 	// ── 成功：结算 + 日志 + 插入任务 ──
 	if taskErr == nil {
+		billingSettlementPending := false
 		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
 			common.SysError("settle task billing error: " + settleErr.Error())
+			// Task adaptors have already written the success response and created an
+			// upstream task. Preserve that task for recovery instead of double-writing
+			// an HTTP error or dropping its upstream id.
+			billingSettlementPending = relayInfo.ResellerBilling != nil
 		}
-		service.LogTaskConsumption(c, relayInfo)
+		if !billingSettlementPending {
+			service.LogTaskConsumption(c, relayInfo)
+		}
 
 		task := model.InitTask(result.Platform, relayInfo)
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
@@ -588,6 +595,7 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 		task.PrivateData.TokenId = relayInfo.TokenId
 		task.PrivateData.NodeName = common.NodeName
+		task.PrivateData.BillingSettlementPending = billingSettlementPending
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
 			ModelPrice:        relayInfo.PriceData.ModelPrice,
 			GroupRatio:        relayInfo.PriceData.GroupRatioInfo.GroupRatio,

@@ -54,17 +54,22 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		other["is_model_mapped"] = true
 		other["upstream_model_name"] = info.UpstreamModelName
 	}
+	customerQuota, customerQuotaErr := CustomerQuotaForBase(info, info.PriceData.Quota)
+	if customerQuotaErr != nil {
+		logger.LogError(c, "error calculating reseller customer quota: "+customerQuotaErr.Error())
+		customerQuota = info.PriceData.Quota
+	}
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
 		ModelName: info.OriginModelName,
 		TokenName: tokenName,
-		Quota:     info.PriceData.Quota,
+		Quota:     customerQuota,
 		Content:   logContent,
 		TokenId:   info.TokenId,
 		Group:     info.UsingGroup,
 		Other:     other,
 	})
-	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
+	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, customerQuota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
 }
 
@@ -159,19 +164,67 @@ func taskModelName(task *model.Task) string {
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.OriginModelName != "" {
 		return bc.OriginModelName
 	}
+	if task.Properties.OriginModelName == "" && len(task.Data) > 0 {
+		var data struct {
+			Model string `json:"model"`
+		}
+		if common.Unmarshal(task.Data, &data) == nil && data.Model != "" {
+			return data.Model
+		}
+	}
 	return task.Properties.OriginModelName
+}
+
+func taskResellerSettlement(task *model.Task) (*model.ResellerRequestSettlement, bool, error) {
+	if task == nil || task.PrivateData.ResellerSettlementRequestId == "" {
+		return nil, false, nil
+	}
+	settlement, err := model.GetResellerRequestSettlement(task.PrivateData.ResellerSettlementRequestId)
+	if err != nil {
+		return nil, true, err
+	}
+	return settlement, true, nil
 }
 
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
+	if task != nil && task.PrivateData.BillingSettlementPending {
+		logger.LogWarn(ctx, fmt.Sprintf("任务 %s 的初始 reseller settlement 尚未完成，跳过自动退款并保留恢复状态", task.TaskID))
+		return
+	}
 	quota := task.Quota
+	settlement, resellerBilled, settlementErr := taskResellerSettlement(task)
+	if settlementErr != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("读取 reseller settlement 失败 task %s: %s", task.TaskID, settlementErr.Error()))
+		return
+	}
+	if resellerBilled {
+		if settlement.Status == model.ResellerSettlementStatusRefunded {
+			return
+		}
+		projected, err := quotaInt(settlement.ActualCustomerQuota)
+		if err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("reseller 退款额度溢出 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+		quota = projected
+		if err := model.RefundResellerSettlement(settlement.RequestId); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("锁定 reseller 退款状态失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+	}
 	if quota == 0 {
 		return
 	}
 
 	// 1. 退还资金来源（钱包或订阅）
-	if err := taskAdjustFunding(task, -quota); err != nil {
+	billingTask := *task
+	billingTask.Quota = quota
+	if err := taskAdjustFunding(&billingTask, -quota); err != nil {
+		if resellerBilled {
+			_ = model.RestoreResellerSettlementAfterRefundFailure(settlement.RequestId)
+		}
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}
@@ -200,52 +253,117 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 // actualQuota 是任务完成后的实际应扣额度，与预扣额度 (task.Quota) 做差额结算。
 // reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
 func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string) {
+	recalculateTaskQuota(ctx, task, actualQuota, reason, "")
+}
+
+func recalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, usageJSON string) {
+	if task != nil && task.PrivateData.BillingSettlementPending {
+		logger.LogWarn(ctx, fmt.Sprintf("任务 %s 的初始 reseller settlement 尚未完成，跳过差额结算并保留恢复状态", task.TaskID))
+		return
+	}
 	if actualQuota <= 0 {
 		return
 	}
 	preConsumedQuota := task.Quota
 	quotaDelta := actualQuota - preConsumedQuota
+	billingQuotaDelta := quotaDelta
+	billingPreConsumedQuota := preConsumedQuota
+	billingActualQuota := actualQuota
+	billingTask := task
+	settlement, resellerBilled, settlementErr := taskResellerSettlement(task)
+	if settlementErr != nil {
+		logger.LogError(ctx, fmt.Sprintf("读取 reseller settlement 失败 task %s: %s", task.TaskID, settlementErr.Error()))
+		return
+	}
+	var resellerWholesaleActual int64
+	if resellerBilled {
+		if settlement.Status == model.ResellerSettlementStatusRefunded {
+			return
+		}
+		customerActual, err := model.ApplyResellerMultiplier(int64(actualQuota), settlement.RetailMultiplierPPM)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("计算 reseller 客户实际额度失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+		resellerWholesaleActual, err = model.ApplyResellerMultiplier(int64(actualQuota), settlement.WholesaleMultiplierPPM)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("计算 reseller 批发实际额度失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+		billingPreConsumedQuota, err = quotaInt(settlement.ActualCustomerQuota)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("读取 reseller 客户额度失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+		billingActualQuota, err = quotaInt(customerActual)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("reseller 客户实际额度溢出 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+		billingQuotaDelta = billingActualQuota - billingPreConsumedQuota
+		copyTask := *task
+		copyTask.Quota = billingPreConsumedQuota
+		billingTask = &copyTask
+	}
 
-	if quotaDelta == 0 {
+	if billingQuotaDelta == 0 {
+		if resellerBilled && (settlement.ActualBaseQuota != int64(actualQuota) || settlement.ActualWholesaleQuota != resellerWholesaleActual) {
+			if err := model.UpdateSettledResellerSettlementActual(settlement.RequestId, int64(actualQuota), int64(billingActualQuota), resellerWholesaleActual, usageJSON); err != nil {
+				logger.LogError(ctx, fmt.Sprintf("更新 reseller task settlement 失败 task %s: %s", task.TaskID, err.Error()))
+			}
+		}
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 预扣费准确（%s，%s）",
-			task.TaskID, logger.LogQuota(actualQuota), reason))
+			task.TaskID, logger.LogQuota(billingActualQuota), reason))
+		task.Quota = actualQuota
 		return
 	}
 
 	logger.LogInfo(ctx, fmt.Sprintf("任务 %s 差额结算：delta=%s（实际：%s，预扣：%s，%s）",
 		task.TaskID,
-		logger.LogQuota(quotaDelta),
-		logger.LogQuota(actualQuota),
-		logger.LogQuota(preConsumedQuota),
+		logger.LogQuota(billingQuotaDelta),
+		logger.LogQuota(billingActualQuota),
+		logger.LogQuota(billingPreConsumedQuota),
 		reason,
 	))
 
 	// 调整资金来源
-	if err := taskAdjustFunding(task, quotaDelta); err != nil {
+	if err := taskAdjustFunding(billingTask, billingQuotaDelta); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
 		return
 	}
 
 	// 调整令牌额度
-	taskAdjustTokenQuota(ctx, task, quotaDelta)
+	taskAdjustTokenQuota(ctx, task, billingQuotaDelta)
+	if resellerBilled {
+		if err := model.UpdateSettledResellerSettlementActual(settlement.RequestId, int64(actualQuota), int64(billingActualQuota), resellerWholesaleActual, usageJSON); err != nil {
+			rollbackTask := *billingTask
+			rollbackTask.Quota = billingActualQuota
+			if rollbackErr := taskAdjustFunding(&rollbackTask, -billingQuotaDelta); rollbackErr != nil {
+				logger.LogError(ctx, fmt.Sprintf("回滚 reseller task 资金失败 task %s: %s", task.TaskID, rollbackErr.Error()))
+			}
+			taskAdjustTokenQuota(ctx, task, -billingQuotaDelta)
+			logger.LogError(ctx, fmt.Sprintf("更新 reseller task settlement 失败 task %s: %s", task.TaskID, err.Error()))
+			return
+		}
+	}
 
 	task.Quota = actualQuota
 
 	var logType int
 	var logQuota int
-	if quotaDelta > 0 {
+	if billingQuotaDelta > 0 {
 		logType = model.LogTypeConsume
-		logQuota = quotaDelta
-		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, quotaDelta)
+		logQuota = billingQuotaDelta
+		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, billingQuotaDelta)
 		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
 	} else {
 		logType = model.LogTypeRefund
-		logQuota = -quotaDelta
+		logQuota = -billingQuotaDelta
 	}
 	other := taskBillingOther(task)
 	other["task_id"] = task.TaskID
-	other["pre_consumed_quota"] = preConsumedQuota
-	other["actual_quota"] = actualQuota
+	other["pre_consumed_quota"] = billingPreConsumedQuota
+	other["actual_quota"] = billingActualQuota
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   logType,
@@ -323,5 +441,15 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
-	RecalculateTaskQuota(ctx, task, actualQuota, reason)
+	usageJSON := ""
+	if encoded, err := common.Marshal(map[string]any{
+		"base_quota":   actualQuota,
+		"kind":         "task_tokens",
+		"total_tokens": totalTokens,
+	}); err == nil {
+		usageJSON = string(encoded)
+	} else {
+		logger.LogError(ctx, fmt.Sprintf("序列化 reseller task usage 失败 task %s: %s", task.TaskID, err.Error()))
+	}
+	recalculateTaskQuota(ctx, task, actualQuota, reason, usageJSON)
 }

@@ -96,7 +96,7 @@ func TestResellerContextContract(t *testing.T) {
 		assert.Equal(t, "Agency A", response.Data.ResellerName)
 		assert.Equal(t, "portal-a.example.com", response.Data.Host)
 		assert.Equal(t, model.ResellerRoleOwner, response.Data.Role)
-		assert.Equal(t, []string{"reseller:read", "reseller:write"}, response.Data.Permissions)
+		assert.Equal(t, []string{"reseller:read", "reseller:write", "reseller:pricing:read", "reseller:pricing:write"}, response.Data.Permissions)
 		assert.Equal(t, "reseller-request_123", response.RequestId)
 		assert.Equal(t, response.RequestId, recorder.Header().Get(common.RequestIdKey))
 	})

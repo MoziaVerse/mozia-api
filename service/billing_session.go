@@ -84,6 +84,12 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	return tokenErr
 }
 
+func (s *BillingSession) isFinanciallySettled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fundingSettled
+}
+
 // Refund 退还所有预扣费，幂等安全，异步执行。
 func (s *BillingSession) Refund(c *gin.Context) {
 	s.mu.Lock()
@@ -110,20 +116,35 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	funding := s.funding
 
 	gopool.Go(func() {
+		refundSucceeded := true
 		// 1) 退还资金来源
 		if err := funding.Refund(); err != nil {
 			common.SysLog("error refunding billing source: " + err.Error())
+			refundSucceeded = false
 		}
 		if extraReserved > 0 && funding.Source() == BillingSourceSubscription && subscriptionId > 0 {
 			if err := model.PostConsumeUserSubscriptionDelta(subscriptionId, -int64(extraReserved)); err != nil {
 				common.SysLog("error refunding subscription extra reserved quota: " + err.Error())
+				refundSucceeded = false
 			}
 		}
 		// 2) 退还令牌额度
 		if tokenConsumed > 0 && !isPlayground {
 			if err := model.IncreaseTokenQuota(tokenId, tokenKey, tokenConsumed); err != nil {
 				common.SysLog("error refunding token quota: " + err.Error())
+				refundSucceeded = false
 			}
+		}
+		if refundSucceeded {
+			if err := refundResellerSettlement(s.relayInfo); err != nil {
+				common.SysLog("error marking reseller settlement refunded: " + err.Error())
+				refundSucceeded = false
+			}
+		}
+		if !refundSucceeded {
+			s.mu.Lock()
+			s.refunded = false
+			s.mu.Unlock()
 		}
 	})
 }
@@ -148,6 +169,9 @@ func (s *BillingSession) needsRefundLocked() bool {
 	}
 	// 订阅可能在 tokenConsumed=0 时仍预扣了额度
 	if sub, ok := s.funding.(*SubscriptionFunding); ok && sub.preConsumed > 0 {
+		return true
+	}
+	if s.relayInfo != nil && s.relayInfo.ResellerBilling != nil {
 		return true
 	}
 	return false

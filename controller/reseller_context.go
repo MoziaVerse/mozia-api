@@ -17,9 +17,9 @@ import (
 const resellerContextBodyLimit = 4 << 10
 
 var resellerRolePermissions = map[string][]string{
-	model.ResellerRoleOwner:  {"reseller:read", "reseller:write"},
-	model.ResellerRoleAdmin:  {"reseller:read", "reseller:write"},
-	model.ResellerRoleViewer: {"reseller:read"},
+	model.ResellerRoleOwner:  {"reseller:read", "reseller:write", "reseller:pricing:read", "reseller:pricing:write"},
+	model.ResellerRoleAdmin:  {"reseller:read", "reseller:write", "reseller:pricing:read", "reseller:pricing:write"},
+	model.ResellerRoleViewer: {"reseller:read", "reseller:pricing:read"},
 }
 
 type resellerContextRequest struct {

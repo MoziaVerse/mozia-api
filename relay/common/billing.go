@@ -2,6 +2,18 @@ package common
 
 import "github.com/gin-gonic/gin"
 
+// ResellerBillingContext contains only the immutable identifiers and integer
+// multipliers needed after pre-consume. The authoritative snapshot lives in
+// the main database; this value is never serialized to customer responses.
+type ResellerBillingContext struct {
+	SettlementRequestId    string
+	ResellerId             int
+	CustomerId             int
+	RetailMultiplierPPM    int64
+	WholesaleMultiplierPPM int64
+	UsageJSON              string
+}
+
 // BillingSettler 抽象计费会话的生命周期操作。
 // 由 service.BillingSession 实现，存储在 RelayInfo 上以避免循环引用。
 type BillingSettler interface {

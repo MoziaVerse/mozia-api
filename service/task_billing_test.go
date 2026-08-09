@@ -50,6 +50,11 @@ func TestMain(m *testing.M) {
 		&model.UserSubscription{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
+		&model.UserSSO{},
+		&model.Reseller{},
+		&model.ResellerCustomer{},
+		&model.ResellerPriceRule{},
+		&model.ResellerRequestSettlement{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -77,6 +82,11 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM system_task_locks")
 		model.DB.Exec("DELETE FROM system_tasks")
+		model.DB.Exec("DELETE FROM user_ssos")
+		model.DB.Exec("DELETE FROM reseller_request_settlements")
+		model.DB.Exec("DELETE FROM reseller_price_rules")
+		model.DB.Exec("DELETE FROM reseller_customers")
+		model.DB.Exec("DELETE FROM resellers")
 	})
 }
 
@@ -812,4 +822,91 @@ func TestRecalculateTaskQuotaByTokensUsesFrozenUserModelRatioSnapshot(t *testing
 	other := taskBillingOther(task)
 	assert.Equal(t, 1.0, other["base_group_ratio"])
 	assert.Equal(t, 0.36, other["user_model_ratio"])
+}
+
+func TestResellerTaskRecalculationUsesFrozenMultipliersAndPersistsUsage(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	const userID, channelID, initialQuota = 65, 65, 10_000
+	const modelName = "reseller-task-model"
+	reseller, customer := seedResellerBillingFixture(t, userID, initialQuota, modelName)
+	seedChannel(t, channelID)
+
+	requestID := "reseller-task-request_65"
+	wholesale, err := model.ResolveResellerWholesalePrice(reseller.Id, modelName, common.GetTimestamp())
+	require.NoError(t, err)
+	retail, err := model.ResolveResellerRetailPrice(reseller.Id, customer.Id, modelName, common.GetTimestamp())
+	require.NoError(t, err)
+	settlement := &model.ResellerRequestSettlement{
+		RequestId: requestID, ResellerId: reseller.Id, CustomerId: customer.Id, UserId: userID, ModelName: modelName,
+		WholesaleRuleId: wholesale.RuleId, WholesaleRuleVersion: wholesale.RuleVersion, WholesaleMultiplierPPM: wholesale.MultiplierPPM,
+		RetailRuleId: retail.RuleId, RetailRuleVersion: retail.RuleVersion, RetailMultiplierPPM: retail.MultiplierPPM,
+		EstimatedBaseQuota: 100, EstimatedCustomerQuota: 120, EstimatedWholesaleQuota: 80,
+	}
+	_, created, err := model.PrepareResellerRequestSettlement(settlement)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NoError(t, model.ReserveMoziaWalletQuota(requestID, userID, modelName, 120))
+	require.NoError(t, model.BeginResellerSettlement(requestID, 100, 120, 80, `{"base_quota":100,"kind":"per_call"}`))
+	require.NoError(t, model.CompleteResellerSettlement(requestID))
+
+	one := 1
+	_, err = model.CreateResellerPriceRule(model.CreateResellerPriceRuleParams{
+		ResellerId: reseller.Id, Kind: model.ResellerPriceRuleKindRetail, ModelName: modelName,
+		MultiplierPPM: 2_000_000, ExpectedVersion: &one, Enabled: true,
+		EffectiveAt: common.GetTimestamp(), CreatedBy: "later-change",
+	})
+	require.NoError(t, err)
+
+	task := makeTask(userID, channelID, 100, 0, BillingSourceWallet, 0)
+	task.PrivateData.WalletReservationRequestId = requestID
+	task.PrivateData.ResellerSettlementRequestId = requestID
+	task.PrivateData.BillingContext.OriginModelName = modelName
+	task.PrivateData.BillingContext.ModelRatio = 2
+	task.PrivateData.BillingContext.GroupRatio = 1
+
+	RecalculateTaskQuotaByTokens(ctx, task, 100)
+	assert.Equal(t, 200, task.Quota)
+	assert.Equal(t, initialQuota-240, getUserQuota(t, userID), "frozen 1.2 retail multiplier must be used instead of the later 2.0 rule")
+	stored, err := model.GetResellerRequestSettlement(requestID)
+	require.NoError(t, err)
+	assert.Equal(t, model.ResellerSettlementStatusSettled, stored.Status)
+	assert.Equal(t, int64(1_200_000), stored.RetailMultiplierPPM)
+	assert.Equal(t, int64(800_000), stored.WholesaleMultiplierPPM)
+	assert.Equal(t, int64(200), stored.ActualBaseQuota)
+	assert.Equal(t, int64(240), stored.ActualCustomerQuota)
+	assert.Equal(t, int64(160), stored.ActualWholesaleQuota)
+	var usage struct {
+		Kind        string `json:"kind"`
+		TotalTokens int    `json:"total_tokens"`
+		BaseQuota   int    `json:"base_quota"`
+	}
+	require.NoError(t, common.UnmarshalJsonStr(stored.UsageJSON, &usage))
+	assert.Equal(t, "task_tokens", usage.Kind)
+	assert.Equal(t, 100, usage.TotalTokens)
+	assert.Equal(t, 200, usage.BaseQuota)
+
+	RefundTaskQuota(ctx, task, "upstream task failed")
+	assert.Equal(t, initialQuota, getUserQuota(t, userID))
+	stored, err = model.GetResellerRequestSettlement(requestID)
+	require.NoError(t, err)
+	assert.Equal(t, model.ResellerSettlementStatusRefunded, stored.Status)
+	RefundTaskQuota(ctx, task, "retry")
+	assert.Equal(t, initialQuota, getUserQuota(t, userID), "task refund must be idempotent")
+}
+
+func TestPendingResellerTaskSuspendsAutomaticBillingMutations(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	const userID, channelID, initialQuota = 66, 66, 1_000
+	seedUser(t, userID, initialQuota)
+	seedChannel(t, channelID)
+	task := makeTask(userID, channelID, 100, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingSettlementPending = true
+
+	RecalculateTaskQuota(ctx, task, 200, "must wait for recovery")
+	RefundTaskQuota(ctx, task, "must wait for recovery")
+	assert.Equal(t, 100, task.Quota)
+	assert.Equal(t, initialQuota, getUserQuota(t, userID))
+	assert.Equal(t, int64(0), countLogs(t))
 }

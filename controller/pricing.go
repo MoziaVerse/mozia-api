@@ -65,6 +65,12 @@ func GetPricing(c *gin.Context) {
 			} else {
 				pricing = model.FilterPricingByMoziaWalletAccess(id, pricing)
 			}
+			projectedPricing, _, err := model.ProjectResellerCustomerPricing(id, pricing)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			pricing = projectedPricing
 		}
 	}
 	// check groupRatio contains usableGroup
