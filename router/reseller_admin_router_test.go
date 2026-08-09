@@ -18,14 +18,18 @@ import (
 )
 
 type resellerAdminItem struct {
-	Id               int    `json:"id"`
-	Name             string `json:"name"`
-	Status           string `json:"status"`
-	Host             string `json:"host"`
-	OwnerSubject     string `json:"owner_subject"`
-	OwnerUsername    string `json:"owner_username"`
-	OwnerDisplayName string `json:"owner_display_name"`
-	MemberCount      int    `json:"member_count"`
+	Id                int    `json:"id"`
+	Name              string `json:"name"`
+	Status            string `json:"status"`
+	Host              string `json:"host"`
+	OwnerSubject      string `json:"owner_subject"`
+	OwnerUserId       int    `json:"owner_user_id"`
+	OwnerUsername     string `json:"owner_username"`
+	OwnerDisplayName  string `json:"owner_display_name"`
+	OwnerQuota        int    `json:"owner_quota"`
+	OwnerUsedQuota    int    `json:"owner_used_quota"`
+	OwnerRequestCount int    `json:"owner_request_count"`
+	MemberCount       int    `json:"member_count"`
 }
 
 type resellerAdminListResponse struct {
@@ -69,6 +73,11 @@ func TestResellerAdminContract(t *testing.T) {
 		require.NoError(t, db.Create(&model.User{
 			Username: "duplicate-owner-a", DisplayName: "重复绑定账号", Password: "test-password", OidcId: "oidc-owner-a", AffCode: "aff-duplicate-owner-a",
 		}).Error)
+		matrixOwner := model.User{
+			Username: "matrix-owner-a", DisplayName: "Matrix 代理商负责人", Password: "test-password", AffCode: "aff-matrix-owner-a", Quota: 7000000, UsedQuota: 3000000, RequestCount: 42,
+		}
+		require.NoError(t, db.Create(&matrixOwner).Error)
+		require.NoError(t, db.Create(&model.UserSSO{SSOSub: "oidc-owner-a", UserId: matrixOwner.Id}).Error)
 		seedReseller(t, db, "Agency A", model.ResellerStatusActive, "portal-a.example.com", "oidc-owner-a", "oidc-viewer-a")
 
 		recorder := request(http.MethodGet, "/api/internal/v1/platform/resellers", "", "matrix-reseller-test-token", "admin-list_123")
@@ -88,8 +97,12 @@ func TestResellerAdminContract(t *testing.T) {
 		assert.Equal(t, model.ResellerStatusActive, response.Data[0].Status)
 		assert.Equal(t, "portal-a.example.com", response.Data[0].Host)
 		assert.Equal(t, "oidc-owner-a", response.Data[0].OwnerSubject)
-		assert.Equal(t, "agency-owner-a", response.Data[0].OwnerUsername)
-		assert.Equal(t, "代理商负责人 A", response.Data[0].OwnerDisplayName)
+		assert.Equal(t, matrixOwner.Id, response.Data[0].OwnerUserId)
+		assert.Equal(t, "matrix-owner-a", response.Data[0].OwnerUsername)
+		assert.Equal(t, "Matrix 代理商负责人", response.Data[0].OwnerDisplayName)
+		assert.Equal(t, 7000000, response.Data[0].OwnerQuota)
+		assert.Equal(t, 3000000, response.Data[0].OwnerUsedQuota)
+		assert.Equal(t, 42, response.Data[0].OwnerRequestCount)
 		assert.Equal(t, 2, response.Data[0].MemberCount)
 	})
 
@@ -208,7 +221,7 @@ func setupResellerAdminTest(t *testing.T) (*gin.Engine, *gorm.DB, func(method st
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSSO{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}))
 	model.DB = db
 	t.Setenv("MATRIX_RESELLER_SERVICE_TOKEN", "matrix-reseller-test-token")
 	t.Setenv("MOZIA_MEGA_SERVICE_TOKEN", "mozia-mega-test-token")

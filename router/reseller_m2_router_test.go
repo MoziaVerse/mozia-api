@@ -39,10 +39,16 @@ type resellerM2Profile struct {
 }
 
 type resellerM2Customer struct {
-	Id       int    `json:"id"`
-	Subject  string `json:"subject"`
-	Status   string `json:"status"`
-	JoinedAt int64  `json:"joined_at"`
+	Id           int    `json:"id"`
+	Subject      string `json:"subject"`
+	Status       string `json:"status"`
+	JoinedAt     int64  `json:"joined_at"`
+	UserId       int    `json:"user_id"`
+	Username     string `json:"username"`
+	DisplayName  string `json:"display_name"`
+	Quota        int    `json:"quota"`
+	UsedQuota    int    `json:"used_quota"`
+	RequestCount int    `json:"request_count"`
 }
 
 type resellerM2Invitation struct {
@@ -252,6 +258,11 @@ func TestResellerM2Contract(t *testing.T) {
 
 	t.Run("customer status update and platform transfer work end to end", func(t *testing.T) {
 		customer := seedCustomerM2(t, db, resellerA.Id, "customer-transfer", model.ResellerCustomerStatusActive)
+		gatewayUser := model.User{
+			Username: "customer-transfer", DisplayName: "客户 Transfer", Password: "test-password", AffCode: "aff-customer-transfer", Quota: 5000000, UsedQuota: 2500000, RequestCount: 17,
+		}
+		require.NoError(t, db.Create(&gatewayUser).Error)
+		require.NoError(t, db.Create(&model.UserSSO{SSOSub: customer.Subject, UserId: gatewayUser.Id}).Error)
 
 		statusRecorder := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/status", customer.Id), `{"status":"suspended"}`, "matrix-reseller-management-test-token", "customer-status_123", map[string]string{
 			"X-Reseller-Subject": "admin-a",
@@ -273,6 +284,12 @@ func TestResellerM2Contract(t *testing.T) {
 			if item.Id == customer.Id {
 				found = true
 				assert.Equal(t, model.ResellerCustomerStatusSuspend, item.Status)
+				assert.Equal(t, gatewayUser.Id, item.UserId)
+				assert.Equal(t, "customer-transfer", item.Username)
+				assert.Equal(t, "客户 Transfer", item.DisplayName)
+				assert.Equal(t, 5000000, item.Quota)
+				assert.Equal(t, 2500000, item.UsedQuota)
+				assert.Equal(t, 17, item.RequestCount)
 			}
 		}
 		assert.True(t, found)
@@ -310,7 +327,7 @@ func setupResellerM2Test(t *testing.T) (*gin.Engine, *gorm.DB, resellerM2Request
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=30000", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}, &model.ResellerCustomer{}, &model.ResellerInvitation{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSSO{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}, &model.ResellerCustomer{}, &model.ResellerInvitation{}))
 	model.DB = db
 	t.Setenv("MATRIX_RESELLER_SERVICE_TOKEN", "matrix-reseller-test-token")
 	t.Setenv("MATRIX_RESELLER_MANAGEMENT_TOKEN", "matrix-reseller-management-test-token")

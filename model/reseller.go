@@ -101,14 +101,18 @@ type ResellerContext struct {
 }
 
 type ResellerAdminRecord struct {
-	Id               int    `json:"id"`
-	Name             string `json:"name"`
-	Status           string `json:"status"`
-	Host             string `json:"host"`
-	OwnerSubject     string `json:"owner_subject"`
-	OwnerUsername    string `json:"owner_username"`
-	OwnerDisplayName string `json:"owner_display_name"`
-	MemberCount      int    `json:"member_count"`
+	Id                int    `json:"id"`
+	Name              string `json:"name"`
+	Status            string `json:"status"`
+	Host              string `json:"host"`
+	OwnerSubject      string `json:"owner_subject"`
+	OwnerUserId       int    `json:"owner_user_id"`
+	OwnerUsername     string `json:"owner_username"`
+	OwnerDisplayName  string `json:"owner_display_name"`
+	OwnerQuota        int    `json:"owner_quota"`
+	OwnerUsedQuota    int    `json:"owner_used_quota"`
+	OwnerRequestCount int    `json:"owner_request_count"`
+	MemberCount       int    `json:"member_count"`
 }
 
 type ResellerMemberRecord struct {
@@ -119,10 +123,16 @@ type ResellerMemberRecord struct {
 }
 
 type ResellerCustomerRecord struct {
-	Id       int    `json:"id"`
-	Subject  string `json:"subject"`
-	Status   string `json:"status"`
-	JoinedAt int64  `json:"joined_at"`
+	Id           int    `json:"id"`
+	Subject      string `json:"subject"`
+	Status       string `json:"status"`
+	JoinedAt     int64  `json:"joined_at"`
+	UserId       int    `json:"user_id"`
+	Username     string `json:"username"`
+	DisplayName  string `json:"display_name"`
+	Quota        int    `json:"quota"`
+	UsedQuota    int    `json:"used_quota"`
+	RequestCount int    `json:"request_count"`
 }
 
 type ResellerInvitationRecord struct {
@@ -253,10 +263,9 @@ func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 
 func ListResellerCustomerRecords(resellerId int) ([]ResellerCustomerRecord, error) {
 	records := make([]ResellerCustomerRecord, 0)
-	err := DB.Table("reseller_customers").
-		Select("id, subject, status, created_at AS joined_at").
-		Where("reseller_id = ?", resellerId).
-		Order("id ASC").
+	err := resellerCustomerRecordsQuery(DB).
+		Where("customers.reseller_id = ?", resellerId).
+		Order("customers.id ASC").
 		Scan(&records).Error
 	if err != nil {
 		return nil, err
@@ -266,9 +275,8 @@ func ListResellerCustomerRecords(resellerId int) ([]ResellerCustomerRecord, erro
 
 func GetResellerCustomerRecord(resellerId int, customerId int) (*ResellerCustomerRecord, error) {
 	var record ResellerCustomerRecord
-	result := DB.Table("reseller_customers").
-		Select("id, subject, status, created_at AS joined_at").
-		Where("id = ? AND reseller_id = ?", customerId, resellerId).
+	result := resellerCustomerRecordsQuery(DB).
+		Where("customers.id = ? AND customers.reseller_id = ?", customerId, resellerId).
 		Limit(1).
 		Scan(&record)
 	if result.Error != nil {
@@ -590,12 +598,22 @@ func GetResellerAdminRecord(id int) (*ResellerAdminRecord, error) {
 
 func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("resellers AS r").
-		Select("r.id, r.name, r.status, rd.host, owner.subject AS owner_subject, owner_user.username AS owner_username, owner_user.display_name AS owner_display_name, COUNT(DISTINCT members.id) AS member_count").
+		Select("r.id, r.name, r.status, rd.host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_quota, COALESCE(owner_sso_user.used_quota, owner_oidc_user.used_quota, 0) AS owner_used_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
 		Joins("LEFT JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.verified = ? AND rd.status = ?", true, ResellerDomainStatusActive).
 		Joins("LEFT JOIN reseller_members AS owner ON owner.reseller_id = r.id AND owner.role = ? AND owner.status = ?", ResellerRoleOwner, ResellerMemberStatusActive).
-		Joins("LEFT JOIN users AS owner_user ON owner_user.id = (SELECT MIN(owner_candidate.id) FROM users AS owner_candidate WHERE owner_candidate.oidc_id = owner.subject AND owner_candidate.deleted_at IS NULL)").
+		Joins("LEFT JOIN user_ssos AS owner_sso ON owner_sso.sso_sub = owner.subject").
+		Joins("LEFT JOIN users AS owner_sso_user ON owner_sso_user.id = owner_sso.user_id AND owner_sso_user.deleted_at IS NULL").
+		Joins("LEFT JOIN users AS owner_oidc_user ON owner_oidc_user.id = (SELECT MIN(owner_candidate.id) FROM users AS owner_candidate WHERE owner_candidate.oidc_id = owner.subject AND owner_candidate.deleted_at IS NULL)").
 		Joins("LEFT JOIN reseller_members AS members ON members.reseller_id = r.id AND members.status = ?", ResellerMemberStatusActive).
-		Group("r.id, r.name, r.status, rd.host, owner.subject, owner_user.username, owner_user.display_name")
+		Group("r.id, r.name, r.status, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.used_quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.used_quota, owner_oidc_user.request_count")
+}
+
+func resellerCustomerRecordsQuery(db *gorm.DB) *gorm.DB {
+	return db.Table("reseller_customers AS customers").
+		Select("customers.id, customers.subject, customers.status, customers.created_at AS joined_at, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS quota, COALESCE(customer_sso_user.used_quota, customer_oidc_user.used_quota, 0) AS used_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count").
+		Joins("LEFT JOIN user_ssos AS customer_sso ON customer_sso.sso_sub = customers.subject").
+		Joins("LEFT JOIN users AS customer_sso_user ON customer_sso_user.id = customer_sso.user_id AND customer_sso_user.deleted_at IS NULL").
+		Joins("LEFT JOIN users AS customer_oidc_user ON customer_oidc_user.id = (SELECT MIN(customer_candidate.id) FROM users AS customer_candidate WHERE customer_candidate.oidc_id = customers.subject AND customer_candidate.deleted_at IS NULL)")
 }
 
 func validResellerName(name string) bool {
