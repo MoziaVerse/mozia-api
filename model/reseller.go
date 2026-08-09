@@ -101,12 +101,14 @@ type ResellerContext struct {
 }
 
 type ResellerAdminRecord struct {
-	Id           int    `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	Host         string `json:"host"`
-	OwnerSubject string `json:"owner_subject"`
-	MemberCount  int    `json:"member_count"`
+	Id               int    `json:"id"`
+	Name             string `json:"name"`
+	Status           string `json:"status"`
+	Host             string `json:"host"`
+	OwnerSubject     string `json:"owner_subject"`
+	OwnerUsername    string `json:"owner_username"`
+	OwnerDisplayName string `json:"owner_display_name"`
+	MemberCount      int    `json:"member_count"`
 }
 
 type ResellerMemberRecord struct {
@@ -523,7 +525,7 @@ func CreateResellerAdminRecord(name string, host string, ownerSubject string) (*
 		return nil, err
 	}
 
-	var record *ResellerAdminRecord
+	var record ResellerAdminRecord
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		reseller := Reseller{Name: name, Status: ResellerStatusActive}
 		if err := tx.Create(&reseller).Error; err != nil {
@@ -545,13 +547,12 @@ func CreateResellerAdminRecord(name string, host string, ownerSubject string) (*
 		}).Error; err != nil {
 			return err
 		}
-		record = &ResellerAdminRecord{
-			Id:           reseller.Id,
-			Name:         reseller.Name,
-			Status:       reseller.Status,
-			Host:         normalizedHost,
-			OwnerSubject: ownerSubject,
-			MemberCount:  1,
+		result := resellerAdminRecordsQuery(tx).Where("r.id = ?", reseller.Id).Limit(1).Scan(&record)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrResellerNotFound
 		}
 		return nil
 	})
@@ -561,7 +562,7 @@ func CreateResellerAdminRecord(name string, host string, ownerSubject string) (*
 		}
 		return nil, err
 	}
-	return record, nil
+	return &record, nil
 }
 
 func UpdateResellerAdminStatus(id int, status string) (*ResellerAdminRecord, error) {
@@ -589,11 +590,12 @@ func GetResellerAdminRecord(id int) (*ResellerAdminRecord, error) {
 
 func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("resellers AS r").
-		Select("r.id, r.name, r.status, rd.host, owner.subject AS owner_subject, COUNT(DISTINCT members.id) AS member_count").
+		Select("r.id, r.name, r.status, rd.host, owner.subject AS owner_subject, owner_user.username AS owner_username, owner_user.display_name AS owner_display_name, COUNT(DISTINCT members.id) AS member_count").
 		Joins("LEFT JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.verified = ? AND rd.status = ?", true, ResellerDomainStatusActive).
 		Joins("LEFT JOIN reseller_members AS owner ON owner.reseller_id = r.id AND owner.role = ? AND owner.status = ?", ResellerRoleOwner, ResellerMemberStatusActive).
+		Joins("LEFT JOIN users AS owner_user ON owner_user.id = (SELECT MIN(owner_candidate.id) FROM users AS owner_candidate WHERE owner_candidate.oidc_id = owner.subject AND owner_candidate.deleted_at IS NULL)").
 		Joins("LEFT JOIN reseller_members AS members ON members.reseller_id = r.id AND members.status = ?", ResellerMemberStatusActive).
-		Group("r.id, r.name, r.status, rd.host, owner.subject")
+		Group("r.id, r.name, r.status, rd.host, owner.subject, owner_user.username, owner_user.display_name")
 }
 
 func validResellerName(name string) bool {
