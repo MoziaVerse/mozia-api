@@ -46,6 +46,10 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply_all": "Applied upstream model changes to ${count} channels",
 
 	"redemption.create": "Created ${count} redemption codes named ${name} (${quota} each)",
+
+	"mozia.wallet_balance_add":      "Increased Mozia ${source} wallet balance for user ${target_user_id} by ${quota} (balance after: ${balance_after_display}; reason: ${reason})",
+	"mozia.wallet_balance_subtract": "Decreased Mozia ${source} wallet balance for user ${target_user_id} by ${quota} (balance after: ${balance_after_display}; reason: ${reason})",
+	"mozia.wallet_balance_set":      "Set Mozia ${source} wallet balance for user ${target_user_id} to ${balance_after_display} (reason: ${reason})",
 }
 
 // auditContentEN 按 action 模板渲染英文兜底文本；未登记的 action 退回 action 本身。

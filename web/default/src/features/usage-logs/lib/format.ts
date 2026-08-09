@@ -23,6 +23,7 @@ import {
   parseTiersFromExpr,
   type ParsedTier,
 } from '@/features/pricing/lib/billing-expr'
+
 import type { UsageLog } from '../data/schema'
 import type { LogOtherData } from '../types'
 
@@ -362,6 +363,12 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'redemption.update': 'Updated a redemption code',
   'redemption.delete': 'Deleted a redemption code',
   'redemption.delete_invalid': 'Deleted invalid redemption codes',
+  'mozia.wallet_balance_add':
+    'Increased Mozia {{source}} wallet balance for user {{target_user_id}} by {{quota}} (balance after: {{balance_after_display}}; reason: {{reason}})',
+  'mozia.wallet_balance_subtract':
+    'Decreased Mozia {{source}} wallet balance for user {{target_user_id}} by {{quota}} (balance after: {{balance_after_display}}; reason: {{reason}})',
+  'mozia.wallet_balance_set':
+    'Set Mozia {{source}} wallet balance for user {{target_user_id}} to {{balance_after_display}} (reason: {{reason}})',
   // Prefill groups
   'prefill_group.create': 'Created a prefill group',
   'prefill_group.update': 'Updated a prefill group',

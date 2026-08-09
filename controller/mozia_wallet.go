@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
@@ -104,17 +105,49 @@ func AdjustMoziaUserWallet(c *gin.Context) {
 		common.ApiErrorMsg(c, "delta 和 target_balance 只能填写一个")
 		return
 	}
+	reason := strings.TrimSpace(req.Reason)
 	wallet, err := model.AdjustMoziaWalletBalance(model.MoziaWalletAdjustInput{
 		UserId:        userId,
 		Source:        req.Source,
 		Delta:         req.Delta,
 		TargetBalance: req.TargetBalance,
-		Reason:        strings.TrimSpace(req.Reason),
+		Reason:        reason,
 	})
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	if req.Delta != nil && *req.Delta == 0 {
+		common.ApiSuccess(c, wallet)
+		return
+	}
+	if reason == "" {
+		reason = "-"
+	}
+	source := strings.ToLower(strings.TrimSpace(req.Source))
+	balanceAfter := wallet.Sources[source]
+	params := map[string]interface{}{
+		"target_user_id":        userId,
+		"source":                source,
+		"balance_after":         balanceAfter,
+		"balance_after_display": logger.LogQuota(balanceAfter),
+		"reason":                reason,
+	}
+	action := "mozia.wallet_balance_set"
+	if req.Delta != nil {
+		delta := *req.Delta
+		quota := delta
+		action = "mozia.wallet_balance_add"
+		if delta < 0 {
+			quota = -delta
+			action = "mozia.wallet_balance_subtract"
+		}
+		params["delta"] = delta
+		params["quota"] = logger.LogQuota(quota)
+	} else {
+		params["target_balance"] = *req.TargetBalance
+	}
+	recordManageAuditFor(c, userId, action, params)
 	common.ApiSuccess(c, wallet)
 }
 
