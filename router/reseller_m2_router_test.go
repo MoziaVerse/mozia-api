@@ -100,6 +100,16 @@ func TestResellerM2Contract(t *testing.T) {
 		assert.Equal(t, middleware.ResellerErrorServiceUnauthorized, registrationResponse.Error.Code)
 	})
 
+	t.Run("empty customer list is an array", func(t *testing.T) {
+		recorder := request(http.MethodGet, "/api/internal/v1/reseller/management/customers", "", "matrix-reseller-management-test-token", "empty-customers_123", map[string]string{
+			"X-Reseller-Subject": "owner-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		response := decodeM2Envelope(t, recorder)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		assert.JSONEq(t, "[]", string(response.RawData))
+	})
+
 	t.Run("viewer cannot mutate and cannot forge reseller id", func(t *testing.T) {
 		recorder := request(http.MethodPost, "/api/internal/v1/reseller/management/invitations", `{"expires_in_hours":24,"reseller_id":999}`, "matrix-reseller-management-test-token", "viewer-write_123", map[string]string{
 			"X-Reseller-Subject": "viewer-a",
