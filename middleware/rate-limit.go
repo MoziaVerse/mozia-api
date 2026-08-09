@@ -203,3 +203,25 @@ func SearchRateLimit() func(c *gin.Context) {
 	}
 	return userRateLimitFactory(common.SearchRateLimitNum, common.SearchRateLimitDuration, "SR")
 }
+
+// SSOCriticalRateLimit is CriticalRateLimit for the /api/sso internal bridge,
+// keyed by end-user ID instead of client IP.
+//
+// Everything under /api/sso is service-to-service: a single trusted backend
+// (matrix) calls it on behalf of its users, so c.ClientIP() is always that one
+// caller — in our deployment the docker bridge gateway. IP-keyed limiting
+// therefore collapses into a single global quota shared by every end user, and
+// the 20/20min budget is exhausted by ~10 external-app logins platform-wide.
+//
+// Keying by user keeps the same per-abuser ceiling without the cross-user
+// interference. Safe here because SSOAuth() runs at the group level and sets
+// "id" to the resolved SSO user before any route-level middleware.
+//
+// Uses its own "SCT" bucket so it never shares counters with the IP-keyed "CT"
+// limiter still guarding the public routes.
+func SSOCriticalRateLimit() func(c *gin.Context) {
+	if !common.CriticalRateLimitEnable {
+		return defNext
+	}
+	return userRateLimitFactory(common.CriticalRateLimitNum, common.CriticalRateLimitDuration, "SCT")
+}
