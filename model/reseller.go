@@ -252,7 +252,7 @@ func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 }
 
 func ListResellerCustomerRecords(resellerId int) ([]ResellerCustomerRecord, error) {
-	var records []ResellerCustomerRecord
+	records := make([]ResellerCustomerRecord, 0)
 	err := DB.Table("reseller_customers").
 		Select("id, subject, status, created_at AS joined_at").
 		Where("reseller_id = ?", resellerId).
