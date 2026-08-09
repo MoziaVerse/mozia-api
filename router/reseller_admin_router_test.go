@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -18,18 +19,21 @@ import (
 )
 
 type resellerAdminItem struct {
-	Id                int    `json:"id"`
-	Name              string `json:"name"`
-	Status            string `json:"status"`
-	Host              string `json:"host"`
-	OwnerSubject      string `json:"owner_subject"`
-	OwnerUserId       int    `json:"owner_user_id"`
-	OwnerUsername     string `json:"owner_username"`
-	OwnerDisplayName  string `json:"owner_display_name"`
-	OwnerQuota        int    `json:"owner_quota"`
-	OwnerUsedQuota    int    `json:"owner_used_quota"`
-	OwnerRequestCount int    `json:"owner_request_count"`
-	MemberCount       int    `json:"member_count"`
+	Id                    int     `json:"id"`
+	Name                  string  `json:"name"`
+	Status                string  `json:"status"`
+	Host                  string  `json:"host"`
+	OwnerSubject          string  `json:"owner_subject"`
+	OwnerUserId           int     `json:"owner_user_id"`
+	OwnerUsername         string  `json:"owner_username"`
+	OwnerDisplayName      string  `json:"owner_display_name"`
+	OwnerBalance          float64 `json:"owner_balance"`
+	OwnerGiftBalance      float64 `json:"owner_gift_balance"`
+	OwnerPaidBalance      float64 `json:"owner_paid_balance"`
+	OwnerRequestCount     int     `json:"owner_request_count"`
+	BalanceDisplayType    string  `json:"balance_display_type"`
+	BalanceCurrencySymbol string  `json:"balance_currency_symbol"`
+	MemberCount           int     `json:"member_count"`
 }
 
 type resellerAdminListResponse struct {
@@ -78,6 +82,10 @@ func TestResellerAdminContract(t *testing.T) {
 		}
 		require.NoError(t, db.Create(&matrixOwner).Error)
 		require.NoError(t, db.Create(&model.UserSSO{SSOSub: "oidc-owner-a", UserId: matrixOwner.Id}).Error)
+		require.NoError(t, db.Create(&[]model.MoziaWalletBalance{
+			{UserId: matrixOwner.Id, Source: model.MoziaWalletSourceGift, Balance: 2000000},
+			{UserId: matrixOwner.Id, Source: model.MoziaWalletSourcePaid, Balance: 4000000},
+		}).Error)
 		seedReseller(t, db, "Agency A", model.ResellerStatusActive, "portal-a.example.com", "oidc-owner-a", "oidc-viewer-a")
 
 		recorder := request(http.MethodGet, "/api/internal/v1/platform/resellers", "", "matrix-reseller-test-token", "admin-list_123")
@@ -100,8 +108,11 @@ func TestResellerAdminContract(t *testing.T) {
 		assert.Equal(t, matrixOwner.Id, response.Data[0].OwnerUserId)
 		assert.Equal(t, "matrix-owner-a", response.Data[0].OwnerUsername)
 		assert.Equal(t, "Matrix 代理商负责人", response.Data[0].OwnerDisplayName)
-		assert.Equal(t, 7000000, response.Data[0].OwnerQuota)
-		assert.Equal(t, 3000000, response.Data[0].OwnerUsedQuota)
+		assert.Equal(t, 14.0, response.Data[0].OwnerBalance)
+		assert.Equal(t, 4.0, response.Data[0].OwnerGiftBalance)
+		assert.Equal(t, 8.0, response.Data[0].OwnerPaidBalance)
+		assert.Equal(t, operation_setting.QuotaDisplayTypeUSD, response.Data[0].BalanceDisplayType)
+		assert.Equal(t, "$", response.Data[0].BalanceCurrencySymbol)
 		assert.Equal(t, 42, response.Data[0].OwnerRequestCount)
 		assert.Equal(t, 2, response.Data[0].MemberCount)
 	})
@@ -218,15 +229,21 @@ func setupResellerAdminTest(t *testing.T) (*gin.Engine, *gorm.DB, func(method st
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	originalDB := model.DB
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalDisplayType := operation_setting.GetQuotaDisplayType()
+	common.QuotaPerUnit = 500000
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeUSD
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSSO{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSSO{}, &model.MoziaWalletBalance{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}))
 	model.DB = db
 	t.Setenv("MATRIX_RESELLER_SERVICE_TOKEN", "matrix-reseller-test-token")
 	t.Setenv("MOZIA_MEGA_SERVICE_TOKEN", "mozia-mega-test-token")
 	t.Cleanup(func() {
 		model.DB = originalDB
+		common.QuotaPerUnit = originalQuotaPerUnit
+		operation_setting.GetGeneralSetting().QuotaDisplayType = originalDisplayType
 		sqlDB, dbErr := db.DB()
 		if dbErr == nil {
 			_ = sqlDB.Close()

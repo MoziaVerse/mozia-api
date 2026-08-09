@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -39,16 +40,19 @@ type resellerM2Profile struct {
 }
 
 type resellerM2Customer struct {
-	Id           int    `json:"id"`
-	Subject      string `json:"subject"`
-	Status       string `json:"status"`
-	JoinedAt     int64  `json:"joined_at"`
-	UserId       int    `json:"user_id"`
-	Username     string `json:"username"`
-	DisplayName  string `json:"display_name"`
-	Quota        int    `json:"quota"`
-	UsedQuota    int    `json:"used_quota"`
-	RequestCount int    `json:"request_count"`
+	Id                    int     `json:"id"`
+	Subject               string  `json:"subject"`
+	Status                string  `json:"status"`
+	JoinedAt              int64   `json:"joined_at"`
+	UserId                int     `json:"user_id"`
+	Username              string  `json:"username"`
+	DisplayName           string  `json:"display_name"`
+	Balance               float64 `json:"balance"`
+	GiftBalance           float64 `json:"gift_balance"`
+	PaidBalance           float64 `json:"paid_balance"`
+	RequestCount          int     `json:"request_count"`
+	BalanceDisplayType    string  `json:"balance_display_type"`
+	BalanceCurrencySymbol string  `json:"balance_currency_symbol"`
 }
 
 type resellerM2Invitation struct {
@@ -263,6 +267,10 @@ func TestResellerM2Contract(t *testing.T) {
 		}
 		require.NoError(t, db.Create(&gatewayUser).Error)
 		require.NoError(t, db.Create(&model.UserSSO{SSOSub: customer.Subject, UserId: gatewayUser.Id}).Error)
+		require.NoError(t, db.Create(&[]model.MoziaWalletBalance{
+			{UserId: gatewayUser.Id, Source: model.MoziaWalletSourceGift, Balance: 1000000},
+			{UserId: gatewayUser.Id, Source: model.MoziaWalletSourcePaid, Balance: 3000000},
+		}).Error)
 
 		statusRecorder := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/status", customer.Id), `{"status":"suspended"}`, "matrix-reseller-management-test-token", "customer-status_123", map[string]string{
 			"X-Reseller-Subject": "admin-a",
@@ -287,8 +295,11 @@ func TestResellerM2Contract(t *testing.T) {
 				assert.Equal(t, gatewayUser.Id, item.UserId)
 				assert.Equal(t, "customer-transfer", item.Username)
 				assert.Equal(t, "客户 Transfer", item.DisplayName)
-				assert.Equal(t, 5000000, item.Quota)
-				assert.Equal(t, 2500000, item.UsedQuota)
+				assert.Equal(t, 10.0, item.Balance)
+				assert.Equal(t, 2.0, item.GiftBalance)
+				assert.Equal(t, 6.0, item.PaidBalance)
+				assert.Equal(t, operation_setting.QuotaDisplayTypeUSD, item.BalanceDisplayType)
+				assert.Equal(t, "$", item.BalanceCurrencySymbol)
 				assert.Equal(t, 17, item.RequestCount)
 			}
 		}
@@ -324,10 +335,14 @@ func setupResellerM2Test(t *testing.T) (*gin.Engine, *gorm.DB, resellerM2Request
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	originalDB := model.DB
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalDisplayType := operation_setting.GetQuotaDisplayType()
+	common.QuotaPerUnit = 500000
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeUSD
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=30000", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSSO{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}, &model.ResellerCustomer{}, &model.ResellerInvitation{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSSO{}, &model.MoziaWalletBalance{}, &model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}, &model.ResellerCustomer{}, &model.ResellerInvitation{}))
 	model.DB = db
 	t.Setenv("MATRIX_RESELLER_SERVICE_TOKEN", "matrix-reseller-test-token")
 	t.Setenv("MATRIX_RESELLER_MANAGEMENT_TOKEN", "matrix-reseller-management-test-token")
@@ -335,6 +350,8 @@ func setupResellerM2Test(t *testing.T) (*gin.Engine, *gorm.DB, resellerM2Request
 	t.Setenv("MOZIA_MEGA_SERVICE_TOKEN", "mozia-mega-test-token")
 	t.Cleanup(func() {
 		model.DB = originalDB
+		common.QuotaPerUnit = originalQuotaPerUnit
+		operation_setting.GetGeneralSetting().QuotaDisplayType = originalDisplayType
 		sqlDB, dbErr := db.DB()
 		if dbErr == nil {
 			_ = sqlDB.Close()
