@@ -385,7 +385,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 		ssoRouter.GET("/user/self", controller.GetSelf)
 		ssoRouter.GET("/user/wallet", controller.GetSSOMoziaWallet)
 		ssoRouter.POST("/user/topup", controller.SSOTopUp)
-		ssoRouter.POST("/user/redeem", middleware.CriticalRateLimit(), controller.SSORedeem)
+		ssoRouter.POST("/user/redeem", middleware.SSOCriticalRateLimit(), controller.SSORedeem)
 		ssoRouter.GET("/pricing", controller.GetPricing)
 		ssoRouter.GET("/vendors", controller.GetSSOVendorsWithFiling)
 
@@ -394,7 +394,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 			ssoTokenRoute.GET("/", controller.GetAllTokens)
 			ssoTokenRoute.GET("/search", middleware.SearchRateLimit(), controller.SearchTokens)
 			ssoTokenRoute.GET("/:id", controller.GetToken)
-			ssoTokenRoute.POST("/:id/key", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKey)
+			ssoTokenRoute.POST("/:id/key", middleware.SSOCriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKey)
 			ssoTokenRoute.POST("/", controller.AddToken)
 			ssoTokenRoute.PUT("/", controller.UpdateToken)
 			ssoTokenRoute.DELETE("/:id", controller.DeleteToken)
