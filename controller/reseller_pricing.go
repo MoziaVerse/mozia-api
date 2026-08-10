@@ -216,7 +216,7 @@ func PreviewResellerManagementPricing(c *gin.Context) {
 	customerId := 0
 	if request.CustomerId != nil {
 		customerId = *request.CustomerId
-		if _, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId); err != nil {
+		if _, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, false); err != nil {
 			handleResellerPricingError(c, err)
 			return
 		}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -32,22 +33,24 @@ const (
 )
 
 var (
-	ErrInvalidResellerHost           = errors.New("invalid reseller host")
-	ErrInvalidResellerName           = errors.New("invalid reseller name")
-	ErrInvalidResellerOwnerSubject   = errors.New("invalid reseller owner subject")
-	ErrInvalidResellerStatus         = errors.New("invalid reseller status")
-	ErrInvalidResellerCustomerStatus = errors.New("invalid reseller customer status")
-	ErrInvalidResellerInvitation     = errors.New("invalid reseller invitation")
-	ErrInvalidResellerSubject        = errors.New("invalid reseller subject")
-	ErrResellerConflict              = errors.New("reseller conflict")
-	ErrResellerNotFound              = errors.New("reseller not found")
-	ErrResellerForbidden             = errors.New("reseller forbidden")
-	ErrResellerInvitationNotFound    = errors.New("reseller invitation not found")
-	ErrResellerInvitationExpired     = errors.New("reseller invitation expired")
-	ErrResellerInvitationRevoked     = errors.New("reseller invitation revoked")
-	ErrResellerInvitationConsumed    = errors.New("reseller invitation consumed")
-	ErrResellerCustomerNotFound      = errors.New("reseller customer not found")
-	ErrResellerCustomerConflict      = errors.New("reseller customer conflict")
+	ErrInvalidResellerHost             = errors.New("invalid reseller host")
+	ErrInvalidResellerName             = errors.New("invalid reseller name")
+	ErrInvalidResellerOwnerSubject     = errors.New("invalid reseller owner subject")
+	ErrInvalidResellerStatus           = errors.New("invalid reseller status")
+	ErrInvalidResellerCustomerStatus   = errors.New("invalid reseller customer status")
+	ErrInvalidResellerCustomerIdentity = errors.New("invalid reseller customer identity")
+	ErrInvalidResellerCustomerRemark   = errors.New("invalid reseller customer remark")
+	ErrInvalidResellerInvitation       = errors.New("invalid reseller invitation")
+	ErrInvalidResellerSubject          = errors.New("invalid reseller subject")
+	ErrResellerConflict                = errors.New("reseller conflict")
+	ErrResellerNotFound                = errors.New("reseller not found")
+	ErrResellerForbidden               = errors.New("reseller forbidden")
+	ErrResellerInvitationNotFound      = errors.New("reseller invitation not found")
+	ErrResellerInvitationExpired       = errors.New("reseller invitation expired")
+	ErrResellerInvitationRevoked       = errors.New("reseller invitation revoked")
+	ErrResellerInvitationConsumed      = errors.New("reseller invitation consumed")
+	ErrResellerCustomerNotFound        = errors.New("reseller customer not found")
+	ErrResellerCustomerConflict        = errors.New("reseller customer conflict")
 )
 
 type Reseller struct {
@@ -76,6 +79,9 @@ type ResellerCustomer struct {
 	Id         int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	ResellerId int    `json:"reseller_id" gorm:"not null;index"`
 	Subject    string `json:"subject" gorm:"type:varchar(255);not null;uniqueIndex"`
+	MatrixName string `json:"matrix_name" gorm:"type:varchar(255);not null;default:''"`
+	Phone      string `json:"phone" gorm:"type:varchar(50);not null;default:''"`
+	Remark     string `json:"-" gorm:"type:varchar(255);not null;default:''"`
 	Status     string `json:"status" gorm:"type:varchar(16);not null;index"`
 	CreatedAt  int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt  int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
@@ -137,6 +143,9 @@ type ResellerCustomerRecord struct {
 	UserId                int     `json:"user_id"`
 	Username              string  `json:"username"`
 	DisplayName           string  `json:"display_name"`
+	MatrixName            string  `json:"matrix_name"`
+	Phone                 string  `json:"phone"`
+	Remark                *string `json:"remark,omitempty"`
 	BalanceQuota          int     `json:"-"`
 	GiftBalanceQuota      int     `json:"-"`
 	PaidBalanceQuota      int     `json:"-"`
@@ -277,9 +286,9 @@ func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 	return records, nil
 }
 
-func ListResellerCustomerRecords(resellerId int) ([]ResellerCustomerRecord, error) {
+func ListResellerCustomerRecords(resellerId int, includeRemark bool) ([]ResellerCustomerRecord, error) {
 	records := make([]ResellerCustomerRecord, 0)
-	err := resellerCustomerRecordsQuery(DB).
+	err := resellerCustomerRecordsQuery(DB, includeRemark).
 		Where("customers.reseller_id = ?", resellerId).
 		Order("customers.id ASC").
 		Scan(&records).Error
@@ -292,9 +301,9 @@ func ListResellerCustomerRecords(resellerId int) ([]ResellerCustomerRecord, erro
 	return records, nil
 }
 
-func GetResellerCustomerRecord(resellerId int, customerId int) (*ResellerCustomerRecord, error) {
+func GetResellerCustomerRecord(resellerId int, customerId int, includeRemark bool) (*ResellerCustomerRecord, error) {
 	var record ResellerCustomerRecord
-	result := resellerCustomerRecordsQuery(DB).
+	result := resellerCustomerRecordsQuery(DB, includeRemark).
 		Where("customers.id = ? AND customers.reseller_id = ?", customerId, resellerId).
 		Limit(1).
 		Scan(&record)
@@ -308,7 +317,7 @@ func GetResellerCustomerRecord(resellerId int, customerId int) (*ResellerCustome
 	return &record, nil
 }
 
-func UpdateResellerCustomerRecordStatus(resellerId int, customerId int, status string) (*ResellerCustomerRecord, error) {
+func UpdateResellerCustomerRecordStatus(resellerId int, customerId int, status string, includeRemark bool) (*ResellerCustomerRecord, error) {
 	if status != ResellerCustomerStatusActive && status != ResellerCustomerStatusSuspend {
 		return nil, ErrInvalidResellerCustomerStatus
 	}
@@ -318,11 +327,37 @@ func UpdateResellerCustomerRecordStatus(resellerId int, customerId int, status s
 	if update.Error != nil {
 		return nil, update.Error
 	}
-	record, err := GetResellerCustomerRecord(resellerId, customerId)
+	record, err := GetResellerCustomerRecord(resellerId, customerId, includeRemark)
 	if err != nil {
 		return nil, err
 	}
 	return record, nil
+}
+
+func UpdateResellerCustomerRecordRemark(resellerId int, customerId int, remark string) (*ResellerCustomerRecord, error) {
+	remark = strings.TrimSpace(remark)
+	if !validResellerCustomerText(remark, 255) {
+		return nil, ErrInvalidResellerCustomerRemark
+	}
+	update := DB.Model(&ResellerCustomer{}).
+		Where("id = ? AND reseller_id = ?", customerId, resellerId).
+		Update("remark", remark)
+	if update.Error != nil {
+		return nil, update.Error
+	}
+	return GetResellerCustomerRecord(resellerId, customerId, true)
+}
+
+func SyncResellerCustomerIdentity(subject string, matrixName string, phone string) (bool, error) {
+	matrixName = strings.TrimSpace(matrixName)
+	phone = strings.TrimSpace(phone)
+	if !ValidResellerSubject(subject) || !validResellerCustomerText(matrixName, 255) || !validResellerCustomerText(phone, 50) {
+		return false, ErrInvalidResellerCustomerIdentity
+	}
+	update := DB.Model(&ResellerCustomer{}).
+		Where("subject = ?", subject).
+		Updates(map[string]any{"matrix_name": matrixName, "phone": phone})
+	return update.RowsAffected > 0, update.Error
 }
 
 func ListResellerInvitationRecords(resellerId int) ([]ResellerInvitationRecord, error) {
@@ -409,8 +444,10 @@ func RevokeResellerInvitationRecord(resellerId int, invitationId int) (*Reseller
 	return record, nil
 }
 
-func ConsumeResellerInvitationRecord(token string, subject string) (*ResellerInvitationConsumeRecord, error) {
-	if token == "" || len(token) > 255 || strings.TrimSpace(token) != token || !ValidResellerSubject(subject) {
+func ConsumeResellerInvitationRecord(token string, subject string, matrixName string, phone string) (*ResellerInvitationConsumeRecord, error) {
+	matrixName = strings.TrimSpace(matrixName)
+	phone = strings.TrimSpace(phone)
+	if token == "" || len(token) > 255 || strings.TrimSpace(token) != token || !ValidResellerSubject(subject) || !validResellerCustomerText(matrixName, 255) || !validResellerCustomerText(phone, 50) {
 		return nil, ErrInvalidResellerInvitation
 	}
 
@@ -459,6 +496,8 @@ func ConsumeResellerInvitationRecord(token string, subject string) (*ResellerInv
 		customer := ResellerCustomer{
 			ResellerId: invitation.ResellerId,
 			Subject:    subject,
+			MatrixName: matrixName,
+			Phone:      phone,
 			Status:     ResellerCustomerStatusActive,
 		}
 		if err := tx.Create(&customer).Error; err != nil {
@@ -470,10 +509,12 @@ func ConsumeResellerInvitationRecord(token string, subject string) (*ResellerInv
 
 		response = &ResellerInvitationConsumeRecord{
 			Customer: ResellerCustomerRecord{
-				Id:       customer.Id,
-				Subject:  customer.Subject,
-				Status:   customer.Status,
-				JoinedAt: customer.CreatedAt,
+				Id:         customer.Id,
+				Subject:    customer.Subject,
+				MatrixName: customer.MatrixName,
+				Phone:      customer.Phone,
+				Status:     customer.Status,
+				JoinedAt:   customer.CreatedAt,
 			},
 			ResellerId:   invitation.ResellerId,
 			ResellerName: reseller.Name,
@@ -527,10 +568,12 @@ func TransferResellerCustomerRecord(customerId int, targetResellerId int) (*Rese
 			PreviousResellerId: previousResellerId,
 			TargetResellerId:   targetResellerId,
 			Customer: ResellerCustomerRecord{
-				Id:       customer.Id,
-				Subject:  customer.Subject,
-				Status:   customer.Status,
-				JoinedAt: customer.CreatedAt,
+				Id:         customer.Id,
+				Subject:    customer.Subject,
+				MatrixName: customer.MatrixName,
+				Phone:      customer.Phone,
+				Status:     customer.Status,
+				JoinedAt:   customer.CreatedAt,
 			},
 		}
 		return nil
@@ -630,12 +673,28 @@ func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 		Group("r.id, r.name, r.status, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
 }
 
-func resellerCustomerRecordsQuery(db *gorm.DB) *gorm.DB {
+func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {
+	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
+	if includeRemark {
+		fields += ", customers.remark"
+	}
 	return db.Table("reseller_customers AS customers").
-		Select("customers.id, customers.subject, customers.status, customers.created_at AS joined_at, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count").
+		Select(fields).
 		Joins("LEFT JOIN user_ssos AS customer_sso ON customer_sso.sso_sub = customers.subject").
 		Joins("LEFT JOIN users AS customer_sso_user ON customer_sso_user.id = customer_sso.user_id AND customer_sso_user.deleted_at IS NULL").
 		Joins("LEFT JOIN users AS customer_oidc_user ON customer_oidc_user.id = (SELECT MIN(customer_candidate.id) FROM users AS customer_candidate WHERE customer_candidate.oidc_id = customers.subject AND customer_candidate.deleted_at IS NULL)")
+}
+
+func validResellerCustomerText(value string, maxRunes int) bool {
+	if utf8.RuneCountInString(value) > maxRunes || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, character := range value {
+		if character < 0x20 || character == 0x7f {
+			return false
+		}
+	}
+	return true
 }
 
 func resellerBalanceAmount(quota int) float64 {

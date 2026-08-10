@@ -18,6 +18,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerManagementRoute.GET("/customers", controller.ListResellerManagementCustomers)
 	resellerManagementRoute.GET("/customers/:id", controller.GetResellerManagementCustomer)
 	resellerManagementRoute.PATCH("/customers/:id/status", controller.UpdateResellerManagementCustomerStatus)
+	resellerManagementRoute.PATCH("/customers/:id/remark", controller.UpdateResellerManagementCustomerRemark)
 	resellerManagementRoute.GET("/invitations", controller.ListResellerManagementInvitations)
 	resellerManagementRoute.POST("/invitations", controller.CreateResellerManagementInvitation)
 	resellerManagementRoute.POST("/invitations/:id/revoke", controller.RevokeResellerManagementInvitation)
@@ -28,6 +29,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerRegistrationRoute := apiRouter.Group("/internal/v1/reseller/registration")
 	resellerRegistrationRoute.Use(middleware.ResellerRegistrationServiceAuth())
 	resellerRegistrationRoute.POST("/invitations/consume", controller.ConsumeResellerRegistrationInvitation)
+	resellerRegistrationRoute.POST("/customers/profile", controller.SyncResellerRegistrationCustomerIdentity)
 
 	resellerAdminRoute := apiRouter.Group("/internal/v1/platform/resellers")
 	resellerAdminRoute.Use(middleware.ResellerAdminServiceAuth())

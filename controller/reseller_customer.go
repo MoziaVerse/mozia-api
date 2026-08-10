@@ -21,6 +21,11 @@ type resellerCustomerStatusRequest struct {
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
+type resellerCustomerRemarkRequest struct {
+	Remark     *string         `json:"remark"`
+	ResellerId json.RawMessage `json:"reseller_id"`
+}
+
 type resellerInvitationCreateRequest struct {
 	ExpiresInHours *int            `json:"expires_in_hours"`
 	ResellerId     json.RawMessage `json:"reseller_id"`
@@ -29,6 +34,15 @@ type resellerInvitationCreateRequest struct {
 type resellerInvitationConsumeRequest struct {
 	Token      string          `json:"token"`
 	Subject    string          `json:"subject"`
+	MatrixName string          `json:"matrix_name"`
+	Phone      string          `json:"phone"`
+	ResellerId json.RawMessage `json:"reseller_id"`
+}
+
+type resellerCustomerIdentitySyncRequest struct {
+	Subject    string          `json:"subject"`
+	MatrixName string          `json:"matrix_name"`
+	Phone      string          `json:"phone"`
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
@@ -75,7 +89,7 @@ func ListResellerManagementCustomers(c *gin.Context) {
 	if !ok {
 		return
 	}
-	records, err := model.ListResellerCustomerRecords(resellerContext.ResellerId)
+	records, err := model.ListResellerCustomerRecords(resellerContext.ResellerId, resellerContext.Role == model.ResellerRoleOwner)
 	if err != nil {
 		logger.LogError(c.Request.Context(), "ListResellerCustomerRecords database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
@@ -93,7 +107,7 @@ func GetResellerManagementCustomer(c *gin.Context) {
 	if !valid {
 		return
 	}
-	record, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId)
+	record, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, resellerContext.Role == model.ResellerRoleOwner)
 	if errors.Is(err, model.ErrResellerCustomerNotFound) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
 		return
@@ -128,7 +142,7 @@ func UpdateResellerManagementCustomerStatus(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
-	record, err := model.UpdateResellerCustomerRecordStatus(resellerContext.ResellerId, customerId, request.Status)
+	record, err := model.UpdateResellerCustomerRecordStatus(resellerContext.ResellerId, customerId, request.Status, resellerContext.Role == model.ResellerRoleOwner)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, record)
@@ -138,6 +152,42 @@ func UpdateResellerManagementCustomerStatus(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
 	default:
 		logger.LogError(c.Request.Context(), "UpdateResellerCustomerRecordStatus database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func UpdateResellerManagementCustomerRemark(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if resellerContext.Role != model.ResellerRoleOwner {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller owner access required")
+		return
+	}
+	customerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerCustomerRemarkRequest
+	if common.Unmarshal(body, &request) != nil || request.Remark == nil || len(request.ResellerId) != 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	record, err := model.UpdateResellerCustomerRecordRemark(resellerContext.ResellerId, customerId, *request.Remark)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrInvalidResellerCustomerRemark):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	case errors.Is(err, model.ErrResellerCustomerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerCustomerRecordRemark database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }
@@ -233,7 +283,7 @@ func ConsumeResellerRegistrationInvitation(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
-	record, err := model.ConsumeResellerInvitationRecord(request.Token, request.Subject)
+	record, err := model.ConsumeResellerInvitationRecord(request.Token, request.Subject, request.MatrixName, request.Phone)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusCreated, record)
@@ -257,6 +307,28 @@ func ConsumeResellerRegistrationInvitation(c *gin.Context) {
 	}
 }
 
+func SyncResellerRegistrationCustomerIdentity(c *gin.Context) {
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerCustomerIdentitySyncRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	updated, err := model.SyncResellerCustomerIdentity(request.Subject, request.MatrixName, request.Phone)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, gin.H{"updated": updated})
+	case errors.Is(err, model.ErrInvalidResellerCustomerIdentity):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	default:
+		logger.LogError(c.Request.Context(), "SyncResellerCustomerIdentity database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
 func ListResellerAdminCustomers(c *gin.Context) {
 	resellerId, valid := positivePathID(c)
 	if !valid {
@@ -270,7 +342,7 @@ func ListResellerAdminCustomers(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 		return
 	}
-	records, err := model.ListResellerCustomerRecords(resellerId)
+	records, err := model.ListResellerCustomerRecords(resellerId, false)
 	if err != nil {
 		logger.LogError(c.Request.Context(), "ListResellerCustomerRecords database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")

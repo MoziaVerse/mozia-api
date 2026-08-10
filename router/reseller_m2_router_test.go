@@ -47,6 +47,9 @@ type resellerM2Customer struct {
 	UserId                int     `json:"user_id"`
 	Username              string  `json:"username"`
 	DisplayName           string  `json:"display_name"`
+	MatrixName            string  `json:"matrix_name"`
+	Phone                 string  `json:"phone"`
+	Remark                *string `json:"remark,omitempty"`
 	Balance               float64 `json:"balance"`
 	GiftBalance           float64 `json:"gift_balance"`
 	PaidBalance           float64 `json:"paid_balance"`
@@ -194,7 +197,7 @@ func TestResellerM2Contract(t *testing.T) {
 
 	t.Run("registration handles success replay expired revoked and unique ownership rollback", func(t *testing.T) {
 		successCreate := createInvitationM2(t, request, "owner-a", "portal-a.example.com", 24)
-		successConsume := request(http.MethodPost, "/api/internal/v1/reseller/registration/invitations/consume", fmt.Sprintf(`{"token":"%s","subject":"customer-a1"}`, successCreate.Token), "matrix-reseller-registration-test-token", "consume-success_123", nil)
+		successConsume := request(http.MethodPost, "/api/internal/v1/reseller/registration/invitations/consume", fmt.Sprintf(`{"token":"%s","subject":"customer-a1","matrix_name":"Matrix 客户 A1","phone":"13800138000"}`, successCreate.Token), "matrix-reseller-registration-test-token", "consume-success_123", nil)
 		successResponse := decodeM2Envelope(t, successConsume)
 		var consumed resellerM2Consume
 		require.NoError(t, common.Unmarshal(successResponse.RawData, &consumed))
@@ -202,6 +205,8 @@ func TestResellerM2Contract(t *testing.T) {
 		assert.Equal(t, "Agency A", consumed.ResellerName)
 		assert.Equal(t, resellerA.Id, consumed.ResellerId)
 		assert.Equal(t, "customer-a1", consumed.Customer.Subject)
+		assert.Equal(t, "Matrix 客户 A1", consumed.Customer.MatrixName)
+		assert.Equal(t, "13800138000", consumed.Customer.Phone)
 
 		replayConsume := request(http.MethodPost, "/api/internal/v1/reseller/registration/invitations/consume", fmt.Sprintf(`{"token":"%s","subject":"customer-a1"}`, successCreate.Token), "matrix-reseller-registration-test-token", "consume-replay_123", nil)
 		replayResponse := decodeM2Envelope(t, replayConsume)
@@ -232,6 +237,95 @@ func TestResellerM2Contract(t *testing.T) {
 		var invitation model.ResellerInvitation
 		require.NoError(t, db.First(&invitation, conflictCreate.Invitation.Id).Error)
 		assert.Nil(t, invitation.ConsumedAt)
+	})
+
+	t.Run("customer identity sync updates existing assignments without creating new ones", func(t *testing.T) {
+		customer := seedCustomerM2(t, db, resellerA.Id, "customer-sync", model.ResellerCustomerStatusActive)
+		recorder := request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/profile", `{"subject":"customer-sync","matrix_name":"同步后的名称","phone":"13900139000"}`, "matrix-reseller-registration-test-token", "profile-sync_123", nil)
+		response := decodeM2Envelope(t, recorder)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		assert.JSONEq(t, `{"updated":true}`, string(response.RawData))
+
+		require.NoError(t, db.First(&customer, customer.Id).Error)
+		assert.Equal(t, "同步后的名称", customer.MatrixName)
+		assert.Equal(t, "13900139000", customer.Phone)
+
+		missing := request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/profile", `{"subject":"not-a-customer","matrix_name":"路人","phone":""}`, "matrix-reseller-registration-test-token", "profile-missing_123", nil)
+		missingResponse := decodeM2Envelope(t, missing)
+		require.Equal(t, http.StatusOK, missing.Code)
+		assert.JSONEq(t, `{"updated":false}`, string(missingResponse.RawData))
+	})
+
+	t.Run("only the reseller owner can read and edit customer remarks", func(t *testing.T) {
+		customer := model.ResellerCustomer{
+			ResellerId: resellerA.Id,
+			Subject:    "customer-remark",
+			MatrixName: "备注客户",
+			Phone:      "13700137000",
+			Remark:     "老板认识的客户",
+			Status:     model.ResellerCustomerStatusActive,
+		}
+		require.NoError(t, db.Create(&customer).Error)
+
+		adminList := request(http.MethodGet, "/api/internal/v1/reseller/management/customers", "", "matrix-reseller-management-test-token", "remark-admin-list_123", map[string]string{
+			"X-Reseller-Subject": "admin-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		adminResponse := decodeM2Envelope(t, adminList)
+		require.Equal(t, http.StatusOK, adminList.Code)
+		var adminCustomers []map[string]any
+		require.NoError(t, common.Unmarshal(adminResponse.RawData, &adminCustomers))
+		found := false
+		for _, item := range adminCustomers {
+			if int(item["id"].(float64)) == customer.Id {
+				found = true
+				assert.Equal(t, "备注客户", item["matrix_name"])
+				assert.Equal(t, "13700137000", item["phone"])
+				_, hasRemark := item["remark"]
+				assert.False(t, hasRemark)
+			}
+		}
+		assert.True(t, found)
+
+		adminUpdate := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/remark", customer.Id), `{"remark":"越权备注"}`, "matrix-reseller-management-test-token", "remark-admin-update_123", map[string]string{
+			"X-Reseller-Subject": "admin-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		adminUpdateResponse := decodeM2Envelope(t, adminUpdate)
+		require.Equal(t, http.StatusForbidden, adminUpdate.Code)
+		assert.Equal(t, middleware.ResellerErrorForbidden, adminUpdateResponse.Error.Code)
+
+		crossTenantUpdate := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/remark", customer.Id), `{"remark":"其他代理商备注"}`, "matrix-reseller-management-test-token", "remark-cross-tenant_123", map[string]string{
+			"X-Reseller-Subject": "owner-b",
+			"X-Reseller-Host":    "portal-b.example.com",
+		})
+		crossTenantResponse := decodeM2Envelope(t, crossTenantUpdate)
+		require.Equal(t, http.StatusNotFound, crossTenantUpdate.Code)
+		assert.Equal(t, middleware.ResellerErrorNotFound, crossTenantResponse.Error.Code)
+
+		ownerUpdate := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/remark", customer.Id), `{"remark":"  重点客户  "}`, "matrix-reseller-management-test-token", "remark-owner-update_123", map[string]string{
+			"X-Reseller-Subject": "owner-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		ownerUpdateResponse := decodeM2Envelope(t, ownerUpdate)
+		var updated resellerM2Customer
+		require.NoError(t, common.Unmarshal(ownerUpdateResponse.RawData, &updated))
+		require.Equal(t, http.StatusOK, ownerUpdate.Code)
+		require.NotNil(t, updated.Remark)
+		assert.Equal(t, "重点客户", *updated.Remark)
+
+		ownerList := request(http.MethodGet, "/api/internal/v1/reseller/management/customers", "", "matrix-reseller-management-test-token", "remark-owner-list_123", map[string]string{
+			"X-Reseller-Subject": "owner-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		ownerResponse := decodeM2Envelope(t, ownerList)
+		require.Equal(t, http.StatusOK, ownerList.Code)
+		assert.Contains(t, string(ownerResponse.RawData), `"remark":"重点客户"`)
+
+		platformList := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers", resellerA.Id), "", "mozia-mega-test-token", "remark-platform-list_123", nil)
+		platformResponse := decodeM2Envelope(t, platformList)
+		require.Equal(t, http.StatusOK, platformList.Code)
+		assert.NotContains(t, string(platformResponse.RawData), `"remark"`)
 	})
 
 	t.Run("concurrent consume only creates one customer", func(t *testing.T) {
