@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -76,7 +77,10 @@ func GetResellerPlatformPricing(c *gin.Context) {
 			wholesale = append(wholesale, record)
 		}
 	}
-	writeResellerAdminSuccess(c, http.StatusOK, gin.H{"rules": wholesale})
+	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
+		"models": resellerPricingModels(wholesale),
+		"rules":  wholesale,
+	})
 }
 
 func CreateResellerPlatformWholesalePrice(c *gin.Context) {
@@ -150,7 +154,33 @@ func GetResellerManagementPricing(c *gin.Context) {
 		handleResellerPricingError(c, err)
 		return
 	}
-	writeResellerAdminSuccess(c, http.StatusOK, gin.H{"rules": records})
+	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
+		"models": resellerPricingModels(records),
+		"rules":  records,
+	})
+}
+
+func resellerPricingModels(records []model.ResellerPriceRuleRecord) []string {
+	models := model.GetEnabledModels()
+	for _, record := range records {
+		models = append(models, record.Model)
+	}
+
+	unique := make(map[string]struct{}, len(models))
+	filtered := make([]string, 0, len(models))
+	for _, name := range models {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, seen := unique[name]; seen {
+			continue
+		}
+		unique[name] = struct{}{}
+		filtered = append(filtered, name)
+	}
+	sort.Strings(filtered)
+	return filtered
 }
 
 func CreateResellerManagementRetailPrice(c *gin.Context) {

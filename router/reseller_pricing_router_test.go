@@ -17,7 +17,8 @@ type resellerPricingRuleEnvelopeData struct {
 }
 
 type resellerPricingListEnvelopeData struct {
-	Rules []model.ResellerPriceRuleRecord `json:"rules"`
+	Models []string                        `json:"models"`
+	Rules  []model.ResellerPriceRuleRecord `json:"rules"`
 }
 
 type resellerPlatformPricingPreview struct {
@@ -39,6 +40,13 @@ type resellerManagementPricingPreview struct {
 
 func TestResellerM3PricingContract(t *testing.T) {
 	_, db, request := setupResellerM2Test(t)
+	require.NoError(t, db.AutoMigrate(&model.Ability{}))
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "default", Model: "m3-model", ChannelId: 1, Enabled: true},
+		{Group: "default", Model: "enabled-only-z", ChannelId: 2, Enabled: true},
+		{Group: "vip", Model: "enabled-only-a", ChannelId: 3, Enabled: true},
+		{Group: "default", Model: "   ", ChannelId: 4, Enabled: true},
+	}).Error)
 	resellerA := seedResellerM2(t, db, "Pricing Agency A", "pricing-a.example.com", model.ResellerRoleOwner, "pricing-owner-a", "pricing-admin-a", "pricing-viewer-a")
 	resellerB := seedResellerM2(t, db, "Pricing Agency B", "pricing-b.example.com", model.ResellerRoleOwner, "pricing-owner-b", "pricing-admin-b", "pricing-viewer-b")
 	customerA := seedCustomerM2(t, db, resellerA.Id, "pricing-customer-a", model.ResellerCustomerStatusActive)
@@ -85,13 +93,28 @@ func TestResellerM3PricingContract(t *testing.T) {
 		assert.Equal(t, http.StatusConflict, stale.Code)
 		assert.Equal(t, middleware.ResellerErrorConflict, staleEnvelope.Error.Code)
 
+		require.NoError(t, db.Create(&model.ResellerPriceRule{
+			ResellerId:    resellerA.Id,
+			Kind:          model.ResellerPriceRuleKindWholesale,
+			ModelName:     "rule-only-disabled",
+			CustomerId:    0,
+			Version:       1,
+			MultiplierPPM: model.ResellerDefaultMultiplierPPM,
+			Enabled:       false,
+			EffectiveAt:   common.GetTimestamp(),
+			CreatedBy:     "seed",
+		}).Error)
+
 		list := request(http.MethodGet, platformBase, "", "mozia-mega-test-token", "platform-list_123", nil)
 		listEnvelope := decodeM2Envelope(t, list)
 		require.Equal(t, http.StatusOK, list.Code)
 		var listed resellerPricingListEnvelopeData
 		require.NoError(t, common.Unmarshal(listEnvelope.RawData, &listed))
-		require.Len(t, listed.Rules, 1)
-		assert.Equal(t, model.ResellerPriceRuleKindWholesale, listed.Rules[0].Kind)
+		assert.Equal(t, []string{"enabled-only-a", "enabled-only-z", "m3-model", "rule-only-disabled"}, listed.Models)
+		require.Len(t, listed.Rules, 2)
+		assert.Equal(t, []string{"m3-model", "rule-only-disabled"}, []string{listed.Rules[0].Model, listed.Rules[1].Model})
+		assert.Equal(t, []string{model.ResellerPriceRuleKindWholesale, model.ResellerPriceRuleKindWholesale}, []string{listed.Rules[0].Kind, listed.Rules[1].Kind})
+		assert.Equal(t, []bool{true, false}, []bool{listed.Rules[0].Enabled, listed.Rules[1].Enabled})
 
 		preview := request(http.MethodPost, platformBase+"/preview", `{"model":"m3-model","base_quota":"9007199254740993"}`, "mozia-mega-test-token", "platform-preview_123", nil)
 		previewEnvelope := decodeM2Envelope(t, preview)
@@ -181,7 +204,15 @@ func TestResellerM3PricingContract(t *testing.T) {
 		require.Equal(t, http.StatusOK, list.Code)
 		var listed resellerPricingListEnvelopeData
 		require.NoError(t, common.Unmarshal(listEnvelope.RawData, &listed))
-		require.Len(t, listed.Rules, 2)
-		assert.ElementsMatch(t, []string{model.ResellerPriceRuleKindWholesale, model.ResellerPriceRuleKindRetail}, []string{listed.Rules[0].Kind, listed.Rules[1].Kind})
+		assert.Equal(t, []string{"enabled-only-a", "enabled-only-z", "m3-model", "rule-only-disabled"}, listed.Models)
+		require.Len(t, listed.Rules, 3)
+		assert.ElementsMatch(t,
+			[]string{model.ResellerPriceRuleKindWholesale + ":m3-model", model.ResellerPriceRuleKindWholesale + ":rule-only-disabled", model.ResellerPriceRuleKindRetail + ":m3-model"},
+			[]string{
+				listed.Rules[0].Kind + ":" + listed.Rules[0].Model,
+				listed.Rules[1].Kind + ":" + listed.Rules[1].Model,
+				listed.Rules[2].Kind + ":" + listed.Rules[2].Model,
+			},
+		)
 	})
 }
