@@ -49,6 +49,7 @@ type resellerM2Customer struct {
 	DisplayName           string  `json:"display_name"`
 	MatrixName            string  `json:"matrix_name"`
 	Phone                 string  `json:"phone"`
+	ProfileSyncedAt       int64   `json:"profile_synced_at"`
 	Remark                *string `json:"remark,omitempty"`
 	Balance               float64 `json:"balance"`
 	GiftBalance           float64 `json:"gift_balance"`
@@ -249,11 +250,45 @@ func TestResellerM2Contract(t *testing.T) {
 		require.NoError(t, db.First(&customer, customer.Id).Error)
 		assert.Equal(t, "同步后的名称", customer.MatrixName)
 		assert.Equal(t, "13900139000", customer.Phone)
+		assert.Positive(t, customer.ProfileSyncedAt)
 
 		missing := request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/profile", `{"subject":"not-a-customer","matrix_name":"路人","phone":""}`, "matrix-reseller-registration-test-token", "profile-missing_123", nil)
 		missingResponse := decodeM2Envelope(t, missing)
 		require.Equal(t, http.StatusOK, missing.Code)
 		assert.JSONEq(t, `{"updated":false}`, string(missingResponse.RawData))
+	})
+
+	t.Run("profile backfill lists only unsynced customer subjects with bounded pagination", func(t *testing.T) {
+		require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("id > ?", 0).Update("profile_synced_at", common.GetTimestamp()).Error)
+		first := seedCustomerM2(t, db, resellerA.Id, "customer-backfill-a", model.ResellerCustomerStatusActive)
+		second := seedCustomerM2(t, db, resellerB.Id, "customer-backfill-b", model.ResellerCustomerStatusActive)
+		seeded := seedCustomerM2(t, db, resellerA.Id, "customer-backfill-complete", model.ResellerCustomerStatusActive)
+		require.NoError(t, db.Model(&seeded).Update("profile_synced_at", common.GetTimestamp()).Error)
+
+		unauthorized := request(http.MethodGet, "/api/internal/v1/reseller/registration/customers/pending-profiles", "", "", "backfill-unauthorized_123", nil)
+		require.Equal(t, http.StatusUnauthorized, unauthorized.Code)
+
+		pageOne := request(http.MethodGet, "/api/internal/v1/reseller/registration/customers/pending-profiles?limit=1", "", "matrix-reseller-registration-test-token", "backfill-page-one_123", nil)
+		pageOneResponse := decodeM2Envelope(t, pageOne)
+		require.Equal(t, http.StatusOK, pageOne.Code)
+		var firstPage model.ResellerCustomerProfileBackfillPage
+		require.NoError(t, common.Unmarshal(pageOneResponse.RawData, &firstPage))
+		require.Len(t, firstPage.Items, 1)
+		assert.Equal(t, first.Id, firstPage.Items[0].Id)
+		assert.Equal(t, "customer-backfill-a", firstPage.Items[0].Subject)
+		assert.Equal(t, first.Id, firstPage.NextAfterId)
+
+		pageTwo := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/registration/customers/pending-profiles?after_id=%d&limit=1", firstPage.NextAfterId), "", "matrix-reseller-registration-test-token", "backfill-page-two_123", nil)
+		pageTwoResponse := decodeM2Envelope(t, pageTwo)
+		require.Equal(t, http.StatusOK, pageTwo.Code)
+		var secondPage model.ResellerCustomerProfileBackfillPage
+		require.NoError(t, common.Unmarshal(pageTwoResponse.RawData, &secondPage))
+		require.Len(t, secondPage.Items, 1)
+		assert.Equal(t, second.Id, secondPage.Items[0].Id)
+		assert.Zero(t, secondPage.NextAfterId)
+
+		invalid := request(http.MethodGet, "/api/internal/v1/reseller/registration/customers/pending-profiles?limit=201", "", "matrix-reseller-registration-test-token", "backfill-invalid_123", nil)
+		require.Equal(t, http.StatusBadRequest, invalid.Code)
 	})
 
 	t.Run("only the reseller owner can read and edit customer remarks", func(t *testing.T) {

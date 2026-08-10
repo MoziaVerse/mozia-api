@@ -76,15 +76,16 @@ type ResellerMember struct {
 }
 
 type ResellerCustomer struct {
-	Id         int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ResellerId int    `json:"reseller_id" gorm:"not null;index"`
-	Subject    string `json:"subject" gorm:"type:varchar(255);not null;uniqueIndex"`
-	MatrixName string `json:"matrix_name" gorm:"type:varchar(255);not null;default:''"`
-	Phone      string `json:"phone" gorm:"type:varchar(50);not null;default:''"`
-	Remark     string `json:"-" gorm:"type:varchar(255);not null;default:''"`
-	Status     string `json:"status" gorm:"type:varchar(16);not null;index"`
-	CreatedAt  int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt  int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
+	Id              int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	ResellerId      int    `json:"reseller_id" gorm:"not null;index"`
+	Subject         string `json:"subject" gorm:"type:varchar(255);not null;uniqueIndex"`
+	MatrixName      string `json:"matrix_name" gorm:"type:varchar(255);not null;default:''"`
+	Phone           string `json:"phone" gorm:"type:varchar(50);not null;default:''"`
+	ProfileSyncedAt int64  `json:"profile_synced_at" gorm:"not null;default:0;index"`
+	Remark          string `json:"-" gorm:"type:varchar(255);not null;default:''"`
+	Status          string `json:"status" gorm:"type:varchar(16);not null;index"`
+	CreatedAt       int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt       int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
 }
 
 type ResellerInvitation struct {
@@ -145,6 +146,7 @@ type ResellerCustomerRecord struct {
 	DisplayName           string  `json:"display_name"`
 	MatrixName            string  `json:"matrix_name"`
 	Phone                 string  `json:"phone"`
+	ProfileSyncedAt       int64   `json:"profile_synced_at"`
 	Remark                *string `json:"remark,omitempty"`
 	BalanceQuota          int     `json:"-"`
 	GiftBalanceQuota      int     `json:"-"`
@@ -155,6 +157,16 @@ type ResellerCustomerRecord struct {
 	RequestCount          int     `json:"request_count"`
 	BalanceDisplayType    string  `json:"balance_display_type" gorm:"-"`
 	BalanceCurrencySymbol string  `json:"balance_currency_symbol" gorm:"-"`
+}
+
+type ResellerCustomerProfileBackfillCandidate struct {
+	Id      int    `json:"id"`
+	Subject string `json:"subject"`
+}
+
+type ResellerCustomerProfileBackfillPage struct {
+	Items       []ResellerCustomerProfileBackfillCandidate `json:"items"`
+	NextAfterId int                                        `json:"next_after_id"`
 }
 
 type ResellerInvitationRecord struct {
@@ -356,8 +368,32 @@ func SyncResellerCustomerIdentity(subject string, matrixName string, phone strin
 	}
 	update := DB.Model(&ResellerCustomer{}).
 		Where("subject = ?", subject).
-		Updates(map[string]any{"matrix_name": matrixName, "phone": phone})
+		Updates(map[string]any{
+			"matrix_name":       matrixName,
+			"phone":             phone,
+			"profile_synced_at": common.GetTimestamp(),
+		})
 	return update.RowsAffected > 0, update.Error
+}
+
+func ListPendingResellerCustomerProfiles(afterId int, limit int) (*ResellerCustomerProfileBackfillPage, error) {
+	items := make([]ResellerCustomerProfileBackfillCandidate, 0, limit+1)
+	err := DB.Model(&ResellerCustomer{}).
+		Select("id, subject").
+		Where("id > ? AND profile_synced_at = 0", afterId).
+		Order("id ASC").
+		Limit(limit + 1).
+		Scan(&items).Error
+	if err != nil {
+		return nil, err
+	}
+
+	nextAfterId := 0
+	if len(items) > limit {
+		items = items[:limit]
+		nextAfterId = items[len(items)-1].Id
+	}
+	return &ResellerCustomerProfileBackfillPage{Items: items, NextAfterId: nextAfterId}, nil
 }
 
 func ListResellerInvitationRecords(resellerId int) ([]ResellerInvitationRecord, error) {
@@ -494,11 +530,12 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 		}
 
 		customer := ResellerCustomer{
-			ResellerId: invitation.ResellerId,
-			Subject:    subject,
-			MatrixName: matrixName,
-			Phone:      phone,
-			Status:     ResellerCustomerStatusActive,
+			ResellerId:      invitation.ResellerId,
+			Subject:         subject,
+			MatrixName:      matrixName,
+			Phone:           phone,
+			ProfileSyncedAt: now,
+			Status:          ResellerCustomerStatusActive,
 		}
 		if err := tx.Create(&customer).Error; err != nil {
 			if isResellerUniqueConstraintError(err) {
@@ -509,12 +546,13 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 
 		response = &ResellerInvitationConsumeRecord{
 			Customer: ResellerCustomerRecord{
-				Id:         customer.Id,
-				Subject:    customer.Subject,
-				MatrixName: customer.MatrixName,
-				Phone:      customer.Phone,
-				Status:     customer.Status,
-				JoinedAt:   customer.CreatedAt,
+				Id:              customer.Id,
+				Subject:         customer.Subject,
+				MatrixName:      customer.MatrixName,
+				Phone:           customer.Phone,
+				ProfileSyncedAt: customer.ProfileSyncedAt,
+				Status:          customer.Status,
+				JoinedAt:        customer.CreatedAt,
 			},
 			ResellerId:   invitation.ResellerId,
 			ResellerName: reseller.Name,
@@ -568,12 +606,13 @@ func TransferResellerCustomerRecord(customerId int, targetResellerId int) (*Rese
 			PreviousResellerId: previousResellerId,
 			TargetResellerId:   targetResellerId,
 			Customer: ResellerCustomerRecord{
-				Id:         customer.Id,
-				Subject:    customer.Subject,
-				MatrixName: customer.MatrixName,
-				Phone:      customer.Phone,
-				Status:     customer.Status,
-				JoinedAt:   customer.CreatedAt,
+				Id:              customer.Id,
+				Subject:         customer.Subject,
+				MatrixName:      customer.MatrixName,
+				Phone:           customer.Phone,
+				ProfileSyncedAt: customer.ProfileSyncedAt,
+				Status:          customer.Status,
+				JoinedAt:        customer.CreatedAt,
 			},
 		}
 		return nil
@@ -674,7 +713,7 @@ func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 }
 
 func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {
-	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
+	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
 	if includeRemark {
 		fields += ", customers.remark"
 	}

@@ -15,6 +15,8 @@ import (
 )
 
 const resellerManagementBodyLimit = 4 << 10
+const resellerProfileBackfillDefaultLimit = 100
+const resellerProfileBackfillMaxLimit = 200
 
 type resellerCustomerStatusRequest struct {
 	Status     string          `json:"status"`
@@ -327,6 +329,39 @@ func SyncResellerRegistrationCustomerIdentity(c *gin.Context) {
 		logger.LogError(c.Request.Context(), "SyncResellerCustomerIdentity database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
+}
+
+func ListPendingResellerRegistrationCustomerProfiles(c *gin.Context) {
+	if _, exists := c.GetQuery("reseller_id"); exists {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	afterId := 0
+	if raw := c.Query("after_id"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 {
+			middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+			return
+		}
+		afterId = value
+	}
+	limit := resellerProfileBackfillDefaultLimit
+	if raw := c.Query("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > resellerProfileBackfillMaxLimit {
+			middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+			return
+		}
+		limit = value
+	}
+
+	page, err := model.ListPendingResellerCustomerProfiles(afterId, limit)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "ListPendingResellerCustomerProfiles database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, page)
 }
 
 func ListResellerAdminCustomers(c *gin.Context) {

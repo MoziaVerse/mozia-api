@@ -30,6 +30,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerRegistrationRoute.Use(middleware.ResellerRegistrationServiceAuth())
 	resellerRegistrationRoute.POST("/invitations/consume", controller.ConsumeResellerRegistrationInvitation)
 	resellerRegistrationRoute.POST("/customers/profile", controller.SyncResellerRegistrationCustomerIdentity)
+	resellerRegistrationRoute.GET("/customers/pending-profiles", controller.ListPendingResellerRegistrationCustomerProfiles)
 
 	resellerAdminRoute := apiRouter.Group("/internal/v1/platform/resellers")
 	resellerAdminRoute.Use(middleware.ResellerAdminServiceAuth())
