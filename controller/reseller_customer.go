@@ -49,10 +49,6 @@ type resellerCustomerIdentitySyncRequest struct {
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
-type resellerCustomerTransferRequest struct {
-	TargetResellerId int `json:"target_reseller_id"`
-}
-
 type resellerCustomerBatchAssignRequest struct {
 	Customers  []model.ResellerCustomerBatchAssignInput `json:"customers"`
 	ResellerId json.RawMessage                          `json:"reseller_id"`
@@ -392,32 +388,24 @@ func ListResellerAdminCustomers(c *gin.Context) {
 	writeResellerAdminSuccess(c, http.StatusOK, records)
 }
 
-func TransferResellerAdminCustomer(c *gin.Context) {
-	customerId, valid := positivePathID(c)
+func UnbindResellerAdminCustomer(c *gin.Context) {
+	resellerId, valid := positivePathID(c)
 	if !valid {
 		return
 	}
-	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
-	if !ok {
-		return
-	}
-	var request resellerCustomerTransferRequest
-	if common.Unmarshal(body, &request) != nil || request.TargetResellerId < 1 {
+	customerId, err := strconv.Atoi(c.Param("customer_id"))
+	if err != nil || customerId < 1 {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
-	record, err := model.TransferResellerCustomerRecord(customerId, request.TargetResellerId)
+	err = model.UnbindResellerCustomerRecord(resellerId, customerId)
 	switch {
 	case err == nil:
-		writeResellerAdminSuccess(c, http.StatusOK, record)
+		writeResellerAdminSuccess(c, http.StatusOK, gin.H{"reseller_id": resellerId, "customer_id": customerId})
 	case errors.Is(err, model.ErrResellerCustomerNotFound):
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
-	case errors.Is(err, model.ErrResellerNotFound):
-		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
-	case errors.Is(err, model.ErrResellerCustomerConflict):
-		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller customer already assigned to target reseller")
 	default:
-		logger.LogError(c.Request.Context(), "TransferResellerCustomerRecord database error: "+err.Error())
+		logger.LogError(c.Request.Context(), "UnbindResellerCustomerRecord database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }

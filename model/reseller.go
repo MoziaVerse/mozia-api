@@ -196,12 +196,6 @@ type ResellerInvitationConsumeRecord struct {
 	ResellerName string                 `json:"reseller_name"`
 }
 
-type ResellerCustomerTransferRecord struct {
-	PreviousResellerId int                    `json:"previous_reseller_id"`
-	TargetResellerId   int                    `json:"target_reseller_id"`
-	Customer           ResellerCustomerRecord `json:"customer"`
-}
-
 type ResellerCustomerBatchAssignInput struct {
 	Subject    string `json:"subject"`
 	MatrixName string `json:"matrix_name"`
@@ -613,62 +607,15 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 	return response, nil
 }
 
-func TransferResellerCustomerRecord(customerId int, targetResellerId int) (*ResellerCustomerTransferRecord, error) {
-	if targetResellerId < 1 {
-		return nil, ErrResellerNotFound
+func UnbindResellerCustomerRecord(resellerId int, customerId int) error {
+	result := DB.Where("id = ? AND reseller_id = ?", customerId, resellerId).Delete(&ResellerCustomer{})
+	if result.Error != nil {
+		return result.Error
 	}
-
-	var response *ResellerCustomerTransferRecord
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		var customer ResellerCustomer
-		if err := tx.Where("id = ?", customerId).Take(&customer).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrResellerCustomerNotFound
-			}
-			return err
-		}
-
-		var target Reseller
-		if err := tx.Select("id", "status").Where("id = ?", targetResellerId).Take(&target).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrResellerNotFound
-			}
-			return err
-		}
-		if target.Status != ResellerStatusActive {
-			return ErrResellerNotFound
-		}
-
-		previousResellerId := customer.ResellerId
-		if previousResellerId == targetResellerId {
-			return ErrResellerCustomerConflict
-		}
-		if err := tx.Model(&ResellerCustomer{}).
-			Where("id = ?", customerId).
-			Update("reseller_id", targetResellerId).Error; err != nil {
-			return err
-		}
-		customer.ResellerId = targetResellerId
-
-		response = &ResellerCustomerTransferRecord{
-			PreviousResellerId: previousResellerId,
-			TargetResellerId:   targetResellerId,
-			Customer: ResellerCustomerRecord{
-				Id:              customer.Id,
-				Subject:         customer.Subject,
-				MatrixName:      customer.MatrixName,
-				Phone:           customer.Phone,
-				ProfileSyncedAt: customer.ProfileSyncedAt,
-				Status:          customer.Status,
-				JoinedAt:        customer.CreatedAt,
-			},
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
+	if result.RowsAffected == 0 {
+		return ErrResellerCustomerNotFound
 	}
-	return response, nil
+	return nil
 }
 
 func BatchAssignResellerCustomerRecords(resellerId int, inputs []ResellerCustomerBatchAssignInput) (*ResellerCustomerBatchAssignRecord, error) {

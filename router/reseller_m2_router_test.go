@@ -81,12 +81,6 @@ type resellerM2Consume struct {
 	ResellerName string             `json:"reseller_name"`
 }
 
-type resellerM2Transfer struct {
-	PreviousResellerId int                `json:"previous_reseller_id"`
-	TargetResellerId   int                `json:"target_reseller_id"`
-	Customer           resellerM2Customer `json:"customer"`
-}
-
 type resellerM2BatchAssignResult struct {
 	Subject           string `json:"subject"`
 	Status            string `json:"status"`
@@ -401,7 +395,7 @@ func TestResellerM2Contract(t *testing.T) {
 		assert.Equal(t, int64(1), customerCount)
 	})
 
-	t.Run("customer status update and platform transfer work end to end", func(t *testing.T) {
+	t.Run("customer status update and platform unbind work end to end", func(t *testing.T) {
 		customer := seedCustomerM2(t, db, resellerA.Id, "customer-transfer", model.ResellerCustomerStatusActive)
 		gatewayUser := model.User{
 			Username: "customer-transfer", DisplayName: "客户 Transfer", Password: "test-password", AffCode: "aff-customer-transfer", Quota: 5000000, UsedQuota: 2500000, RequestCount: 17,
@@ -446,29 +440,23 @@ func TestResellerM2Contract(t *testing.T) {
 		}
 		assert.True(t, found)
 
-		transferRecorder := request(http.MethodPost, fmt.Sprintf("/api/internal/v1/platform/reseller-customers/%d/transfer", customer.Id), fmt.Sprintf(`{"target_reseller_id":%d}`, resellerB.Id), "mozia-mega-test-token", "platform-transfer_123", nil)
-		transferResponse := decodeM2Envelope(t, transferRecorder)
-		var transferred resellerM2Transfer
-		require.NoError(t, common.Unmarshal(transferResponse.RawData, &transferred))
-		require.Equal(t, http.StatusOK, transferRecorder.Code)
-		assert.Equal(t, resellerA.Id, transferred.PreviousResellerId)
-		assert.Equal(t, resellerB.Id, transferred.TargetResellerId)
-		assert.Equal(t, model.ResellerCustomerStatusSuspend, transferred.Customer.Status)
+		wrongReseller := request(http.MethodDelete, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/%d", resellerB.Id, customer.Id), "", "mozia-mega-test-token", "platform-unbind-wrong_123", nil)
+		wrongResponse := decodeM2Envelope(t, wrongReseller)
+		require.Equal(t, http.StatusNotFound, wrongReseller.Code)
+		assert.Equal(t, middleware.ResellerErrorNotFound, wrongResponse.Error.Code)
+		require.NoError(t, db.First(&model.ResellerCustomer{}, customer.Id).Error)
 
-		duplicateRecorder := request(http.MethodPost, fmt.Sprintf("/api/internal/v1/platform/reseller-customers/%d/transfer", customer.Id), fmt.Sprintf(`{"target_reseller_id":%d}`, resellerB.Id), "mozia-mega-test-token", "platform-duplicate_123", nil)
-		duplicateResponse := decodeM2Envelope(t, duplicateRecorder)
-		require.Equal(t, http.StatusConflict, duplicateRecorder.Code)
-		assert.Equal(t, middleware.ResellerErrorConflict, duplicateResponse.Error.Code)
-
-		customerRecorder := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d", customer.Id), "", "matrix-reseller-management-test-token", "platform-transfer-scope_123", map[string]string{
-			"X-Reseller-Subject": "admin-b",
-			"X-Reseller-Host":    "portal-b.example.com",
-		})
-		customerResponse := decodeM2Envelope(t, customerRecorder)
-		var moved resellerM2Customer
-		require.NoError(t, common.Unmarshal(customerResponse.RawData, &moved))
-		require.Equal(t, http.StatusOK, customerRecorder.Code)
-		assert.Equal(t, "customer-transfer", moved.Subject)
+		unbindRecorder := request(http.MethodDelete, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/%d", resellerA.Id, customer.Id), "", "mozia-mega-test-token", "platform-unbind_123", nil)
+		unbindResponse := decodeM2Envelope(t, unbindRecorder)
+		var unbound struct {
+			ResellerId int `json:"reseller_id"`
+			CustomerId int `json:"customer_id"`
+		}
+		require.NoError(t, common.Unmarshal(unbindResponse.RawData, &unbound))
+		require.Equal(t, http.StatusOK, unbindRecorder.Code)
+		assert.Equal(t, resellerA.Id, unbound.ResellerId)
+		assert.Equal(t, customer.Id, unbound.CustomerId)
+		assert.ErrorIs(t, db.First(&model.ResellerCustomer{}, customer.Id).Error, gorm.ErrRecordNotFound)
 	})
 
 	t.Run("platform batch assign classifies mixed ownership and retries safely", func(t *testing.T) {
