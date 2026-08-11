@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"os"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -30,6 +31,10 @@ const (
 	ResellerInvitationStatusExpired  = "expired"
 	ResellerInvitationStatusRevoked  = "revoked"
 	ResellerInvitationStatusConsumed = "consumed"
+
+	ResellerCustomerBatchAssignStatusAssigned             = "assigned"
+	ResellerCustomerBatchAssignStatusAlreadyInTarget      = "already_in_target"
+	ResellerCustomerBatchAssignStatusOwnedByOtherReseller = "owned_by_other_reseller"
 )
 
 var (
@@ -197,6 +202,24 @@ type ResellerCustomerTransferRecord struct {
 	Customer           ResellerCustomerRecord `json:"customer"`
 }
 
+type ResellerCustomerBatchAssignInput struct {
+	Subject    string `json:"subject"`
+	MatrixName string `json:"matrix_name"`
+	Phone      string `json:"phone"`
+}
+
+type ResellerCustomerBatchAssignResult struct {
+	Subject           string `json:"subject"`
+	Status            string `json:"status"`
+	CustomerId        *int   `json:"customer_id,omitempty"`
+	CurrentResellerId *int   `json:"current_reseller_id,omitempty"`
+}
+
+type ResellerCustomerBatchAssignRecord struct {
+	ResellerId int                                 `json:"reseller_id"`
+	Results    []ResellerCustomerBatchAssignResult `json:"results"`
+}
+
 func NormalizeResellerHost(raw string) (string, error) {
 	if raw == "" || len(raw) > 260 || strings.TrimSpace(raw) != raw {
 		return "", ErrInvalidResellerHost
@@ -247,6 +270,14 @@ func NormalizeResellerHost(raw string) (string, error) {
 	return host, nil
 }
 
+func configuredResellerSharedHost() string {
+	host, err := NormalizeResellerHost(strings.TrimSpace(os.Getenv("MATRIX_RESELLER_SHARED_HOST")))
+	if err != nil {
+		return ""
+	}
+	return host
+}
+
 func ValidResellerSubject(subject string) bool {
 	if subject == "" || len(subject) > 255 || strings.TrimSpace(subject) != subject {
 		return false
@@ -260,12 +291,29 @@ func ValidResellerSubject(subject string) bool {
 }
 
 func ResolveResellerContext(subject string, host string) (*ResellerContext, error) {
-	var context ResellerContext
-	err := DB.Table("reseller_members AS rm").
-		Select("r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role").
+	query := DB.Table("reseller_members AS rm").
 		Joins("JOIN resellers AS r ON r.id = rm.reseller_id AND r.status = ?", ResellerStatusActive).
+		Where("rm.subject = ? AND rm.status = ?", subject, ResellerMemberStatusActive)
+	if host == configuredResellerSharedHost() {
+		var contexts []ResellerContext
+		err := query.
+			Select("r.id AS reseller_id, r.name AS reseller_name, rm.subject, rm.role").
+			Limit(2).
+			Scan(&contexts).Error
+		if err != nil {
+			return nil, err
+		}
+		if len(contexts) != 1 {
+			return nil, gorm.ErrRecordNotFound
+		}
+		contexts[0].Host = host
+		return &contexts[0], nil
+	}
+
+	var context ResellerContext
+	err := query.
+		Select("r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role").
 		Joins("JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
-		Where("rm.subject = ? AND rm.status = ?", subject, ResellerMemberStatusActive).
 		Take(&context).Error
 	if err != nil {
 		return nil, err
@@ -623,6 +671,89 @@ func TransferResellerCustomerRecord(customerId int, targetResellerId int) (*Rese
 	return response, nil
 }
 
+func BatchAssignResellerCustomerRecords(resellerId int, inputs []ResellerCustomerBatchAssignInput) (*ResellerCustomerBatchAssignRecord, error) {
+	if resellerId < 1 {
+		return nil, ErrResellerNotFound
+	}
+
+	var reseller Reseller
+	if err := DB.Select("id", "status").Where("id = ?", resellerId).Take(&reseller).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrResellerNotFound
+		}
+		return nil, err
+	}
+	if reseller.Status != ResellerStatusActive {
+		return nil, ErrResellerNotFound
+	}
+
+	normalized := make([]ResellerCustomerBatchAssignInput, 0, len(inputs))
+	for _, input := range inputs {
+		item := ResellerCustomerBatchAssignInput{
+			Subject:    input.Subject,
+			MatrixName: strings.TrimSpace(input.MatrixName),
+			Phone:      strings.TrimSpace(input.Phone),
+		}
+		if !ValidResellerSubject(item.Subject) || !validResellerCustomerText(item.MatrixName, 255) || !validResellerCustomerText(item.Phone, 50) {
+			return nil, ErrInvalidResellerCustomerIdentity
+		}
+		normalized = append(normalized, item)
+	}
+
+	results := make([]ResellerCustomerBatchAssignResult, 0, len(inputs))
+	for _, input := range normalized {
+		result, err := batchAssignResellerCustomerRecord(resellerId, input.Subject, input.MatrixName, input.Phone)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, *result)
+	}
+
+	return &ResellerCustomerBatchAssignRecord{
+		ResellerId: resellerId,
+		Results:    results,
+	}, nil
+}
+
+func batchAssignResellerCustomerRecord(resellerId int, subject string, matrixName string, phone string) (*ResellerCustomerBatchAssignResult, error) {
+	now := common.GetTimestamp()
+	result := ResellerCustomerBatchAssignResult{Subject: subject}
+	customer := ResellerCustomer{
+		ResellerId:      resellerId,
+		Subject:         subject,
+		MatrixName:      matrixName,
+		Phone:           phone,
+		ProfileSyncedAt: now,
+		Status:          ResellerCustomerStatusActive,
+	}
+	if err := DB.Create(&customer).Error; err == nil {
+		customerId := customer.Id
+		currentResellerId := resellerId
+		result.Status = ResellerCustomerBatchAssignStatusAssigned
+		result.CustomerId = &customerId
+		result.CurrentResellerId = &currentResellerId
+		return &result, nil
+	} else if !isResellerUniqueConstraintError(err) {
+		return nil, err
+	}
+
+	var existing ResellerCustomer
+	if err := DB.Select("id", "reseller_id").Where("subject = ?", subject).Take(&existing).Error; err != nil {
+		return nil, err
+	}
+
+	customerId := existing.Id
+	currentResellerId := existing.ResellerId
+	result.CustomerId = &customerId
+	result.CurrentResellerId = &currentResellerId
+	if existing.ResellerId == resellerId {
+		result.Status = ResellerCustomerBatchAssignStatusAlreadyInTarget
+		return &result, nil
+	}
+	result.Status = ResellerCustomerBatchAssignStatusOwnedByOtherReseller
+	return &result, nil
+}
+
 func CreateResellerAdminRecord(name string, host string, ownerSubject string) (*ResellerAdminRecord, error) {
 	if !validResellerName(name) {
 		return nil, ErrInvalidResellerName
@@ -641,13 +772,15 @@ func CreateResellerAdminRecord(name string, host string, ownerSubject string) (*
 		if err := tx.Create(&reseller).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(&ResellerDomain{
-			ResellerId: reseller.Id,
-			Host:       normalizedHost,
-			Verified:   true,
-			Status:     ResellerDomainStatusActive,
-		}).Error; err != nil {
-			return err
+		if normalizedHost != configuredResellerSharedHost() {
+			if err := tx.Create(&ResellerDomain{
+				ResellerId: reseller.Id,
+				Host:       normalizedHost,
+				Verified:   true,
+				Status:     ResellerDomainStatusActive,
+			}).Error; err != nil {
+				return err
+			}
 		}
 		if err := tx.Create(&ResellerMember{
 			ResellerId: reseller.Id,
@@ -747,6 +880,9 @@ func resellerBalanceAmount(quota int) float64 {
 }
 
 func setResellerAdminBalanceDisplay(record *ResellerAdminRecord) {
+	if record.Host == "" {
+		record.Host = configuredResellerSharedHost()
+	}
 	record.OwnerBalance = resellerBalanceAmount(record.OwnerBalanceQuota)
 	record.OwnerGiftBalance = resellerBalanceAmount(record.OwnerGiftBalanceQuota)
 	record.OwnerPaidBalance = resellerBalanceAmount(record.OwnerPaidBalanceQuota)

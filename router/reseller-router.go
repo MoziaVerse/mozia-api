@@ -38,6 +38,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerAdminRoute.POST("", controller.CreateResellerAdmin)
 	resellerAdminRoute.PATCH("/:id/status", controller.UpdateResellerAdminStatus)
 	resellerAdminRoute.GET("/:id/customers", controller.ListResellerAdminCustomers)
+	resellerAdminRoute.POST("/:id/customers/batch-assign", controller.BatchAssignResellerAdminCustomers)
 	resellerAdminRoute.GET("/:id/pricing", controller.GetResellerPlatformPricing)
 	resellerAdminRoute.POST("/:id/pricing/wholesale", controller.CreateResellerPlatformWholesalePrice)
 	resellerAdminRoute.POST("/:id/pricing/preview", controller.PreviewResellerPlatformPricing)

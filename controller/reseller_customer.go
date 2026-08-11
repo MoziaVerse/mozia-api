@@ -15,6 +15,7 @@ import (
 )
 
 const resellerManagementBodyLimit = 4 << 10
+const resellerPlatformBatchAssignBodyLimit = 64 << 10
 const resellerProfileBackfillDefaultLimit = 100
 const resellerProfileBackfillMaxLimit = 200
 
@@ -50,6 +51,11 @@ type resellerCustomerIdentitySyncRequest struct {
 
 type resellerCustomerTransferRequest struct {
 	TargetResellerId int `json:"target_reseller_id"`
+}
+
+type resellerCustomerBatchAssignRequest struct {
+	Customers  []model.ResellerCustomerBatchAssignInput `json:"customers"`
+	ResellerId json.RawMessage                          `json:"reseller_id"`
 }
 
 func GetResellerManagementProfile(c *gin.Context) {
@@ -412,6 +418,45 @@ func TransferResellerAdminCustomer(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller customer already assigned to target reseller")
 	default:
 		logger.LogError(c.Request.Context(), "TransferResellerCustomerRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func BatchAssignResellerAdminCustomers(c *gin.Context) {
+	resellerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerPlatformBatchAssignBodyLimit)
+	if !ok {
+		return
+	}
+
+	var request resellerCustomerBatchAssignRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || len(request.Customers) == 0 || len(request.Customers) > 100 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+
+	seenSubjects := make(map[string]struct{}, len(request.Customers))
+	for _, customer := range request.Customers {
+		if _, exists := seenSubjects[customer.Subject]; exists {
+			middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+			return
+		}
+		seenSubjects[customer.Subject] = struct{}{}
+	}
+
+	record, err := model.BatchAssignResellerCustomerRecords(resellerId, request.Customers)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrInvalidResellerCustomerIdentity):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	case errors.Is(err, model.ErrResellerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
+	default:
+		logger.LogError(c.Request.Context(), "BatchAssignResellerCustomerRecords database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -38,17 +39,22 @@ func ListResellerAdminRecords(c *gin.Context) {
 func CreateResellerAdmin(c *gin.Context) {
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerAdminBodyLimit))
 	if err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("CreateResellerAdmin invalid request: read body failed error=%q body=%q", err.Error(), string(body)))
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
 
 	var request createResellerAdminRequest
-	if common.Unmarshal(body, &request) != nil {
+	if err := common.Unmarshal(body, &request); err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("CreateResellerAdmin invalid request: decode failed error=%q body=%q", err.Error(), string(body)))
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
 
 	record, err := model.CreateResellerAdminRecord(request.Name, request.Host, request.OwnerSubject)
+	if err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("CreateResellerAdmin failed error=%q body=%q", err.Error(), common.GetJsonString(request)))
+	}
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusCreated, record)

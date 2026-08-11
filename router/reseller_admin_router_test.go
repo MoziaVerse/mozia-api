@@ -162,6 +162,67 @@ func TestResellerAdminContract(t *testing.T) {
 		assert.Equal(t, model.ResellerMemberStatusActive, member.Status)
 	})
 
+	t.Run("allows multiple resellers on the shared platform host", func(t *testing.T) {
+		_, db, request := setupResellerAdminTest(t)
+
+		create := func(name string, subject string) resellerAdminItemResponse {
+			recorder := request(
+				http.MethodPost,
+				"/api/internal/v1/platform/resellers",
+				fmt.Sprintf(`{"name":%q,"host":"reseller.mzsjai.com","owner_subject":%q}`, name, subject),
+				"mozia-mega-test-token",
+				"shared-host-create_123",
+			)
+			var response resellerAdminItemResponse
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Equal(t, http.StatusCreated, recorder.Code)
+			assert.Equal(t, "reseller.mzsjai.com", response.Data.Host)
+			return response
+		}
+
+		resellerA := create("Shared Agency A", "shared-owner-a")
+		resellerB := create("Shared Agency B", "shared-owner-b")
+
+		var domainCount int64
+		require.NoError(t, db.Model(&model.ResellerDomain{}).Where("host = ?", "reseller.mzsjai.com").Count(&domainCount).Error)
+		assert.Zero(t, domainCount)
+
+		for subject, resellerId := range map[string]int{
+			"shared-owner-a": resellerA.Data.Id,
+			"shared-owner-b": resellerB.Data.Id,
+		} {
+			recorder := request(
+				http.MethodPost,
+				"/api/internal/v1/reseller/context",
+				fmt.Sprintf(`{"subject":%q,"host":"reseller.mzsjai.com"}`, subject),
+				"matrix-reseller-test-token",
+				"shared-host-context_123",
+			)
+			var response resellerAdminContextResponse
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Equal(t, http.StatusOK, recorder.Code)
+			assert.Equal(t, resellerId, response.Data.ResellerId)
+		}
+
+		require.NoError(t, db.Create(&model.ResellerMember{
+			ResellerId: resellerB.Data.Id,
+			Subject:    "shared-owner-a",
+			Role:       model.ResellerRoleViewer,
+			Status:     model.ResellerMemberStatusActive,
+		}).Error)
+		ambiguous := request(
+			http.MethodPost,
+			"/api/internal/v1/reseller/context",
+			`{"subject":"shared-owner-a","host":"reseller.mzsjai.com"}`,
+			"matrix-reseller-test-token",
+			"shared-host-ambiguous_123",
+		)
+		var ambiguousResponse resellerAdminContextResponse
+		require.NoError(t, common.Unmarshal(ambiguous.Body.Bytes(), &ambiguousResponse))
+		require.Equal(t, http.StatusNotFound, ambiguous.Code)
+		assert.Equal(t, middleware.ResellerErrorContextNotFound, ambiguousResponse.Error.Code)
+	})
+
 	t.Run("rejects duplicate host without partial rows", func(t *testing.T) {
 		_, db, request := setupResellerAdminTest(t)
 		seedReseller(t, db, "Agency A", model.ResellerStatusActive, "portal-a.example.com", "oidc-owner-a")
@@ -240,6 +301,7 @@ func setupResellerAdminTest(t *testing.T) (*gin.Engine, *gorm.DB, func(method st
 	model.DB = db
 	t.Setenv("MATRIX_RESELLER_SERVICE_TOKEN", "matrix-reseller-test-token")
 	t.Setenv("MOZIA_MEGA_SERVICE_TOKEN", "mozia-mega-test-token")
+	t.Setenv("MATRIX_RESELLER_SHARED_HOST", "reseller.mzsjai.com")
 	t.Cleanup(func() {
 		model.DB = originalDB
 		common.QuotaPerUnit = originalQuotaPerUnit

@@ -87,6 +87,18 @@ type resellerM2Transfer struct {
 	Customer           resellerM2Customer `json:"customer"`
 }
 
+type resellerM2BatchAssignResult struct {
+	Subject           string `json:"subject"`
+	Status            string `json:"status"`
+	CustomerId        *int   `json:"customer_id,omitempty"`
+	CurrentResellerId *int   `json:"current_reseller_id,omitempty"`
+}
+
+type resellerM2BatchAssign struct {
+	ResellerId int                           `json:"reseller_id"`
+	Results    []resellerM2BatchAssignResult `json:"results"`
+}
+
 type resellerM2Request func(method string, path string, body string, token string, requestID string, headers map[string]string) *httptest.ResponseRecorder
 
 func TestResellerM2Contract(t *testing.T) {
@@ -457,6 +469,176 @@ func TestResellerM2Contract(t *testing.T) {
 		require.NoError(t, common.Unmarshal(customerResponse.RawData, &moved))
 		require.Equal(t, http.StatusOK, customerRecorder.Code)
 		assert.Equal(t, "customer-transfer", moved.Subject)
+	})
+
+	t.Run("platform batch assign classifies mixed ownership and retries safely", func(t *testing.T) {
+		existingTarget := seedCustomerM2(t, db, resellerA.Id, "customer-batch-target", model.ResellerCustomerStatusActive)
+		existingOther := seedCustomerM2(t, db, resellerB.Id, "customer-batch-other", model.ResellerCustomerStatusActive)
+		body := `{"customers":[{"subject":"customer-batch-new","matrix_name":"批量新客户","phone":"13600136000"},{"subject":"customer-batch-target","matrix_name":"目标代理商已有客户","phone":"13500135000"},{"subject":"customer-batch-other","matrix_name":"其他代理商客户","phone":"13400134000"}]}`
+
+		recorder := request(http.MethodPost, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/batch-assign", resellerA.Id), body, "mozia-mega-test-token", "platform-batch-assign_123", nil)
+		response := decodeM2Envelope(t, recorder)
+		var assigned resellerM2BatchAssign
+		require.NoError(t, common.Unmarshal(response.RawData, &assigned))
+		require.Equal(t, http.StatusOK, recorder.Code)
+		require.Len(t, assigned.Results, 3)
+		assert.Equal(t, resellerA.Id, assigned.ResellerId)
+
+		first := assigned.Results[0]
+		require.NotNil(t, first.CustomerId)
+		require.NotNil(t, first.CurrentResellerId)
+		assert.Equal(t, "customer-batch-new", first.Subject)
+		assert.Equal(t, model.ResellerCustomerBatchAssignStatusAssigned, first.Status)
+		assert.Equal(t, resellerA.Id, *first.CurrentResellerId)
+
+		var created model.ResellerCustomer
+		require.NoError(t, db.First(&created, *first.CustomerId).Error)
+		assert.Equal(t, resellerA.Id, created.ResellerId)
+		assert.Equal(t, "批量新客户", created.MatrixName)
+		assert.Equal(t, "13600136000", created.Phone)
+		assert.Equal(t, model.ResellerCustomerStatusActive, created.Status)
+		assert.Positive(t, created.ProfileSyncedAt)
+
+		second := assigned.Results[1]
+		require.NotNil(t, second.CustomerId)
+		require.NotNil(t, second.CurrentResellerId)
+		assert.Equal(t, "customer-batch-target", second.Subject)
+		assert.Equal(t, model.ResellerCustomerBatchAssignStatusAlreadyInTarget, second.Status)
+		assert.Equal(t, existingTarget.Id, *second.CustomerId)
+		assert.Equal(t, resellerA.Id, *second.CurrentResellerId)
+
+		third := assigned.Results[2]
+		require.NotNil(t, third.CustomerId)
+		require.NotNil(t, third.CurrentResellerId)
+		assert.Equal(t, "customer-batch-other", third.Subject)
+		assert.Equal(t, model.ResellerCustomerBatchAssignStatusOwnedByOtherReseller, third.Status)
+		assert.Equal(t, existingOther.Id, *third.CustomerId)
+		assert.Equal(t, resellerB.Id, *third.CurrentResellerId)
+
+		retryRecorder := request(http.MethodPost, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/batch-assign", resellerA.Id), body, "mozia-mega-test-token", "platform-batch-retry_123", nil)
+		retryResponse := decodeM2Envelope(t, retryRecorder)
+		var retried resellerM2BatchAssign
+		require.NoError(t, common.Unmarshal(retryResponse.RawData, &retried))
+		require.Equal(t, http.StatusOK, retryRecorder.Code)
+		require.Len(t, retried.Results, 3)
+		assert.Equal(t, model.ResellerCustomerBatchAssignStatusAlreadyInTarget, retried.Results[0].Status)
+		require.NotNil(t, retried.Results[0].CustomerId)
+		assert.Equal(t, *first.CustomerId, *retried.Results[0].CustomerId)
+		assert.Equal(t, model.ResellerCustomerBatchAssignStatusAlreadyInTarget, retried.Results[1].Status)
+		assert.Equal(t, model.ResellerCustomerBatchAssignStatusOwnedByOtherReseller, retried.Results[2].Status)
+
+		var count int64
+		require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("subject = ?", "customer-batch-new").Count(&count).Error)
+		assert.Equal(t, int64(1), count)
+	})
+
+	t.Run("platform batch assign concurrent same subject returns assigned then already_in_target", func(t *testing.T) {
+		path := fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/batch-assign", resellerA.Id)
+		body := `{"customers":[{"subject":"customer-batch-concurrent","matrix_name":"并发客户","phone":"13300133000"}]}`
+
+		type concurrentResult struct {
+			code   int
+			status string
+			err    error
+		}
+		results := make([]concurrentResult, 2)
+		var wg sync.WaitGroup
+		for i := 0; i < 2; i++ {
+			wg.Add(1)
+			go func(index int) {
+				defer wg.Done()
+				recorder := request(http.MethodPost, path, body, "mozia-mega-test-token", fmt.Sprintf("platform-batch-concurrent_%d", index), nil)
+				response := decodeM2Envelope(t, recorder)
+				results[index].code = recorder.Code
+				if recorder.Code == http.StatusOK {
+					var payload resellerM2BatchAssign
+					if err := common.Unmarshal(response.RawData, &payload); err != nil {
+						results[index].err = err
+						return
+					}
+					if len(payload.Results) != 1 {
+						results[index].err = fmt.Errorf("expected 1 result, got %d", len(payload.Results))
+						return
+					}
+					results[index].status = payload.Results[0].Status
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		require.NoError(t, results[0].err)
+		require.NoError(t, results[1].err)
+		assert.Equal(t, http.StatusOK, results[0].code)
+		assert.Equal(t, http.StatusOK, results[1].code)
+		assert.Contains(t, []string{results[0].status, results[1].status}, model.ResellerCustomerBatchAssignStatusAssigned)
+		assert.Contains(t, []string{results[0].status, results[1].status}, model.ResellerCustomerBatchAssignStatusAlreadyInTarget)
+
+		var count int64
+		require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("subject = ?", "customer-batch-concurrent").Count(&count).Error)
+		assert.Equal(t, int64(1), count)
+	})
+
+	t.Run("platform batch assign rejects invalid payloads", func(t *testing.T) {
+		cases := []struct {
+			name string
+			body string
+		}{
+			{name: "empty", body: `{"customers":[]}`},
+			{name: "duplicate subjects", body: `{"customers":[{"subject":"customer-batch-dup"},{"subject":"customer-batch-dup"}]}`},
+			{name: "forged reseller scope", body: `{"reseller_id":999,"customers":[{"subject":"customer-batch-scope"}]}`},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				recorder := request(http.MethodPost, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/batch-assign", resellerA.Id), tc.body, "mozia-mega-test-token", "platform-batch-invalid_123", nil)
+				response := decodeM2Envelope(t, recorder)
+				require.Equal(t, http.StatusBadRequest, recorder.Code)
+				assert.Equal(t, middleware.ResellerErrorInvalidRequest, response.Error.Code)
+			})
+		}
+	})
+
+	t.Run("platform batch assign validates all inputs before any write", func(t *testing.T) {
+		path := fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/batch-assign", resellerA.Id)
+		body := `{"customers":[{"subject":"customer-batch-prevalidate","matrix_name":"先合法","phone":"13200132000"},{"subject":" customer-batch-invalid","matrix_name":"后续非法","phone":"13100131000"}]}`
+
+		recorder := request(http.MethodPost, path, body, "mozia-mega-test-token", "platform-batch-prevalidate_123", nil)
+		response := decodeM2Envelope(t, recorder)
+		require.Equal(t, http.StatusBadRequest, recorder.Code)
+		assert.Equal(t, middleware.ResellerErrorInvalidRequest, response.Error.Code)
+
+		var count int64
+		require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("subject = ?", "customer-batch-prevalidate").Count(&count).Error)
+		assert.Equal(t, int64(0), count)
+	})
+
+	t.Run("platform batch assign requires an active target reseller", func(t *testing.T) {
+		suspended := seedResellerM2(t, db, "Agency Suspended", "portal-suspended.example.com", model.ResellerRoleOwner, "owner-suspended", "admin-suspended", "viewer-suspended")
+		require.NoError(t, db.Model(&model.Reseller{}).Where("id = ?", suspended.Id).Update("status", model.ResellerStatusSuspended).Error)
+
+		cases := []struct {
+			name string
+			path string
+		}{
+			{name: "suspended", path: fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/batch-assign", suspended.Id)},
+			{name: "missing", path: "/api/internal/v1/platform/resellers/999999/customers/batch-assign"},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				recorder := request(http.MethodPost, tc.path, `{"customers":[{"subject":"customer-batch-missing"}]}`, "mozia-mega-test-token", "platform-batch-missing_123", nil)
+				response := decodeM2Envelope(t, recorder)
+				require.Equal(t, http.StatusNotFound, recorder.Code)
+				assert.Equal(t, middleware.ResellerErrorNotFound, response.Error.Code)
+			})
+		}
+	})
+
+	t.Run("platform batch assign enforces platform auth", func(t *testing.T) {
+		recorder := request(http.MethodPost, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers/batch-assign", resellerA.Id), `{"customers":[{"subject":"customer-batch-auth"}]}`, "matrix-reseller-management-test-token", "platform-batch-auth_123", nil)
+		response := decodeM2Envelope(t, recorder)
+		require.Equal(t, http.StatusUnauthorized, recorder.Code)
+		assert.Equal(t, middleware.ResellerErrorServiceUnauthorized, response.Error.Code)
 	})
 }
 
