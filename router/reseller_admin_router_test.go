@@ -243,6 +243,72 @@ func TestResellerAdminContract(t *testing.T) {
 		assert.Equal(t, beforeCounts, resellerTableCounts(t, db))
 	})
 
+	t.Run("edits reseller name and switches between shared and custom hosts", func(t *testing.T) {
+		_, db, request := setupResellerAdminTest(t)
+		reseller := seedReseller(t, db, "Agency A", model.ResellerStatusActive, "portal-a.example.com", "oidc-owner-a")
+
+		shared := request(
+			http.MethodPatch,
+			fmt.Sprintf("/api/internal/v1/platform/resellers/%d", reseller.Id),
+			`{"name":"Agency A","host":"reseller.mzsjai.com"}`,
+			"mozia-mega-test-token",
+			"edit-shared_123",
+		)
+		var sharedResponse resellerAdminItemResponse
+		require.NoError(t, common.Unmarshal(shared.Body.Bytes(), &sharedResponse))
+		require.Equal(t, http.StatusOK, shared.Code)
+		assert.Equal(t, "Agency A", sharedResponse.Data.Name)
+		assert.Equal(t, "reseller.mzsjai.com", sharedResponse.Data.Host)
+
+		var domainCount int64
+		require.NoError(t, db.Model(&model.ResellerDomain{}).Where("reseller_id = ?", reseller.Id).Count(&domainCount).Error)
+		assert.Zero(t, domainCount)
+
+		custom := request(
+			http.MethodPatch,
+			fmt.Sprintf("/api/internal/v1/platform/resellers/%d", reseller.Id),
+			`{"name":"Agency Custom","host":"Portal-New.example.com.:443"}`,
+			"mozia-mega-test-token",
+			"edit-custom_123",
+		)
+		var customResponse resellerAdminItemResponse
+		require.NoError(t, common.Unmarshal(custom.Body.Bytes(), &customResponse))
+		require.Equal(t, http.StatusOK, custom.Code)
+		assert.Equal(t, "Agency Custom", customResponse.Data.Name)
+		assert.Equal(t, "portal-new.example.com", customResponse.Data.Host)
+
+		var domain model.ResellerDomain
+		require.NoError(t, db.Where("reseller_id = ?", reseller.Id).Take(&domain).Error)
+		assert.Equal(t, "portal-new.example.com", domain.Host)
+		assert.True(t, domain.Verified)
+		assert.Equal(t, model.ResellerDomainStatusActive, domain.Status)
+	})
+
+	t.Run("duplicate edited host rolls back reseller changes", func(t *testing.T) {
+		_, db, request := setupResellerAdminTest(t)
+		resellerA := seedReseller(t, db, "Agency A", model.ResellerStatusActive, "portal-a.example.com", "oidc-owner-a")
+		seedReseller(t, db, "Agency B", model.ResellerStatusActive, "portal-b.example.com", "oidc-owner-b")
+
+		recorder := request(
+			http.MethodPatch,
+			fmt.Sprintf("/api/internal/v1/platform/resellers/%d", resellerA.Id),
+			`{"name":"Agency Changed","host":"PORTAL-B.EXAMPLE.COM"}`,
+			"mozia-mega-test-token",
+			"edit-conflict_123",
+		)
+		var response resellerAdminItemResponse
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.Equal(t, http.StatusConflict, recorder.Code)
+		assert.Equal(t, middleware.ResellerErrorConflict, response.Error.Code)
+
+		var persisted model.Reseller
+		require.NoError(t, db.First(&persisted, resellerA.Id).Error)
+		assert.Equal(t, "Agency A", persisted.Name)
+		var domain model.ResellerDomain
+		require.NoError(t, db.Where("reseller_id = ?", resellerA.Id).Take(&domain).Error)
+		assert.Equal(t, "portal-a.example.com", domain.Host)
+	})
+
 	t.Run("suspended reseller stops resolving existing context immediately", func(t *testing.T) {
 		_, db, request := setupResellerAdminTest(t)
 		reseller := seedReseller(t, db, "Agency A", model.ResellerStatusActive, "portal-a.example.com", "oidc-owner-a")

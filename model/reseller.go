@@ -820,6 +820,59 @@ func UpdateResellerAdminStatus(id int, status string) (*ResellerAdminRecord, err
 	return GetResellerAdminRecord(id)
 }
 
+func UpdateResellerAdminRecord(id int, name string, host string) (*ResellerAdminRecord, error) {
+	if !validResellerName(name) {
+		return nil, ErrInvalidResellerName
+	}
+	normalizedHost, err := NormalizeResellerHost(host)
+	if err != nil {
+		return nil, err
+	}
+
+	var record ResellerAdminRecord
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		var reseller Reseller
+		if err := tx.Select("id").Where("id = ?", id).Take(&reseller).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrResellerNotFound
+			}
+			return err
+		}
+		if err := tx.Model(&reseller).Update("name", name).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("reseller_id = ?", id).Delete(&ResellerDomain{}).Error; err != nil {
+			return err
+		}
+		if normalizedHost != configuredResellerSharedHost() {
+			if err := tx.Create(&ResellerDomain{
+				ResellerId: id,
+				Host:       normalizedHost,
+				Verified:   true,
+				Status:     ResellerDomainStatusActive,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		result := resellerAdminRecordsQuery(tx).Where("r.id = ?", id).Limit(1).Scan(&record)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrResellerNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		if isResellerUniqueConstraintError(err) {
+			return nil, ErrResellerConflict
+		}
+		return nil, err
+	}
+	setResellerAdminBalanceDisplay(&record)
+	return &record, nil
+}
+
 func GetResellerAdminRecord(id int) (*ResellerAdminRecord, error) {
 	var record ResellerAdminRecord
 	result := resellerAdminRecordsQuery(DB).Where("r.id = ?", id).Limit(1).Scan(&record)

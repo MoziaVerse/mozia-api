@@ -26,6 +26,11 @@ type updateResellerAdminStatusRequest struct {
 	Status string `json:"status"`
 }
 
+type updateResellerAdminRequest struct {
+	Name string `json:"name"`
+	Host string `json:"host"`
+}
+
 func ListResellerAdminRecords(c *gin.Context) {
 	records, err := model.ListResellerAdminRecords()
 	if err != nil {
@@ -99,6 +104,44 @@ func UpdateResellerAdminStatus(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
 	default:
 		logger.LogError(c.Request.Context(), "UpdateResellerAdminStatus database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func UpdateResellerAdmin(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id < 1 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerAdminBodyLimit))
+	if err != nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+
+	var request updateResellerAdminRequest
+	if common.Unmarshal(body, &request) != nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+
+	record, err := model.UpdateResellerAdminRecord(id, request.Name, request.Host)
+	if err != nil {
+		logger.LogWarn(c.Request.Context(), fmt.Sprintf("UpdateResellerAdmin failed reseller_id=%d error=%q body=%q", id, err.Error(), common.GetJsonString(request)))
+	}
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrInvalidResellerName), errors.Is(err, model.ErrInvalidResellerHost):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	case errors.Is(err, model.ErrResellerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
+	case errors.Is(err, model.ErrResellerConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "duplicate reseller")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerAdminRecord database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }

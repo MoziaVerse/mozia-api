@@ -36,6 +36,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerAdminRoute.Use(middleware.ResellerAdminServiceAuth())
 	resellerAdminRoute.GET("", controller.ListResellerAdminRecords)
 	resellerAdminRoute.POST("", controller.CreateResellerAdmin)
+	resellerAdminRoute.PATCH("/:id", controller.UpdateResellerAdmin)
 	resellerAdminRoute.PATCH("/:id/status", controller.UpdateResellerAdminStatus)
 	resellerAdminRoute.GET("/:id/customers", controller.ListResellerAdminCustomers)
 	resellerAdminRoute.POST("/:id/customers/batch-assign", controller.BatchAssignResellerAdminCustomers)
