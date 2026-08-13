@@ -90,7 +90,7 @@ func GetResellerManagementTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	customerId, ok := requiredPositiveQueryID(c, "customer_id")
+	customerId, ok := optionalPositiveQueryID(c, "customer_id")
 	if !ok {
 		return
 	}
@@ -102,16 +102,24 @@ func GetResellerManagementTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	customer, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, false)
-	if err != nil {
-		handleResellerUsageError(c, err)
-		return
-	}
 	taskID, ok := optionalSafeQueryText(c, "task_id")
 	if !ok {
 		return
 	}
-	result, err := model.ListResellerCustomerTasks(customer, page, pageSize, startTimestamp, endTimestamp, taskID)
+	var (
+		result *model.ResellerTaskPage
+		err    error
+	)
+	if customerId == nil {
+		result, err = model.ListResellerTasks(resellerContext.ResellerId, page, pageSize, startTimestamp, endTimestamp, taskID)
+	} else {
+		customer, customerErr := model.GetResellerCustomerRecord(resellerContext.ResellerId, *customerId, false)
+		if customerErr != nil {
+			handleResellerUsageError(c, customerErr)
+			return
+		}
+		result, err = model.ListResellerCustomerTasks(customer, page, pageSize, startTimestamp, endTimestamp, taskID)
+	}
 	if err != nil {
 		handleResellerUsageError(c, err)
 		return
@@ -157,20 +165,6 @@ func resellerTimeRangeQuery(c *gin.Context) (*int64, *int64, bool) {
 		return nil, nil, false
 	}
 	return &startTimestamp, &endTimestamp, true
-}
-
-func requiredPositiveQueryID(c *gin.Context, name string) (int, bool) {
-	value := strings.TrimSpace(c.Query(name))
-	if value == "" {
-		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
-		return 0, false
-	}
-	id, err := strconv.Atoi(value)
-	if err != nil || id < 1 {
-		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
-		return 0, false
-	}
-	return id, true
 }
 
 func resellerTaskPageQuery(c *gin.Context) (int, int, bool) {

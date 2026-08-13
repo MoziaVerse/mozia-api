@@ -62,11 +62,15 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 	resellerA := seedResellerM2(t, db, "Usage Agency A", "usage-a.example.com", model.ResellerRoleOwner, "usage-owner-a", "usage-admin-a", "usage-viewer-a")
 	resellerB := seedResellerM2(t, db, "Usage Agency B", "usage-b.example.com", model.ResellerRoleOwner, "usage-owner-b", "usage-admin-b", "usage-viewer-b")
 	customerA := seedCustomerM2(t, db, resellerA.Id, "usage-customer-a", model.ResellerCustomerStatusActive)
+	customerC := seedCustomerM2(t, db, resellerA.Id, "usage-customer-c", model.ResellerCustomerStatusActive)
+	customerD := seedCustomerM2(t, db, resellerA.Id, "usage-customer-d", model.ResellerCustomerStatusActive)
 	customerB := seedCustomerM2(t, db, resellerB.Id, "usage-customer-b", model.ResellerCustomerStatusActive)
 	customerNoUser := seedCustomerM2(t, db, resellerA.Id, "usage-customer-no-user", model.ResellerCustomerStatusActive)
 
 	joinedAtA := int64(100)
 	require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("id = ?", customerA.Id).Update("created_at", joinedAtA).Error)
+	require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("id = ?", customerC.Id).Update("created_at", int64(125)).Error)
+	require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("id = ?", customerD.Id).Update("created_at", int64(135)).Error)
 	require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("id = ?", customerB.Id).Update("created_at", int64(200)).Error)
 	require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("id = ?", customerNoUser.Id).Update("created_at", int64(300)).Error)
 
@@ -80,6 +84,18 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&userA).Error)
 	require.NoError(t, db.Create(&model.UserSSO{SSOSub: customerA.Subject, UserId: userA.Id}).Error)
+	userC := model.User{
+		Username:    "usage_user_c",
+		Password:    "password123",
+		DisplayName: "Usage User C",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Quota:       1000,
+		AffCode:     "usage-aff-c",
+	}
+	require.NoError(t, db.Create(&userC).Error)
+	require.NoError(t, db.Create(&model.UserSSO{SSOSub: customerC.Subject, UserId: userC.Id}).Error)
+	require.NoError(t, db.Create(&model.UserSSO{SSOSub: customerD.Subject, UserId: userC.Id}).Error)
 
 	seedResellerSettlement(t, db, model.ResellerRequestSettlement{
 		RequestId:               "usage-settlement-a1",
@@ -279,6 +295,51 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		PrivateData: model.TaskPrivateData{Key: "hidden-key", UpstreamTaskID: "hidden-upstream-id", ResultURL: "https://hidden.example/result-c"},
 		Data:        []byte(`{"result_url":"hidden-result-url-c"}`),
 	})
+	seedTask(t, db, model.Task{
+		TaskID:      "task-c-before-join",
+		Platform:    "veo",
+		UserId:      userC.Id,
+		Action:      "generate",
+		Status:      model.TaskStatusFailure,
+		Progress:    "100%",
+		SubmitTime:  124,
+		StartTime:   124,
+		FinishTime:  124,
+		Properties:  model.Properties{OriginModelName: "customer-c-before", UpstreamModelName: "hidden-upstream-model", Input: "hidden-input"},
+		FailReason:  "hidden-fail-reason",
+		PrivateData: model.TaskPrivateData{Key: "hidden-key", UpstreamTaskID: "hidden-upstream-id", ResultURL: "https://hidden.example/result-c-before"},
+		Data:        []byte(`{"result_url":"hidden-result-url-c-before"}`),
+	})
+	seedTask(t, db, model.Task{
+		TaskID:      "task-c-after-128",
+		Platform:    "kling",
+		UserId:      userC.Id,
+		Action:      "remixGenerate",
+		Status:      model.TaskStatusSuccess,
+		Progress:    "100%",
+		SubmitTime:  128,
+		StartTime:   128,
+		FinishTime:  129,
+		Properties:  model.Properties{OriginModelName: "customer-c-model-a", UpstreamModelName: "hidden-upstream-model", Input: "hidden-input"},
+		FailReason:  "hidden-fail-reason",
+		PrivateData: model.TaskPrivateData{Key: "hidden-key", UpstreamTaskID: "hidden-upstream-id", ResultURL: "https://hidden.example/result-c-128"},
+		Data:        []byte(`{"result_url":"hidden-result-url-c-128"}`),
+	})
+	seedTask(t, db, model.Task{
+		TaskID:      "task-c-after-150",
+		Platform:    "suno",
+		UserId:      userC.Id,
+		Action:      "generate",
+		Status:      model.TaskStatusSubmitted,
+		Progress:    "15%",
+		SubmitTime:  150,
+		StartTime:   0,
+		FinishTime:  0,
+		Properties:  model.Properties{OriginModelName: "customer-c-model-b", UpstreamModelName: "hidden-upstream-model", Input: "hidden-input"},
+		FailReason:  "hidden-fail-reason",
+		PrivateData: model.TaskPrivateData{Key: "hidden-key", UpstreamTaskID: "hidden-upstream-id", ResultURL: "https://hidden.example/result-c-150"},
+		Data:        []byte(`{"result_url":"hidden-result-url-c-150"}`),
+	})
 
 	viewerHeaders := map[string]string{
 		"X-Reseller-Subject": "usage-viewer-a",
@@ -428,9 +489,61 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		assert.Equal(t, "task-after-120", filteredData.Items[0].TaskId)
 	})
 
+	t.Run("tasks without customer_id merge current reseller customers with global ordering and pagination", func(t *testing.T) {
+		all := request(http.MethodGet, "/api/internal/v1/reseller/management/tasks?start_timestamp=80&end_timestamp=160", "", "matrix-reseller-management-test-token", "tasks-all_123", adminHeaders)
+		allEnvelope := decodeM2Envelope(t, all)
+		require.Equal(t, http.StatusOK, all.Code)
+
+		var allData resellerTasksEnvelopeData
+		require.NoError(t, common.Unmarshal(allEnvelope.RawData, &allData))
+		assert.Equal(t, 1, allData.Page)
+		assert.Equal(t, 20, allData.PageSize)
+		assert.Equal(t, int64(4), allData.Total)
+		require.Len(t, allData.Items, 4)
+		assert.Equal(t,
+			[]string{"task-c-after-150", "task-after-140", "task-after-130", "task-after-120"},
+			[]string{allData.Items[0].TaskId, allData.Items[1].TaskId, allData.Items[2].TaskId, allData.Items[3].TaskId},
+		)
+		assert.Equal(t,
+			[]int{customerD.Id, customerA.Id, customerA.Id, customerA.Id},
+			[]int{allData.Items[0].CustomerId, allData.Items[1].CustomerId, allData.Items[2].CustomerId, allData.Items[3].CustomerId},
+		)
+
+		pageTwo := request(http.MethodGet, "/api/internal/v1/reseller/management/tasks?start_timestamp=80&end_timestamp=160&p=2&page_size=2", "", "matrix-reseller-management-test-token", "tasks-all-page-two_123", adminHeaders)
+		pageTwoEnvelope := decodeM2Envelope(t, pageTwo)
+		require.Equal(t, http.StatusOK, pageTwo.Code)
+		var pageTwoData resellerTasksEnvelopeData
+		require.NoError(t, common.Unmarshal(pageTwoEnvelope.RawData, &pageTwoData))
+		assert.Equal(t, 2, pageTwoData.Page)
+		assert.Equal(t, 2, pageTwoData.PageSize)
+		assert.Equal(t, int64(4), pageTwoData.Total)
+		require.Len(t, pageTwoData.Items, 2)
+		assert.Equal(t, []string{"task-after-130", "task-after-120"}, []string{pageTwoData.Items[0].TaskId, pageTwoData.Items[1].TaskId})
+		assert.Equal(t, []int{customerA.Id, customerA.Id}, []int{pageTwoData.Items[0].CustomerId, pageTwoData.Items[1].CustomerId})
+	})
+
+	t.Run("tasks without customer_id deduplicate shared user to latest customer boundary", func(t *testing.T) {
+		recorder := request(http.MethodGet, "/api/internal/v1/reseller/management/tasks?start_timestamp=80&end_timestamp=160", "", "matrix-reseller-management-test-token", "tasks-shared-user_123", adminHeaders)
+		envelope := decodeM2Envelope(t, recorder)
+		require.Equal(t, http.StatusOK, recorder.Code)
+
+		var data resellerTasksEnvelopeData
+		require.NoError(t, common.Unmarshal(envelope.RawData, &data))
+		for _, item := range data.Items {
+			assert.NotEqual(t, "task-c-after-128", item.TaskId)
+		}
+
+		var latestCustomerItems []string
+		for _, item := range data.Items {
+			if item.CustomerId == customerD.Id {
+				latestCustomerItems = append(latestCustomerItems, item.TaskId)
+			}
+		}
+		assert.Equal(t, []string{"task-c-after-150"}, latestCustomerItems)
+	})
+
 	t.Run("tasks reject invalid input hide cross tenant data and return empty page for unbound user", func(t *testing.T) {
 		for _, path := range []string{
-			"/api/internal/v1/reseller/management/tasks",
 			fmt.Sprintf("/api/internal/v1/reseller/management/tasks?customer_id=%d&start_timestamp=100", customerA.Id),
 			fmt.Sprintf("/api/internal/v1/reseller/management/tasks?customer_id=%d&start_timestamp=140&end_timestamp=100", customerA.Id),
 			fmt.Sprintf("/api/internal/v1/reseller/management/tasks?customer_id=%d&p=0", customerA.Id),

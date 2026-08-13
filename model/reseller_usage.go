@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"gorm.io/gorm"
 )
 
 type ResellerUsageItem struct {
@@ -72,6 +73,7 @@ type resellerTaskUsageJSON struct {
 type resellerTaskRow struct {
 	ID         int64
 	TaskID     string
+	UserID     int
 	Platform   constant.TaskPlatform
 	Action     string
 	Status     TaskStatus
@@ -179,7 +181,7 @@ func ListResellerCustomerTasks(customer *ResellerCustomerRecord, page int, pageS
 
 	rows := make([]resellerTaskRow, 0, pageSize)
 	offset := (page - 1) * pageSize
-	if err := query.Select("id, task_id, platform, action, status, progress, submit_time, start_time, finish_time, properties").
+	if err := query.Select("id, user_id, task_id, platform, action, status, progress, submit_time, start_time, finish_time, properties").
 		Order("submit_time DESC").
 		Order("id DESC").
 		Offset(offset).
@@ -190,6 +192,93 @@ func ListResellerCustomerTasks(customer *ResellerCustomerRecord, page int, pageS
 
 	taskPage.Items = make([]ResellerTaskItem, 0, len(rows))
 	for _, row := range rows {
+		taskPage.Items = append(taskPage.Items, ResellerTaskItem{
+			CustomerId:  customer.Id,
+			TaskId:      row.TaskID,
+			Platform:    string(row.Platform),
+			Model:       strings.TrimSpace(row.Properties.OriginModelName),
+			Action:      row.Action,
+			Status:      string(row.Status),
+			Progress:    row.Progress,
+			SubmittedAt: row.SubmitTime,
+			StartedAt:   row.StartTime,
+			FinishedAt:  row.FinishTime,
+		})
+	}
+	return taskPage, nil
+}
+
+func ListResellerTasks(resellerId int, page int, pageSize int, startTimestamp *int64, endTimestamp *int64, taskID *string) (*ResellerTaskPage, error) {
+	taskPage := &ResellerTaskPage{
+		Page:     page,
+		PageSize: pageSize,
+		Items:    make([]ResellerTaskItem, 0),
+	}
+
+	customers, err := ListResellerCustomerRecords(resellerId, false)
+	if err != nil {
+		return nil, err
+	}
+
+	userCustomerMap := make(map[int]ResellerCustomerRecord, len(customers))
+	for _, customer := range customers {
+		if customer.UserId <= 0 {
+			continue
+		}
+		current, ok := userCustomerMap[customer.UserId]
+		if !ok || customer.JoinedAt > current.JoinedAt || (customer.JoinedAt == current.JoinedAt && customer.Id > current.Id) {
+			userCustomerMap[customer.UserId] = customer
+		}
+	}
+
+	var scope *gorm.DB
+	hasCustomerWithUser := false
+	// ponytail: keep per-customer join boundaries with ORs; add task tenancy snapshots if customer counts make the query too large.
+	for _, customer := range userCustomerMap {
+		startBound := customer.JoinedAt
+		if startTimestamp != nil && *startTimestamp > startBound {
+			startBound = *startTimestamp
+		}
+		if scope == nil {
+			scope = DB.Where("user_id = ? AND submit_time >= ?", customer.UserId, startBound)
+		} else {
+			scope = scope.Or("user_id = ? AND submit_time >= ?", customer.UserId, startBound)
+		}
+		hasCustomerWithUser = true
+	}
+	if !hasCustomerWithUser {
+		return taskPage, nil
+	}
+
+	query := DB.Model(&Task{}).Where(scope)
+	if endTimestamp != nil {
+		query = query.Where("submit_time <= ?", *endTimestamp)
+	}
+	if taskID != nil {
+		query = query.Where("task_id = ?", *taskID)
+	}
+
+	if err := query.Count(&taskPage.Total).Error; err != nil {
+		return nil, err
+	}
+
+	rows := make([]resellerTaskRow, 0, pageSize)
+	offset := (page - 1) * pageSize
+	if err := query.Select("id, user_id, task_id, platform, action, status, progress, submit_time, start_time, finish_time, properties").
+		Order("submit_time DESC").
+		Order("id DESC").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	taskPage.Items = make([]ResellerTaskItem, 0, len(rows))
+	for _, row := range rows {
+		customer, ok := userCustomerMap[row.UserID]
+		if !ok {
+			continue
+		}
 		taskPage.Items = append(taskPage.Items, ResellerTaskItem{
 			CustomerId:  customer.Id,
 			TaskId:      row.TaskID,
