@@ -18,6 +18,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerManagementRoute.GET("/customers", controller.ListResellerManagementCustomers)
 	resellerManagementRoute.GET("/customers/:id", controller.GetResellerManagementCustomer)
 	resellerManagementRoute.PATCH("/customers/:id/status", controller.UpdateResellerManagementCustomerStatus)
+	resellerManagementRoute.PATCH("/customers/:id/overseas-model-access", controller.UpdateResellerManagementCustomerOverseasModelAccess)
 	resellerManagementRoute.PATCH("/customers/:id/remark", controller.UpdateResellerManagementCustomerRemark)
 	resellerManagementRoute.GET("/invitations", controller.ListResellerManagementInvitations)
 	resellerManagementRoute.POST("/invitations", controller.CreateResellerManagementInvitation)

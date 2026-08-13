@@ -22,6 +22,8 @@ const (
 	ResellerMemberStatusActive    = "active"
 	ResellerCustomerStatusActive  = "active"
 	ResellerCustomerStatusSuspend = "suspended"
+	resellerCustomerDefaultGroup  = "default"
+	resellerCustomerExtGroup      = "ext"
 
 	ResellerRoleOwner  = "owner"
 	ResellerRoleAdmin  = "admin"
@@ -152,6 +154,7 @@ type ResellerCustomerRecord struct {
 	MatrixName            string  `json:"matrix_name"`
 	Phone                 string  `json:"phone"`
 	ProfileSyncedAt       int64   `json:"profile_synced_at"`
+	OverseasModelAccess   bool    `json:"overseas_model_access"`
 	Remark                *string `json:"remark,omitempty"`
 	BalanceQuota          int     `json:"-"`
 	GiftBalanceQuota      int     `json:"-"`
@@ -400,6 +403,56 @@ func UpdateResellerCustomerRecordRemark(resellerId int, customerId int, remark s
 		return nil, update.Error
 	}
 	return GetResellerCustomerRecord(resellerId, customerId, true)
+}
+
+func UpdateResellerCustomerOverseasModelAccess(resellerId int, customerId int, allowed bool, includeRemark bool) (*ResellerCustomerRecord, error) {
+	targetGroup := resellerCustomerDefaultGroup
+	if allowed {
+		targetGroup = resellerCustomerExtGroup
+	}
+
+	var userId int
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var linked struct {
+			UserId int `gorm:"column:user_id"`
+		}
+		result := resellerCustomerLinkedUserQuery(tx).
+			Where("customers.id = ? AND customers.reseller_id = ?", customerId, resellerId).
+			Limit(1).
+			Scan(&linked)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrResellerCustomerNotFound
+		}
+		if linked.UserId < 1 {
+			return ErrResellerCustomerConflict
+		}
+
+		var user User
+		if err := tx.Select("id").
+			Where("id = ? AND deleted_at IS NULL", linked.UserId).
+			Take(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrResellerCustomerConflict
+			}
+			return err
+		}
+		if err := tx.Model(&user).Update("group", targetGroup).Error; err != nil {
+			return err
+		}
+		userId = user.Id
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if common.RedisEnabled && common.RDB != nil {
+		_ = UpdateUserGroupCache(userId, targetGroup)
+	}
+	return GetResellerCustomerRecord(resellerId, customerId, includeRemark)
 }
 
 func SyncResellerCustomerIdentity(subject string, matrixName string, phone string) (bool, error) {
@@ -846,15 +899,30 @@ func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 }
 
 func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {
-	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
+	trueValue, falseValue := commonTrueVal, commonFalseVal
+	if trueValue == "" {
+		trueValue, falseValue = "1", "0"
+	}
+	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
 	if includeRemark {
 		fields += ", customers.remark"
 	}
+	return resellerCustomerLinkedUserQuery(db).Select(fields)
+}
+
+func resellerCustomerLinkedUserQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("reseller_customers AS customers").
-		Select(fields).
 		Joins("LEFT JOIN user_ssos AS customer_sso ON customer_sso.sso_sub = customers.subject").
 		Joins("LEFT JOIN users AS customer_sso_user ON customer_sso_user.id = customer_sso.user_id AND customer_sso_user.deleted_at IS NULL").
 		Joins("LEFT JOIN users AS customer_oidc_user ON customer_oidc_user.id = (SELECT MIN(customer_candidate.id) FROM users AS customer_candidate WHERE customer_candidate.oidc_id = customers.subject AND customer_candidate.deleted_at IS NULL)")
+}
+
+func resellerUserGroupColumn(alias string) string {
+	groupCol := commonGroupCol
+	if groupCol == "" {
+		groupCol = "`group`"
+	}
+	return alias + "." + groupCol
 }
 
 func validResellerCustomerText(value string, maxRunes int) bool {

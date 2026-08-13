@@ -29,6 +29,10 @@ type resellerCustomerRemarkRequest struct {
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
+type resellerCustomerOverseasModelAccessRequest struct {
+	Allowed *bool `json:"allowed"`
+}
+
 type resellerInvitationCreateRequest struct {
 	ExpiresInHours *int            `json:"expires_in_hours"`
 	ResellerId     json.RawMessage `json:"reseller_id"`
@@ -192,6 +196,47 @@ func UpdateResellerManagementCustomerRemark(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
 	default:
 		logger.LogError(c.Request.Context(), "UpdateResellerCustomerRecordRemark database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func UpdateResellerManagementCustomerOverseasModelAccess(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if !resellerManagementWriteAllowed(resellerContext.Role) {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
+		return
+	}
+	customerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerCustomerOverseasModelAccessRequest
+	var fields map[string]json.RawMessage
+	requestErr := common.Unmarshal(body, &request)
+	fieldsErr := common.Unmarshal(body, &fields)
+	_, hasAllowed := fields["allowed"]
+	if requestErr != nil || fieldsErr != nil || request.Allowed == nil || len(fields) != 1 || !hasAllowed {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+
+	record, err := model.UpdateResellerCustomerOverseasModelAccess(resellerContext.ResellerId, customerId, *request.Allowed, resellerContext.Role == model.ResellerRoleOwner)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrResellerCustomerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+	case errors.Is(err, model.ErrResellerCustomerConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller customer user unavailable")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerCustomerOverseasModelAccess database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }

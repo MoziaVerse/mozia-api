@@ -50,6 +50,7 @@ type resellerM2Customer struct {
 	MatrixName            string  `json:"matrix_name"`
 	Phone                 string  `json:"phone"`
 	ProfileSyncedAt       int64   `json:"profile_synced_at"`
+	OverseasModelAccess   bool    `json:"overseas_model_access"`
 	Remark                *string `json:"remark,omitempty"`
 	Balance               float64 `json:"balance"`
 	GiftBalance           float64 `json:"gift_balance"`
@@ -369,6 +370,121 @@ func TestResellerM2Contract(t *testing.T) {
 		assert.NotContains(t, string(platformResponse.RawData), `"remark"`)
 	})
 
+	t.Run("overseas model access toggles by reseller scope without leaking group", func(t *testing.T) {
+		defaultCustomer := seedCustomerM2(t, db, resellerA.Id, "customer-overseas-default", model.ResellerCustomerStatusActive)
+		extCustomer := seedCustomerM2(t, db, resellerA.Id, "customer-overseas-ext", model.ResellerCustomerStatusActive)
+		crossTenantCustomer := seedCustomerM2(t, db, resellerB.Id, "customer-overseas-other", model.ResellerCustomerStatusActive)
+
+		defaultUser := model.User{
+			Username: "customer-overseas-default", DisplayName: "默认分组客户", Password: "test-password", AffCode: "aff-customer-overseas-default", Group: "default",
+		}
+		extUser := model.User{
+			Username: "customer-overseas-ext", DisplayName: "海外分组客户", Password: "test-password", AffCode: "aff-customer-overseas-ext", Group: "ext",
+		}
+		crossTenantUser := model.User{
+			Username: "customer-overseas-other", DisplayName: "其他代理商客户", Password: "test-password", AffCode: "aff-customer-overseas-other", Group: "default",
+		}
+		require.NoError(t, db.Create(&defaultUser).Error)
+		require.NoError(t, db.Create(&extUser).Error)
+		require.NoError(t, db.Create(&crossTenantUser).Error)
+		require.NoError(t, db.Create(&[]model.UserSSO{
+			{SSOSub: defaultCustomer.Subject, UserId: defaultUser.Id},
+			{SSOSub: extCustomer.Subject, UserId: extUser.Id},
+			{SSOSub: crossTenantCustomer.Subject, UserId: crossTenantUser.Id},
+		}).Error)
+
+		listRecorder := request(http.MethodGet, "/api/internal/v1/reseller/management/customers", "", "matrix-reseller-management-test-token", "overseas-list_123", map[string]string{
+			"X-Reseller-Subject": "owner-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		listResponse := decodeM2Envelope(t, listRecorder)
+		var listed []resellerM2Customer
+		require.NoError(t, common.Unmarshal(listResponse.RawData, &listed))
+		require.Equal(t, http.StatusOK, listRecorder.Code)
+		assert.NotContains(t, string(listResponse.RawData), `"group"`)
+
+		foundDefault := false
+		foundExt := false
+		for _, item := range listed {
+			switch item.Id {
+			case defaultCustomer.Id:
+				foundDefault = true
+				assert.False(t, item.OverseasModelAccess)
+			case extCustomer.Id:
+				foundExt = true
+				assert.True(t, item.OverseasModelAccess)
+			}
+		}
+		assert.True(t, foundDefault)
+		assert.True(t, foundExt)
+
+		getRecorder := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d", extCustomer.Id), "", "matrix-reseller-management-test-token", "overseas-get_123", map[string]string{
+			"X-Reseller-Subject": "admin-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		getResponse := decodeM2Envelope(t, getRecorder)
+		var fetched resellerM2Customer
+		require.NoError(t, common.Unmarshal(getResponse.RawData, &fetched))
+		require.Equal(t, http.StatusOK, getRecorder.Code)
+		assert.True(t, fetched.OverseasModelAccess)
+		assert.NotContains(t, string(getResponse.RawData), `"group"`)
+
+		viewerRecorder := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/overseas-model-access", defaultCustomer.Id), `{"allowed":true}`, "matrix-reseller-management-test-token", "overseas-viewer_123", map[string]string{
+			"X-Reseller-Subject": "viewer-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		viewerResponse := decodeM2Envelope(t, viewerRecorder)
+		require.Equal(t, http.StatusForbidden, viewerRecorder.Code)
+		assert.Equal(t, middleware.ResellerErrorForbidden, viewerResponse.Error.Code)
+		require.NoError(t, db.First(&defaultUser, defaultUser.Id).Error)
+		assert.Equal(t, "default", defaultUser.Group)
+
+		forgedScopeRecorder := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/overseas-model-access", defaultCustomer.Id), `{"allowed":true,"reseller_id":999}`, "matrix-reseller-management-test-token", "overseas-forged-scope_123", map[string]string{
+			"X-Reseller-Subject": "admin-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		forgedScopeResponse := decodeM2Envelope(t, forgedScopeRecorder)
+		require.Equal(t, http.StatusBadRequest, forgedScopeRecorder.Code)
+		assert.Equal(t, middleware.ResellerErrorInvalidRequest, forgedScopeResponse.Error.Code)
+		require.NoError(t, db.First(&defaultUser, defaultUser.Id).Error)
+		assert.Equal(t, "default", defaultUser.Group)
+
+		enableRecorder := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/overseas-model-access", defaultCustomer.Id), `{"allowed":true}`, "matrix-reseller-management-test-token", "overseas-enable_123", map[string]string{
+			"X-Reseller-Subject": "admin-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		enableResponse := decodeM2Envelope(t, enableRecorder)
+		var enabled resellerM2Customer
+		require.NoError(t, common.Unmarshal(enableResponse.RawData, &enabled))
+		require.Equal(t, http.StatusOK, enableRecorder.Code)
+		assert.True(t, enabled.OverseasModelAccess)
+		assert.NotContains(t, string(enableResponse.RawData), `"group"`)
+		require.NoError(t, db.First(&defaultUser, defaultUser.Id).Error)
+		assert.Equal(t, "ext", defaultUser.Group)
+
+		disableRecorder := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/overseas-model-access", defaultCustomer.Id), `{"allowed":false}`, "matrix-reseller-management-test-token", "overseas-disable_123", map[string]string{
+			"X-Reseller-Subject": "owner-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		disableResponse := decodeM2Envelope(t, disableRecorder)
+		var disabled resellerM2Customer
+		require.NoError(t, common.Unmarshal(disableResponse.RawData, &disabled))
+		require.Equal(t, http.StatusOK, disableRecorder.Code)
+		assert.False(t, disabled.OverseasModelAccess)
+		require.NoError(t, db.First(&defaultUser, defaultUser.Id).Error)
+		assert.Equal(t, "default", defaultUser.Group)
+
+		crossTenantRecorder := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/overseas-model-access", crossTenantCustomer.Id), `{"allowed":true}`, "matrix-reseller-management-test-token", "overseas-cross-tenant_123", map[string]string{
+			"X-Reseller-Subject": "owner-a",
+			"X-Reseller-Host":    "portal-a.example.com",
+		})
+		crossTenantResponse := decodeM2Envelope(t, crossTenantRecorder)
+		require.Equal(t, http.StatusNotFound, crossTenantRecorder.Code)
+		assert.Equal(t, middleware.ResellerErrorNotFound, crossTenantResponse.Error.Code)
+		require.NoError(t, db.First(&crossTenantUser, crossTenantUser.Id).Error)
+		assert.Equal(t, "default", crossTenantUser.Group)
+	})
+
 	t.Run("concurrent consume only creates one customer", func(t *testing.T) {
 		created := createInvitationM2(t, request, "owner-a", "portal-a.example.com", 24)
 		var wg sync.WaitGroup
@@ -641,6 +757,10 @@ func setupResellerM2Test(t *testing.T) (*gin.Engine, *gorm.DB, resellerM2Request
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared&_busy_timeout=30000", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.UserSSO{}, &model.MoziaWalletBalance{}, &model.Reseller{}, &model.ResellerDomain{},
 		&model.ResellerMember{}, &model.ResellerCustomer{}, &model.ResellerInvitation{},
@@ -655,9 +775,9 @@ func setupResellerM2Test(t *testing.T) (*gin.Engine, *gorm.DB, resellerM2Request
 		model.DB = originalDB
 		common.QuotaPerUnit = originalQuotaPerUnit
 		operation_setting.GetGeneralSetting().QuotaDisplayType = originalDisplayType
-		sqlDB, dbErr := db.DB()
+		pooledDB, dbErr := db.DB()
 		if dbErr == nil {
-			_ = sqlDB.Close()
+			_ = pooledDB.Close()
 		}
 	})
 
