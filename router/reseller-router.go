@@ -25,6 +25,8 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerManagementRoute.GET("/pricing", controller.GetResellerManagementPricing)
 	resellerManagementRoute.POST("/pricing/retail", controller.CreateResellerManagementRetailPrice)
 	resellerManagementRoute.POST("/pricing/preview", controller.PreviewResellerManagementPricing)
+	resellerManagementRoute.GET("/usage", controller.GetResellerManagementUsage)
+	resellerManagementRoute.GET("/tasks", controller.GetResellerManagementTasks)
 
 	resellerRegistrationRoute := apiRouter.Group("/internal/v1/reseller/registration")
 	resellerRegistrationRoute.Use(middleware.ResellerRegistrationServiceAuth())
