@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
@@ -61,7 +62,11 @@ func GetResellerManagementUsage(c *gin.Context) {
 			return
 		}
 	}
-	result, err := model.ListResellerUsage(resellerContext.ResellerId, customerId, startTimestamp, endTimestamp)
+	modelName, ok := optionalSafeQueryText(c, "model")
+	if !ok {
+		return
+	}
+	result, err := model.ListResellerUsage(resellerContext.ResellerId, customerId, startTimestamp, endTimestamp, modelName)
 	if err != nil {
 		handleResellerUsageError(c, err)
 		return
@@ -102,7 +107,11 @@ func GetResellerManagementTasks(c *gin.Context) {
 		handleResellerUsageError(c, err)
 		return
 	}
-	result, err := model.ListResellerCustomerTasks(customer, page, pageSize, startTimestamp, endTimestamp)
+	taskID, ok := optionalSafeQueryText(c, "task_id")
+	if !ok {
+		return
+	}
+	result, err := model.ListResellerCustomerTasks(customer, page, pageSize, startTimestamp, endTimestamp, taskID)
 	if err != nil {
 		handleResellerUsageError(c, err)
 		return
@@ -184,6 +193,23 @@ func resellerTaskPageQuery(c *gin.Context) (int, int, bool) {
 		pageSize = value
 	}
 	return page, pageSize, true
+}
+
+func optionalSafeQueryText(c *gin.Context, name string) (*string, bool) {
+	values := c.Request.URL.Query()[name]
+	if len(values) == 0 {
+		return nil, true
+	}
+	if len(values) != 1 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return nil, false
+	}
+	value := strings.TrimSpace(values[0])
+	if value == "" || len(value) > 191 || !utf8.ValidString(value) || strings.ContainsAny(value, "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f") {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return nil, false
+	}
+	return &value, true
 }
 
 func formatResellerUsageQuota(quota int64) string {

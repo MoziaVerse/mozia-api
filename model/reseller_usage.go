@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 )
 
 type ResellerUsageItem struct {
@@ -35,6 +36,7 @@ type ResellerUsageResult struct {
 type ResellerTaskItem struct {
 	CustomerId  int    `json:"customer_id"`
 	TaskId      string `json:"task_id"`
+	Platform    string `json:"platform"`
 	Model       string `json:"model"`
 	Action      string `json:"action"`
 	Status      string `json:"status"`
@@ -70,6 +72,7 @@ type resellerTaskUsageJSON struct {
 type resellerTaskRow struct {
 	ID         int64
 	TaskID     string
+	Platform   constant.TaskPlatform
 	Action     string
 	Status     TaskStatus
 	Progress   string
@@ -79,7 +82,7 @@ type resellerTaskRow struct {
 	Properties Properties
 }
 
-func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, endTimestamp *int64) (*ResellerUsageResult, error) {
+func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, endTimestamp *int64, modelName *string) (*ResellerUsageResult, error) {
 	// ponytail: parse usage JSON in Go for SQLite/MySQL parity; add normalized token columns if full-history scans become costly.
 	rows := make([]resellerUsageSettlementRow, 0)
 	query := DB.Model(&ResellerRequestSettlement{}).
@@ -90,6 +93,9 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 	}
 	if startTimestamp != nil && endTimestamp != nil {
 		query = query.Where("created_at >= ? AND created_at <= ?", *startTimestamp, *endTimestamp)
+	}
+	if modelName != nil {
+		query = query.Where("model_name = ?", *modelName)
 	}
 	if err := query.Order("customer_id ASC").Order("model_name ASC").Order("id ASC").Find(&rows).Error; err != nil {
 		return nil, err
@@ -143,7 +149,7 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 	return result, nil
 }
 
-func ListResellerCustomerTasks(customer *ResellerCustomerRecord, page int, pageSize int, startTimestamp *int64, endTimestamp *int64) (*ResellerTaskPage, error) {
+func ListResellerCustomerTasks(customer *ResellerCustomerRecord, page int, pageSize int, startTimestamp *int64, endTimestamp *int64, taskID *string) (*ResellerTaskPage, error) {
 	taskPage := &ResellerTaskPage{
 		Page:     page,
 		PageSize: pageSize,
@@ -163,6 +169,9 @@ func ListResellerCustomerTasks(customer *ResellerCustomerRecord, page int, pageS
 	if endTimestamp != nil {
 		query = query.Where("submit_time <= ?", *endTimestamp)
 	}
+	if taskID != nil {
+		query = query.Where("task_id = ?", *taskID)
+	}
 
 	if err := query.Count(&taskPage.Total).Error; err != nil {
 		return nil, err
@@ -170,7 +179,7 @@ func ListResellerCustomerTasks(customer *ResellerCustomerRecord, page int, pageS
 
 	rows := make([]resellerTaskRow, 0, pageSize)
 	offset := (page - 1) * pageSize
-	if err := query.Select("id, task_id, action, status, progress, submit_time, start_time, finish_time, properties").
+	if err := query.Select("id, task_id, platform, action, status, progress, submit_time, start_time, finish_time, properties").
 		Order("submit_time DESC").
 		Order("id DESC").
 		Offset(offset).
@@ -184,6 +193,7 @@ func ListResellerCustomerTasks(customer *ResellerCustomerRecord, page int, pageS
 		taskPage.Items = append(taskPage.Items, ResellerTaskItem{
 			CustomerId:  customer.Id,
 			TaskId:      row.TaskID,
+			Platform:    string(row.Platform),
 			Model:       strings.TrimSpace(row.Properties.OriginModelName),
 			Action:      row.Action,
 			Status:      string(row.Status),

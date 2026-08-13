@@ -44,6 +44,7 @@ type resellerTasksEnvelopeData struct {
 	Items    []struct {
 		CustomerId  int    `json:"customer_id"`
 		TaskId      string `json:"task_id"`
+		Platform    string `json:"platform"`
 		Model       string `json:"model"`
 		Action      string `json:"action"`
 		Status      string `json:"status"`
@@ -235,6 +236,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 	})
 	seedTask(t, db, model.Task{
 		TaskID:      "task-after-120",
+		Platform:    "veo",
 		UserId:      userA.Id,
 		Action:      "generate",
 		Status:      model.TaskStatusSuccess,
@@ -249,6 +251,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 	})
 	seedTask(t, db, model.Task{
 		TaskID:      "task-after-130",
+		Platform:    "kling",
 		UserId:      userA.Id,
 		Action:      "remixGenerate",
 		Status:      model.TaskStatusInProgress,
@@ -263,6 +266,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 	})
 	seedTask(t, db, model.Task{
 		TaskID:      "task-after-140",
+		Platform:    "suno",
 		UserId:      userA.Id,
 		Action:      "generate",
 		Status:      model.TaskStatusSubmitted,
@@ -333,6 +337,15 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		assert.NotContains(t, body, "upstream-secret")
 		assert.NotContains(t, body, "refund-secret")
 
+		modelRecorder := request(http.MethodGet, "/api/internal/v1/reseller/management/usage?start_timestamp=100&end_timestamp=140&model=alpha-model", "", "matrix-reseller-management-test-token", "usage-model_123", viewerHeaders)
+		modelEnvelope := decodeM2Envelope(t, modelRecorder)
+		require.Equal(t, http.StatusOK, modelRecorder.Code)
+		var modelData resellerUsageEnvelopeData
+		require.NoError(t, common.Unmarshal(modelEnvelope.RawData, &modelData))
+		assert.Equal(t, 1, modelData.Summary.ModelCount)
+		require.Len(t, modelData.Items, 2)
+		assert.Equal(t, []string{"alpha-model", "alpha-model"}, []string{modelData.Items[0].Model, modelData.Items[1].Model})
+
 		allRecorder := request(http.MethodGet, "/api/internal/v1/reseller/management/usage?start_timestamp=100&end_timestamp=140", "", "matrix-reseller-management-test-token", "usage-all_123", viewerHeaders)
 		allEnvelope := decodeM2Envelope(t, allRecorder)
 		require.Equal(t, http.StatusOK, allRecorder.Code)
@@ -357,6 +370,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 			fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d&start_timestamp=100", customerA.Id),
 			fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d&start_timestamp=140&end_timestamp=100", customerA.Id),
 			fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d&start_timestamp=0&end_timestamp=100", customerA.Id),
+			fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d&model=alpha-model&model=beta-task-model", customerA.Id),
 		} {
 			recorder := request(http.MethodGet, path, "", "matrix-reseller-management-test-token", "usage-invalid-time_123", ownerHeaders)
 			envelope := decodeM2Envelope(t, recorder)
@@ -377,6 +391,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		assert.Equal(t, int64(2), data.Total)
 		require.Len(t, data.Items, 2)
 		assert.Equal(t, []string{"task-after-130", "task-after-120"}, []string{data.Items[0].TaskId, data.Items[1].TaskId})
+		assert.Equal(t, []string{"kling", "veo"}, []string{data.Items[0].Platform, data.Items[1].Platform})
 		assert.Equal(t, []string{"safe-model-b", "safe-model-a"}, []string{data.Items[0].Model, data.Items[1].Model})
 		assert.Equal(t, []int64{130, 120}, []int64{data.Items[0].SubmittedAt, data.Items[1].SubmittedAt})
 
@@ -402,6 +417,15 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		assert.Equal(t, int64(3), pageTwoData.Total)
 		require.Len(t, pageTwoData.Items, 1)
 		assert.Equal(t, "task-after-130", pageTwoData.Items[0].TaskId)
+
+		filtered := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/tasks?customer_id=%d&task_id=task-after-120", customerA.Id), "", "matrix-reseller-management-test-token", "tasks-filtered_123", adminHeaders)
+		filteredEnvelope := decodeM2Envelope(t, filtered)
+		require.Equal(t, http.StatusOK, filtered.Code)
+		var filteredData resellerTasksEnvelopeData
+		require.NoError(t, common.Unmarshal(filteredEnvelope.RawData, &filteredData))
+		assert.Equal(t, int64(1), filteredData.Total)
+		require.Len(t, filteredData.Items, 1)
+		assert.Equal(t, "task-after-120", filteredData.Items[0].TaskId)
 	})
 
 	t.Run("tasks reject invalid input hide cross tenant data and return empty page for unbound user", func(t *testing.T) {
@@ -411,6 +435,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 			fmt.Sprintf("/api/internal/v1/reseller/management/tasks?customer_id=%d&start_timestamp=140&end_timestamp=100", customerA.Id),
 			fmt.Sprintf("/api/internal/v1/reseller/management/tasks?customer_id=%d&p=0", customerA.Id),
 			fmt.Sprintf("/api/internal/v1/reseller/management/tasks?customer_id=%d&page_size=101", customerA.Id),
+			fmt.Sprintf("/api/internal/v1/reseller/management/tasks?customer_id=%d&task_id=task-after-120&task_id=task-after-130", customerA.Id),
 		} {
 			recorder := request(http.MethodGet, path, "", "matrix-reseller-management-test-token", "tasks-invalid_123", adminHeaders)
 			envelope := decodeM2Envelope(t, recorder)
