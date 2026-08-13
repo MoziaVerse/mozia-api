@@ -189,6 +189,10 @@ func isKnownTaskField(field string) bool {
 		"image":           true,
 		"images":          true,
 		"size":            true,
+		"resolution":      true,
+		"ratio":           true,
+		"aspect_ratio":    true,
+		"content":         true,
 		"duration":        true,
 		"input_reference": true, // Sora 特有字段
 	}
@@ -208,6 +212,15 @@ func ValidateBasicTaskRequest(c *gin.Context, info *RelayInfo, action string) *d
 	// 为了metadata字段的兼容性，统一UnmarshalBodyReusable
 	if err := common.UnmarshalBodyReusable(c, &req); err != nil {
 		return createTaskError(err, "invalid_request", http.StatusBadRequest, true)
+	}
+
+	if len(req.Content) > 0 {
+		summary, err := req.ParseVideoContent()
+		if err != nil {
+			return createTaskError(err, "invalid_request", http.StatusBadRequest, true)
+		}
+		req.Prompt = summary.Prompt
+		req.Images = summary.LegacyImages()
 	}
 
 	if taskErr := validatePrompt(req.Prompt); taskErr != nil {

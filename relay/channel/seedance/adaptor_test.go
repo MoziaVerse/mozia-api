@@ -126,6 +126,111 @@ func TestBuildRequestBodyPreservesMiniMaxH3ReferenceImageURL(t *testing.T) {
 	assert.Equal(t, imageURL, images[0])
 }
 
+func TestBuildRequestBodySelectsMiniMaxH3FrameModelFromExternalAlias(t *testing.T) {
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"MiniMax-H3",
+		"duration":5,
+		"resolution":"768P",
+		"ratio":"21:9",
+		"content":[
+			{"type":"text","text":"animate the moment before the jump"},
+			{"type":"image_url","role":"first_frame","image_url":{"url":"https://example.com/first.jpg"}},
+			{"type":"image_url","role":"last_frame","image_url":{"url":"https://example.com/last.jpg"}}
+		]
+	}`)
+	info.OriginModelName = "MiniMax-H3"
+	info.UpstreamModelName = info.OriginModelName
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, "minimax/minimax-h3-fl2va", payload["model"])
+	assert.Equal(t, "animate the moment before the jump", payload["prompt"])
+	assert.Equal(t, "1344x576", payload["size"])
+	assert.Equal(t, []any{"https://example.com/first.jpg", "https://example.com/last.jpg"}, payload["images"])
+	assert.NotContains(t, payload, "content")
+	assert.NotContains(t, payload, "ratio")
+	assert.NotContains(t, payload, "resolution")
+}
+
+func TestBuildRequestBodySelectsMiniMaxH3ReferenceModelFromExternalAlias(t *testing.T) {
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"MiniMax-H3",
+		"duration":5,
+		"aspect_ratio":"1:1",
+		"content":[
+			{"type":"text","text":"bring the photo to life"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/reference.jpg"}}
+		]
+	}`)
+	info.OriginModelName = "MiniMax-H3"
+	info.UpstreamModelName = info.OriginModelName
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, "minimax/minimax-h3-ref2va", payload["model"])
+	assert.Equal(t, "768x768", payload["size"])
+	assert.Equal(t, []any{"https://example.com/reference.jpg"}, payload["images"])
+	assert.NotContains(t, payload, "content")
+}
+
+func TestBuildRequestBodyPreservesExplicitMiniMaxH3ModelMapping(t *testing.T) {
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"MiniMax-H3",
+		"duration":5,
+		"resolution":"768P",
+		"content":[
+			{"type":"text","text":"use the configured upstream model"},
+			{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/reference.jpg"}}
+		]
+	}`)
+	info.OriginModelName = "MiniMax-H3"
+	info.UpstreamModelName = info.OriginModelName
+	c.Set("model_mapping", `{"MiniMax-H3":"minimax-h3-ref2va-int8"}`)
+	require.NoError(t, relayhelper.ModelMappedHelper(c, info, nil))
+	require.True(t, info.IsModelMapped)
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, "minimax-h3-ref2va-int8", payload["model"])
+	assert.Equal(t, "https://example.com/reference.jpg", payload["images"].([]any)[0])
+}
+
+func TestBuildRequestBodyMiniMaxH3ExplicitSizeWins(t *testing.T) {
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"MiniMax-H3",
+		"duration":5,
+		"size":"992x992",
+		"resolution":"768P",
+		"ratio":"9:16",
+		"content":[
+			{"type":"text","text":"prefer the explicit legacy size"}
+		]
+	}`)
+	info.OriginModelName = "MiniMax-H3"
+	info.UpstreamModelName = info.OriginModelName
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, "992x992", payload["size"])
+}
+
+func TestBuildRequestBodyMiniMaxH3TopLevelParametersBeatMetadata(t *testing.T) {
+	adaptor, c, info := prepareRequest(t, `{
+		"model":"MiniMax-H3",
+		"prompt":"use canonical parameters",
+		"duration":5,
+		"resolution":"768P",
+		"ratio":"1:1",
+		"metadata":{"resolution":"2K","ratio":"adaptive"}
+	}`)
+	info.OriginModelName = "MiniMax-H3"
+	info.UpstreamModelName = info.OriginModelName
+
+	payload := buildPayload(t, adaptor, c, info)
+
+	assert.Equal(t, "768x768", payload["size"])
+}
+
 func TestValidateRequestRequiresExplicitPositiveDuration(t *testing.T) {
 	tests := []struct {
 		name string
@@ -142,6 +247,105 @@ func TestValidateRequestRequiresExplicitPositiveDuration(t *testing.T) {
 			require.NotNil(t, taskErr)
 			assert.Equal(t, "invalid_duration", taskErr.Code)
 			assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+		})
+	}
+}
+
+func TestValidateRequestRejectsMiniMaxH3UnsupportedReferenceMedia(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "reference video",
+			body: `{"model":"MiniMax-H3","duration":5,"content":[{"type":"text","text":"p"},{"type":"video_url","role":"reference_video","video_url":{"url":"https://example.com/ref.mp4"}}]}`,
+		},
+		{
+			name: "reference audio",
+			body: `{"model":"MiniMax-H3","duration":5,"content":[{"type":"text","text":"p"},{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://example.com/ref.mp3"}}]}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			adaptor, c, info := prepareRequestWithoutValidation(t, tc.body)
+			info.OriginModelName = "MiniMax-H3"
+			info.UpstreamModelName = info.OriginModelName
+
+			taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
+			require.NotNil(t, taskErr)
+			assert.Equal(t, "invalid_request", taskErr.Code)
+		})
+	}
+}
+
+func TestValidateRequestRejectsMiniMaxH3ImageLimitViolations(t *testing.T) {
+	t.Run("ref2va over 9 images", func(t *testing.T) {
+		adaptor, c, info := prepareRequestWithoutValidation(t, `{
+			"model":"MiniMax-H3",
+			"duration":5,
+			"content":[
+				{"type":"text","text":"p"},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/1.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/2.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/3.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/4.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/5.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/6.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/7.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/8.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/9.jpg"}},
+				{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/10.jpg"}}
+			]
+		}`)
+		info.OriginModelName = "MiniMax-H3"
+		info.UpstreamModelName = info.OriginModelName
+
+		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
+		require.NotNil(t, taskErr)
+		assert.Equal(t, "invalid_request", taskErr.Code)
+	})
+
+	t.Run("fl2va legacy images over 2", func(t *testing.T) {
+		adaptor, c, info := prepareRequestWithoutValidation(t, `{
+			"model":"minimax/minimax-h3-fl2va",
+			"prompt":"p",
+			"duration":5,
+			"images":[
+				"https://example.com/1.jpg",
+				"https://example.com/2.jpg",
+				"https://example.com/3.jpg"
+			]
+		}`)
+		info.OriginModelName = "minimax/minimax-h3-fl2va"
+		info.UpstreamModelName = info.OriginModelName
+
+		taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
+		require.NotNil(t, taskErr)
+		assert.Equal(t, "invalid_request", taskErr.Code)
+	})
+}
+
+func TestValidateRequestRejectsMiniMaxH3UnsupportedResolution(t *testing.T) {
+	tests := []string{
+		`{"model":"MiniMax-H3","prompt":"p","duration":5,"resolution":"2K"}`,
+		`{"model":"MiniMax-H3","prompt":"p","duration":5,"resolution":"768P","ratio":"adaptive"}`,
+		`{"model":"MiniMax-H3","prompt":"p","duration":5,"size":"1366x768"}`,
+	}
+
+	for _, body := range tests {
+		t.Run(body, func(t *testing.T) {
+			adaptor, c, info := prepareRequestWithoutValidation(t, body)
+			info.OriginModelName = "MiniMax-H3"
+			info.UpstreamModelName = info.OriginModelName
+
+			taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
+			require.NotNil(t, taskErr)
+			assert.Equal(t, "invalid_size", taskErr.Code)
 		})
 	}
 }

@@ -31,7 +31,7 @@ func VideoGenerations(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param task_id path string true "Task ID"
-// @Success 200 {object} dto.VideoTaskResponse "任务状态和结果"
+// @Success 200 {object} dto.PublicVideoTaskResponse "任务状态和结果"
 // @Failure 400 {object} dto.OpenAIError "请求参数错误"
 // @Failure 401 {object} dto.OpenAIError "未授权"
 // @Failure 403 {object} dto.OpenAIError "无权限"

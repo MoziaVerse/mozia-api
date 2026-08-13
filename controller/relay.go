@@ -625,7 +625,25 @@ func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}
+	if taskErr.Type == "" {
+		taskErr.Type = taskErrorType(taskErr.StatusCode)
+	}
 	c.JSON(taskErr.StatusCode, taskErr)
+}
+
+func taskErrorType(statusCode int) string {
+	switch statusCode {
+	case http.StatusUnauthorized:
+		return "authentication_error"
+	case http.StatusForbidden:
+		return "permission_error"
+	case http.StatusTooManyRequests:
+		return "rate_limit_error"
+	}
+	if statusCode >= http.StatusInternalServerError {
+		return "server_error"
+	}
+	return "invalid_request_error"
 }
 
 func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError, retryTimes int) bool {

@@ -9,6 +9,8 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func buildPayloadForBody(t *testing.T, upstreamModel, body string) *generateRequest {
@@ -82,4 +84,86 @@ func TestConvertPayloadNonSeedanceStripsPrefix(t *testing.T) {
 	if r.Model != "gpt_image_2" {
 		t.Fatalf("Model: got %q want gpt_image_2", r.Model)
 	}
+}
+
+func TestConvertPayloadReferenceVideoDefaultsToVideoModel(t *testing.T) {
+	r := buildPayloadForBody(t, "", `{
+		"prompt":"use the reference video",
+		"content":[
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://example.com/ref.mp4"}}
+		]
+	}`)
+
+	assert.Equal(t, defaultVideoModel, r.Model)
+}
+
+func TestConvertPayloadContentFramesOverrideLegacyFiles(t *testing.T) {
+	r := buildPayloadForBody(t, "cool:seedance_2", `{
+		"model":"cool:seedance_2",
+		"prompt":"make it cinematic",
+		"images":["https://example.com/legacy.png"],
+		"content":[
+			{"type":"image_url","role":"first_frame","image_url":{"url":"https://example.com/start.png"}},
+			{"type":"image_url","role":"last_frame","image_url":{"url":"https://example.com/end.png"}}
+		],
+		"metadata":{
+			"files":[{"url":"https://example.com/meta.png","type":"image"}]
+		}
+	}`)
+
+	require.Len(t, r.Files, 2)
+	assert.Equal(t, fileRef{URL: "https://example.com/start.png", Type: "image", Name: "start"}, r.Files[0])
+	assert.Equal(t, fileRef{URL: "https://example.com/end.png", Type: "image", Name: "end"}, r.Files[1])
+	assert.Contains(t, r.Prompt, "@start is the first frame.")
+	assert.Contains(t, r.Prompt, "@end is the last frame.")
+	assert.Contains(t, r.Prompt, "make it cinematic")
+}
+
+func TestConvertPayloadContentReferenceMediaTypes(t *testing.T) {
+	r := buildPayloadForBody(t, "cool:seedance_2", `{
+		"model":"cool:seedance_2",
+		"prompt":"mix the references",
+		"content":[
+			{"type":"image_url","role":"reference_image","image_url":{"url":"https://example.com/ref.png"}},
+			{"type":"video_url","role":"reference_video","video_url":{"url":"https://example.com/ref.mp4"}},
+			{"type":"audio_url","role":"reference_audio","audio_url":{"url":"https://example.com/ref.mp3"}}
+		]
+	}`)
+
+	require.Len(t, r.Files, 3)
+	tests := []struct {
+		index    int
+		url      string
+		fileType string
+	}{
+		{0, "https://example.com/ref.png", "image"},
+		{1, "https://example.com/ref.mp4", "video"},
+		{2, "https://example.com/ref.mp3", "audio"},
+	}
+	for _, tc := range tests {
+		got := r.Files[tc.index]
+		assert.Equal(t, tc.url, got.URL)
+		assert.Equal(t, tc.fileType, got.Type)
+		assert.Empty(t, got.Name)
+	}
+}
+
+func TestConvertPayloadCanonicalTopLevelFieldsBeatMetadata(t *testing.T) {
+	r := buildPayloadForBody(t, "cool:seedance_2", `{
+		"model":"cool:seedance_2",
+		"prompt":"hi",
+		"aspect_ratio":"16:9",
+		"size":"1:1",
+		"resolution":"1080p",
+		"duration":8,
+		"metadata":{
+			"ratio":"4:3",
+			"resolution":"720p",
+			"duration":3
+		}
+	}`)
+
+	assert.Equal(t, "16:9", r.Ratio)
+	assert.Equal(t, "1080p", r.Resolution)
+	assert.Equal(t, 8, r.Duration)
 }

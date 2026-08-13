@@ -7,6 +7,7 @@ import (
 type TaskError struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
+	Type       string `json:"type,omitempty"`
 	Data       any    `json:"data"`
 	StatusCode int    `json:"-"`
 	LocalError bool   `json:"-"`

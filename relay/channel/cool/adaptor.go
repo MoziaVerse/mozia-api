@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -212,12 +214,21 @@ func (a *TaskAdaptor) GetChannelName() string {
 // ============================
 
 func (a *TaskAdaptor) convertToRequestPayload(c *gin.Context, req *relaycommon.TaskSubmitReq, info *relaycommon.RelayInfo) (*generateRequest, error) {
+	var content relaycommon.VideoContentSummary
+	if len(req.Content) > 0 {
+		var err error
+		content, err = req.ParseVideoContent()
+		if err != nil {
+			return nil, errors.Wrap(err, "parse content failed")
+		}
+	}
+
 	modelName := taskcommon.DefaultString(info.UpstreamModelName, "")
 	if modelName == "" {
 		modelName = req.Model
 	}
 	if modelName == "" {
-		if len(req.Images) > 0 {
+		if len(req.Images) > 0 || len(content.ReferenceVideos) > 0 || len(content.ReferenceAudios) > 0 {
 			modelName = defaultVideoModel
 		} else {
 			modelName = defaultImageModel
@@ -225,25 +236,26 @@ func (a *TaskAdaptor) convertToRequestPayload(c *gin.Context, req *relaycommon.T
 	}
 
 	r := &generateRequest{
-		Prompt:   req.Prompt,
-		Ratio:    req.Size,
-		Duration: req.Duration,
-	}
-
-	for _, u := range req.Images {
-		if u == "" {
-			continue
-		}
-		r.Files = append(r.Files, fileRef{URL: u, Type: "image"})
-	}
-	if req.Image != "" {
-		r.Files = append(r.Files, fileRef{URL: req.Image, Type: "image"})
+		Files: buildLegacyImageFiles(req),
 	}
 
 	// 允许通过 metadata 传任意原生字段（model / resolution / optimizePromptAsync /
 	// timeout / 自定义 files 列表等）。参考视频通过 files 里 type:video 的素材传入。
 	if err := taskcommon.UnmarshalMetadata(req.Metadata, r); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata failed")
+	}
+
+	if len(req.Content) > 0 {
+		r.Files = buildContentFiles(content)
+		r.Prompt = applyFramePromptBindings(firstNonEmpty(content.Prompt, r.Prompt), content)
+	} else if prompt := strings.TrimSpace(req.Prompt); prompt != "" {
+		r.Prompt = prompt
+	}
+	if ratio := resolveCoolRatio(req); ratio != "" {
+		r.Ratio = ratio
+	}
+	if duration, ok := resolveCoolDuration(req); ok {
+		r.Duration = duration
 	}
 
 	// Seedance SKU：把对外模型名（cool:seedance_2_480p_video 等）还原成 cool 上游
@@ -266,12 +278,108 @@ func (a *TaskAdaptor) convertToRequestPayload(c *gin.Context, req *relaycommon.T
 	}
 
 	// 其它 cool 模型：剥掉对外 cool: 前缀（cool 的 model key 不带前缀），
-	// 并兜底转发顶层 resolution（TaskSubmitReq 不含 resolution 字段会被丢弃）。
+	// 并转发统一接口的顶层 resolution。
 	if r.Model == "" {
 		r.Model = stripCoolPrefix(modelName)
 	}
-	if resolution := resolveSeedanceResolution(c, req); resolution != "" {
+	if resolution := resolveCoolResolution(req); resolution != "" {
 		r.Resolution = resolution
 	}
 	return r, nil
+}
+
+func buildLegacyImageFiles(req *relaycommon.TaskSubmitReq) []fileRef {
+	files := make([]fileRef, 0, len(req.Images)+1)
+	for _, u := range req.Images {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		files = append(files, fileRef{URL: u, Type: "image"})
+	}
+	if image := strings.TrimSpace(req.Image); image != "" {
+		files = append(files, fileRef{URL: image, Type: "image"})
+	}
+	return files
+}
+
+func buildContentFiles(summary relaycommon.VideoContentSummary) []fileRef {
+	files := make([]fileRef, 0, len(summary.ReferenceImages)+len(summary.ReferenceVideos)+len(summary.ReferenceAudios)+2)
+	if summary.FirstFrameURL != "" {
+		files = append(files, fileRef{URL: summary.FirstFrameURL, Type: "image", Name: "start"})
+	}
+	if summary.LastFrameURL != "" {
+		files = append(files, fileRef{URL: summary.LastFrameURL, Type: "image", Name: "end"})
+	}
+	files = appendContentRefs(files, summary.ReferenceImages, "image")
+	files = appendContentRefs(files, summary.ReferenceVideos, "video")
+	files = appendContentRefs(files, summary.ReferenceAudios, "audio")
+	return files
+}
+
+func appendContentRefs(files []fileRef, urls []string, fileType string) []fileRef {
+	for _, u := range urls {
+		if strings.TrimSpace(u) == "" {
+			continue
+		}
+		files = append(files, fileRef{URL: u, Type: fileType})
+	}
+	return files
+}
+
+func applyFramePromptBindings(prompt string, summary relaycommon.VideoContentSummary) string {
+	prompt = strings.TrimSpace(prompt)
+	if summary.FirstFrameURL == "" && summary.LastFrameURL == "" {
+		return prompt
+	}
+
+	bindings := make([]string, 0, 2)
+	lowerPrompt := strings.ToLower(prompt)
+	if summary.FirstFrameURL != "" && !strings.Contains(lowerPrompt, "@start") {
+		bindings = append(bindings, "@start is the first frame.")
+	}
+	if summary.LastFrameURL != "" && !strings.Contains(lowerPrompt, "@end") {
+		bindings = append(bindings, "@end is the last frame.")
+	}
+	if len(bindings) == 0 {
+		return prompt
+	}
+	prefix := strings.Join(bindings, " ")
+	if prompt == "" {
+		return prefix
+	}
+	return prefix + " " + prompt
+}
+
+func resolveCoolRatio(req *relaycommon.TaskSubmitReq) string {
+	if req == nil {
+		return ""
+	}
+	return firstNonEmpty(derefString(req.Ratio), derefString(req.AspectRatio), req.Size)
+}
+
+func resolveCoolResolution(req *relaycommon.TaskSubmitReq) string {
+	if req == nil {
+		return ""
+	}
+	return strings.TrimSpace(derefString(req.Resolution))
+}
+
+func resolveCoolDuration(req *relaycommon.TaskSubmitReq) (int, bool) {
+	if req == nil {
+		return 0, false
+	}
+	if req.Duration > 0 {
+		return req.Duration, true
+	}
+	if seconds, err := strconv.Atoi(strings.TrimSpace(req.Seconds)); err == nil && seconds > 0 {
+		return seconds, true
+	}
+	return 0, false
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }

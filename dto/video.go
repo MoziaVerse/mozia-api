@@ -31,6 +31,33 @@ type VideoTaskResponse struct {
 	Error    *VideoTaskError    `json:"error,omitempty"`                // 错误信息（失败时）
 }
 
+// PublicVideoTaskResponse is the flat public contract for
+// GET /v1/video/generations/{task_id}.
+type PublicVideoTaskResponse struct {
+	ID         string                  `json:"id" example:"task_abc123"`
+	TaskID     string                  `json:"task_id" example:"task_abc123"`
+	Object     string                  `json:"object" example:"video"`
+	Model      string                  `json:"model,omitempty" example:"MiniMax-H3"`
+	Status     string                  `json:"status" example:"succeeded"`
+	Progress   int                     `json:"progress" example:"100"`
+	CreatedAt  int64                   `json:"created_at" example:"1723363200"`
+	UpdatedAt  int64                   `json:"updated_at" example:"1723363260"`
+	Content    *PublicVideoTaskContent `json:"content,omitempty"`
+	Error      *PublicVideoTaskFailure `json:"error,omitempty"`
+	Resolution string                  `json:"resolution,omitempty" example:"720p"`
+	Ratio      string                  `json:"ratio,omitempty" example:"16:9"`
+	Duration   *float64                `json:"duration,omitempty" example:"5"`
+}
+
+type PublicVideoTaskContent struct {
+	URL string `json:"url" example:"https://example.com/v1/videos/task_abc123/content"`
+}
+
+type PublicVideoTaskFailure struct {
+	Code    string `json:"code" example:"task_failed"`
+	Message string `json:"message" example:"upstream provider rejected the request"`
+}
+
 // VideoTaskMetadata 视频任务元数据
 type VideoTaskMetadata struct {
 	Duration float64 `json:"duration" example:"5.0"`  // 实际生成的视频时长

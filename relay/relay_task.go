@@ -468,11 +468,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
-	// 通用 TaskDto 格式
-	respBody, err = common.Marshal(dto.TaskResponse[any]{
-		Code: "success",
-		Data: TaskModel2Dto(originTask),
-	})
+	respBody, err = publicVideoTaskResponseBody(originTask, originTask.Data)
 	if err != nil {
 		taskResp = service.TaskErrorWrapper(err, "marshal_response_failed", http.StatusInternalServerError)
 	}
@@ -481,7 +477,7 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。
 // 仅当渠道类型为 Gemini 或 Vertex 时触发；其他渠道或出错时返回 nil。
-// 当非 OpenAI Video API 时，还会构建自定义格式的响应体。
+// 当非 OpenAI Video API 时，使用最新上游响应构建统一的公开视频任务响应。
 func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	channelModel, err := model.GetChannelById(task.ChannelId, true)
 	if err != nil {
@@ -521,13 +517,9 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 
 	snap := task.Snapshot()
 
-	// 将上游最新状态更新到 task
-	if ti.Status != "" {
-		task.Status = model.TaskStatus(ti.Status)
-	}
-	if ti.Progress != "" {
-		task.Progress = ti.Progress
-	}
+	applyRealtimeTaskInfo(task, ti)
+
+	// 将上游最新结果更新到 task
 	if strings.HasPrefix(ti.Url, "data:") {
 		// data: URI — kept in Data, not ResultURL
 	} else if ti.Url != "" {
@@ -546,60 +538,166 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		return nil
 	}
 
-	// 非 OpenAI Video API: 构建自定义格式响应
-	format := detectVideoFormat(body)
-	out := map[string]any{
-		"error":    nil,
-		"format":   format,
-		"metadata": nil,
-		"status":   mapTaskStatusToSimple(task.Status),
-		"task_id":  task.TaskID,
-		"url":      task.GetResultURL(),
-	}
-	respBody, _ := common.Marshal(dto.TaskResponse[any]{
-		Code: "success",
-		Data: out,
-	})
+	respBody, _ := publicVideoTaskResponseBody(task, body)
 	return respBody
 }
 
-// detectVideoFormat 从 Gemini/Vertex 原始响应中探测视频格式
-func detectVideoFormat(rawBody []byte) string {
-	var raw map[string]any
-	if err := common.Unmarshal(rawBody, &raw); err != nil {
-		return "mp4"
+func applyRealtimeTaskInfo(task *model.Task, ti *relaycommon.TaskInfo) {
+	if ti.Status != "" {
+		task.Status = model.TaskStatus(ti.Status)
 	}
-	respObj, ok := raw["response"].(map[string]any)
-	if !ok {
-		return "mp4"
+	if ti.Progress != "" {
+		task.Progress = ti.Progress
 	}
-	vids, ok := respObj["videos"].([]any)
-	if !ok || len(vids) == 0 {
-		return "mp4"
+	if ti.Reason != "" || model.TaskStatus(ti.Status) == model.TaskStatusFailure {
+		task.FailReason = ti.Reason
 	}
-	v0, ok := vids[0].(map[string]any)
-	if !ok {
-		return "mp4"
-	}
-	mt, ok := v0["mimeType"].(string)
-	if !ok || mt == "" || strings.Contains(mt, "mp4") {
-		return "mp4"
-	}
-	return mt
 }
 
-// mapTaskStatusToSimple 将内部 TaskStatus 映射为简化状态字符串
-func mapTaskStatusToSimple(status model.TaskStatus) string {
-	switch status {
-	case model.TaskStatusSuccess:
-		return "succeeded"
-	case model.TaskStatusFailure:
-		return "failed"
-	case model.TaskStatusQueued, model.TaskStatusSubmitted:
+func normalizePublicVideoTaskStatus(status model.TaskStatus) string {
+	switch strings.ToUpper(strings.TrimSpace(string(status))) {
+	case string(model.TaskStatusNotStart), string(model.TaskStatusSubmitted), string(model.TaskStatusQueued):
 		return "queued"
+	case string(model.TaskStatusInProgress):
+		return "running"
+	case string(model.TaskStatusSuccess):
+		return "succeeded"
+	case string(model.TaskStatusFailure):
+		return "failed"
+	case "CANCELLED", "CANCELED":
+		return "cancelled"
+	case "EXPIRED":
+		return "expired"
 	default:
-		return "processing"
+		return "unknown"
 	}
+}
+
+func publicVideoTaskProgress(status string, progress string) int {
+	switch status {
+	case "succeeded", "failed", "cancelled", "expired":
+		return 100
+	}
+	progress = strings.TrimSpace(strings.TrimSuffix(progress, "%"))
+	if progress == "" {
+		return 0
+	}
+	value, err := strconv.Atoi(progress)
+	if err != nil {
+		return 0
+	}
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
+func publicVideoTaskModel(task *model.Task) string {
+	if task.Properties.OriginModelName != "" {
+		return task.Properties.OriginModelName
+	}
+	if task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.OriginModelName != "" {
+		return task.PrivateData.BillingContext.OriginModelName
+	}
+	if task.Properties.UpstreamModelName != "" {
+		return task.Properties.UpstreamModelName
+	}
+	return ""
+}
+
+func publicVideoTaskMetadata(data []byte, resp *dto.PublicVideoTaskResponse) {
+	if len(data) == 0 {
+		return
+	}
+	var raw map[string]any
+	if err := common.Unmarshal(data, &raw); err != nil {
+		return
+	}
+
+	candidates := make([]map[string]any, 0, 5)
+	if taskData, ok := raw["task"].(map[string]any); ok {
+		if result, ok := taskData["result"].(map[string]any); ok {
+			candidates = append(candidates, result)
+		}
+		candidates = append(candidates, taskData)
+	}
+	if result, ok := raw["result"].(map[string]any); ok {
+		candidates = append(candidates, result)
+	}
+	if output, ok := raw["output"].(map[string]any); ok {
+		candidates = append(candidates, output)
+	}
+	candidates = append(candidates, raw)
+
+	for _, candidate := range candidates {
+		if resp.Resolution == "" {
+			resp.Resolution = publicVideoTaskString(candidate["resolution"])
+		}
+		if resp.Ratio == "" {
+			resp.Ratio = publicVideoTaskString(candidate["ratio"])
+			if resp.Ratio == "" {
+				resp.Ratio = publicVideoTaskString(candidate["aspect_ratio"])
+			}
+		}
+		if resp.Duration == nil {
+			if duration, ok := publicVideoTaskDuration(candidate["duration"]); ok {
+				resp.Duration = &duration
+			} else if duration, ok := publicVideoTaskDuration(candidate["seconds"]); ok {
+				resp.Duration = &duration
+			}
+		}
+	}
+}
+
+func publicVideoTaskString(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func publicVideoTaskDuration(value any) (float64, bool) {
+	switch value := value.(type) {
+	case float64:
+		return value, value > 0
+	case string:
+		duration, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+		return duration, err == nil && duration > 0
+	default:
+		return 0, false
+	}
+}
+
+func publicVideoTaskResponse(task *model.Task, metadataData []byte) *dto.PublicVideoTaskResponse {
+	status := normalizePublicVideoTaskStatus(task.Status)
+	resp := &dto.PublicVideoTaskResponse{
+		ID:        task.TaskID,
+		TaskID:    task.TaskID,
+		Object:    "video",
+		Model:     publicVideoTaskModel(task),
+		Status:    status,
+		Progress:  publicVideoTaskProgress(status, task.Progress),
+		CreatedAt: task.CreatedAt,
+		UpdatedAt: task.UpdatedAt,
+	}
+	if status == "succeeded" && task.GetResultURL() != "" {
+		resp.Content = &dto.PublicVideoTaskContent{
+			URL: taskcommon.BuildProxyURL(task.TaskID),
+		}
+	}
+	if status == "failed" {
+		resp.Error = &dto.PublicVideoTaskFailure{
+			Code:    "task_failed",
+			Message: task.FailReason,
+		}
+	}
+	publicVideoTaskMetadata(metadataData, resp)
+	return resp
+}
+
+func publicVideoTaskResponseBody(task *model.Task, metadataData []byte) ([]byte, error) {
+	return common.Marshal(publicVideoTaskResponse(task, metadataData))
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {

@@ -171,9 +171,7 @@ func seedanceDurationRatio(duration int) float64 {
 // 保证「按什么清晰度计费」== 「实际请求 cool 的清晰度」，避免错扣。
 // ---------------------------------------------------------------------------
 
-// coolRawRequest 用于补读 TaskSubmitReq 结构体未覆盖的顶层字段。
-// cool / mozia 客户端按文档在顶层传 resolution / aspect_ratio / duration，
-// 但 TaskSubmitReq 没有 resolution 字段会被丢弃；这里直接读原始 body 兜底。
+// coolRawRequest 用于读取覆盖处理后的原始顶层字段，并兼容 metadata 参数。
 type coolRawRequest struct {
 	Resolution  string         `json:"resolution,omitempty"`
 	AspectRatio string         `json:"aspect_ratio,omitempty"`
@@ -200,13 +198,14 @@ func readCoolRawRequest(c *gin.Context) coolRawRequest {
 }
 
 // resolveSeedanceResolution 统一解析清晰度并归一化为 480p / 720p / 1080p。
-// 优先级：metadata.resolution > 顶层 resolution > req.Metadata.resolution。
+// 优先级：顶层 resolution > metadata.resolution。
 // 解析不到合法清晰度时返回 ""，由调用方决定是否回落默认。
 func resolveSeedanceResolution(c *gin.Context, req *relaycommon.TaskSubmitReq) string {
 	body := readCoolRawRequest(c)
 	raw := firstNonEmpty(
-		stringFromMap(body.Metadata, "resolution"),
 		body.Resolution,
+		derefString(req.Resolution),
+		stringFromMap(body.Metadata, "resolution"),
 		stringFromMap(req.Metadata, "resolution"),
 	)
 	return normalizeSeedanceResolution(raw)
