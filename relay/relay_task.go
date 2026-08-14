@@ -700,7 +700,7 @@ func publicVideoTaskResponse(task *model.Task, metadataData []byte) *dto.PublicV
 }
 
 func publicVideoTaskResponseBody(task *model.Task, metadataData []byte) ([]byte, error) {
-	return common.Marshal(publicVideoTaskResponse(task, metadataData))
+	return common.MarshalNoEscapeHTML(publicVideoTaskResponse(task, metadataData))
 }
 
 func TaskModel2Dto(task *model.Task) *dto.TaskDto {

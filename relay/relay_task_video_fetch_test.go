@@ -50,6 +50,8 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 
 	body, err := publicVideoTaskResponseBody(successTask, successTask.Data)
 	require.NoError(t, err)
+	assert.Contains(t, string(body), "&signature=")
+	assert.NotContains(t, string(body), `\u0026`)
 
 	var resp dto.PublicVideoTaskResponse
 	require.NoError(t, common.Unmarshal(body, &resp))

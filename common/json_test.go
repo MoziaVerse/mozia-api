@@ -41,3 +41,15 @@ func TestJsonRawMessageToString(t *testing.T) {
 		})
 	}
 }
+
+func TestMarshalNoEscapeHTML(t *testing.T) {
+	body, err := MarshalNoEscapeHTML(struct {
+		URL     string `json:"url"`
+		Literal string `json:"literal"`
+	}{
+		URL:     "https://example.com/video.mp4?expires=1&signature=test&uid=2",
+		Literal: `\u0026`,
+	})
+	require.NoError(t, err)
+	require.Equal(t, `{"url":"https://example.com/video.mp4?expires=1&signature=test&uid=2","literal":"\\u0026"}`, string(body))
+}
