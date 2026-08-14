@@ -50,7 +50,8 @@ type PublicVideoTaskResponse struct {
 }
 
 type PublicVideoTaskContent struct {
-	URL string `json:"url" example:"https://example.com/v1/videos/task_abc123/content"`
+	URL       string `json:"url" example:"https://example.com/v1/video/generations/task_abc123/content/video.mp4?expires=1723449600&signature=xxx"`
+	ExpiresAt int64  `json:"expires_at" example:"1723449600"`
 }
 
 type PublicVideoTaskFailure struct {

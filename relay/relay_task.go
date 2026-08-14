@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -682,8 +683,10 @@ func publicVideoTaskResponse(task *model.Task, metadataData []byte) *dto.PublicV
 		UpdatedAt: task.UpdatedAt,
 	}
 	if status == "succeeded" && task.GetResultURL() != "" {
+		now := time.Now()
 		resp.Content = &dto.PublicVideoTaskContent{
-			URL: taskcommon.BuildProxyURL(task.TaskID),
+			URL:       taskcommon.BuildSignedVideoGenerationURLAt(now, task.UserId, task.TaskID, taskcommon.TaskVideoFilename(task)),
+			ExpiresAt: now.Add(taskcommon.SignedVideoURLTTL).Unix(),
 		}
 	}
 	if status == "failed" {

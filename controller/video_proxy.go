@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"context"
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -123,13 +123,16 @@ func serveVideoProxy(c *gin.Context, attachmentFilename string) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "", nil)
+	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, "", nil)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to create request: %s", err.Error()))
 		videoProxyError(c, http.StatusInternalServerError, "server_error", "Failed to create proxy request")
 		return
+	}
+	for _, header := range []string{"Range", "If-Range"} {
+		if value := c.GetHeader(header); value != "" {
+			req.Header.Set(header, value)
+		}
 	}
 
 	switch channel.Type {
@@ -214,7 +217,7 @@ func serveVideoProxy(c *gin.Context, attachmentFilename string) {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Upstream returned status %d for %s", resp.StatusCode, videoURL))
 		videoProxyError(c, http.StatusBadGateway, "server_error",
 			fmt.Sprintf("Upstream service returned status %d", resp.StatusCode))
@@ -243,6 +246,9 @@ func serveVideoProxy(c *gin.Context, attachmentFilename string) {
 		c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
 	}
 	c.Writer.WriteHeader(resp.StatusCode)
+	if c.Request.Method == http.MethodHead {
+		return
+	}
 	if _, err = io.Copy(c.Writer, resp.Body); err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Failed to stream video content: %s", err.Error()))
 	}
@@ -302,7 +308,6 @@ func writeVideoDataURL(c *gin.Context, dataURL, attachmentFilename string) error
 	} else {
 		c.Writer.Header().Set("Cache-Control", "public, max-age=86400")
 	}
-	c.Writer.WriteHeader(http.StatusOK)
-	_, err = c.Writer.Write(videoBytes)
-	return err
+	http.ServeContent(c.Writer, c.Request, attachmentFilename, time.Time{}, bytes.NewReader(videoBytes))
+	return nil
 }

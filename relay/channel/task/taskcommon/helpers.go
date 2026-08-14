@@ -111,6 +111,14 @@ func BuildSignedVideoProxyURL(userID int, taskID, filename string) string {
 }
 
 func BuildSignedVideoProxyURLAt(now time.Time, userID int, taskID, filename string) string {
+	return buildSignedVideoURLAt(now, "/v1/videos", userID, taskID, filename)
+}
+
+func BuildSignedVideoGenerationURLAt(now time.Time, userID int, taskID, filename string) string {
+	return buildSignedVideoURLAt(now, "/v1/video/generations", userID, taskID, filename)
+}
+
+func buildSignedVideoURLAt(now time.Time, resourcePath string, userID int, taskID, filename string) string {
 	filename = SanitizeVideoFilename(filename, taskID)
 	expires := now.Add(SignedVideoURLTTL).Unix()
 	signature := signedVideoSignature(userID, taskID, filename, expires)
@@ -118,8 +126,9 @@ func BuildSignedVideoProxyURLAt(now time.Time, userID int, taskID, filename stri
 	values.Set("uid", strconv.Itoa(userID))
 	values.Set("expires", strconv.FormatInt(expires, 10))
 	values.Set("signature", signature)
-	return fmt.Sprintf("%s/v1/videos/%s/content/%s?%s",
+	return fmt.Sprintf("%s%s/%s/content/%s?%s",
 		strings.TrimRight(system_setting.ServerAddress, "/"),
+		resourcePath,
 		url.PathEscape(taskID),
 		url.PathEscape(filename),
 		values.Encode(),

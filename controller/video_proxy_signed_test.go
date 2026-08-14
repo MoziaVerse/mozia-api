@@ -91,6 +91,63 @@ func TestSignedVideoProxyStreamsAttachment(t *testing.T) {
 	assert.Equal(t, "private, max-age=86400", dataRecorder.Header().Get("Cache-Control"))
 }
 
+func TestSignedVideoProxyForwardsRangeAndSupportsHead(t *testing.T) {
+	prepareVideoProxyTestDB(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Accept-Ranges", "bytes")
+		w.Header().Set("Content-Type", "video/mp4")
+		switch r.Method {
+		case http.MethodGet:
+			assert.Equal(t, "bytes=0-4", r.Header.Get("Range"))
+			w.Header().Set("Content-Range", "bytes 0-4/11")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("video"))
+		case http.MethodHead:
+			assert.Empty(t, r.Header.Get("Range"))
+			w.Header().Set("Content-Length", "11")
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer upstream.Close()
+
+	baseURL := upstream.URL
+	require.NoError(t, model.DB.Create(&model.Channel{
+		Id:      3,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "provider-key",
+		BaseURL: &baseURL,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.Task{
+		TaskID:    "task_range",
+		UserId:    42,
+		ChannelId: 3,
+		Status:    model.TaskStatusSuccess,
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID: "upstream-task",
+		},
+	}).Error)
+
+	r := buildVideoProxyTestRouter(t)
+	signedURL := taskcommon.BuildSignedVideoGenerationURLAt(time.Now(), 42, "task_range", "clip.mp4")
+
+	getRequest := httptest.NewRequest(http.MethodGet, mustRequestURI(t, signedURL), nil)
+	getRequest.Header.Set("Range", "bytes=0-4")
+	getRecorder := httptest.NewRecorder()
+	r.ServeHTTP(getRecorder, getRequest)
+	assert.Equal(t, http.StatusPartialContent, getRecorder.Code)
+	assert.Equal(t, "video", getRecorder.Body.String())
+	assert.Equal(t, "bytes 0-4/11", getRecorder.Header().Get("Content-Range"))
+
+	headRequest := httptest.NewRequest(http.MethodHead, mustRequestURI(t, signedURL), nil)
+	headRecorder := httptest.NewRecorder()
+	r.ServeHTTP(headRecorder, headRequest)
+	assert.Equal(t, http.StatusOK, headRecorder.Code)
+	assert.Empty(t, headRecorder.Body.String())
+	assert.Equal(t, "11", headRecorder.Header().Get("Content-Length"))
+}
+
 func TestSignedVideoProxyAllowsConfiguredChannelOriginOnly(t *testing.T) {
 	prepareVideoProxyTestDB(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -193,6 +250,9 @@ func buildVideoProxyTestRouter(t *testing.T) http.Handler {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/v1/videos/:task_id/content/:filename", SignedVideoProxy)
+	r.HEAD("/v1/videos/:task_id/content/:filename", SignedVideoProxy)
+	r.GET("/v1/video/generations/:task_id/content/:filename", SignedVideoProxy)
+	r.HEAD("/v1/video/generations/:task_id/content/:filename", SignedVideoProxy)
 	return r
 }
 

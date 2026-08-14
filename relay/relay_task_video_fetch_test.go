@@ -1,7 +1,10 @@
 package relay
 
 import (
+	"net/url"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -21,6 +24,7 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 
 	successTask := &model.Task{
 		TaskID:    "task_success",
+		UserId:    42,
 		Status:    model.TaskStatusSuccess,
 		Progress:  "30%",
 		CreatedAt: 100,
@@ -34,6 +38,9 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 		},
 		Data: mustMarshalTaskData(t, map[string]any{
 			"ratio": "16:9",
+			"output": map[string]any{
+				"filename": "final.mp4",
+			},
 			"result": map[string]any{
 				"duration":   5.5,
 				"resolution": "720p",
@@ -55,7 +62,15 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 	assert.Equal(t, int64(100), resp.CreatedAt)
 	assert.Equal(t, int64(200), resp.UpdatedAt)
 	require.NotNil(t, resp.Content)
-	assert.Equal(t, "https://gateway.example/v1/videos/task_success/content", resp.Content.URL)
+	signedURL, err := url.Parse(resp.Content.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "/v1/video/generations/task_success/content/final.mp4", signedURL.Path)
+	assert.Equal(t, "42", signedURL.Query().Get("uid"))
+	assert.NotEmpty(t, signedURL.Query().Get("signature"))
+	expiresAt, err := strconv.ParseInt(signedURL.Query().Get("expires"), 10, 64)
+	require.NoError(t, err)
+	assert.Equal(t, expiresAt, resp.Content.ExpiresAt)
+	assert.WithinDuration(t, time.Now().Add(24*time.Hour), time.Unix(expiresAt, 0), 2*time.Second)
 	assert.Nil(t, resp.Error)
 	assert.Equal(t, "720p", resp.Resolution)
 	assert.Equal(t, "16:9", resp.Ratio)

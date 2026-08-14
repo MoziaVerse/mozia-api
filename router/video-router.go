@@ -14,13 +14,17 @@ func SetVideoRouter(router *gin.Engine) {
 	videoProxyRouter.Use(middleware.TokenOrUserAuth())
 	{
 		videoProxyRouter.GET("/video/generations/:task_id/content", controller.VideoProxy)
+		videoProxyRouter.HEAD("/video/generations/:task_id/content", controller.VideoProxy)
 		videoProxyRouter.GET("/videos/:task_id/content", controller.VideoProxy)
+		videoProxyRouter.HEAD("/videos/:task_id/content", controller.VideoProxy)
 	}
 	signedVideoProxyRouter := router.Group("/v1")
 	signedVideoProxyRouter.Use(middleware.RouteTag("relay"))
 	{
 		signedVideoProxyRouter.GET("/video/generations/:task_id/content/:filename", controller.SignedVideoProxy)
+		signedVideoProxyRouter.HEAD("/video/generations/:task_id/content/:filename", controller.SignedVideoProxy)
 		signedVideoProxyRouter.GET("/videos/:task_id/content/:filename", controller.SignedVideoProxy)
+		signedVideoProxyRouter.HEAD("/videos/:task_id/content/:filename", controller.SignedVideoProxy)
 	}
 
 	videoV1Router := router.Group("/v1")
