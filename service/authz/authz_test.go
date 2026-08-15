@@ -97,15 +97,13 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 
 	assert.True(t, Can(42, common.RoleAdminUser, ChannelSensitiveWrite))
 	assert.False(t, Can(42, common.RoleAdminUser, ChannelWrite))
-	assert.Equal(t, PermissionsMap{
-		ResourceChannel: {
-			ActionRead:           true,
-			ActionOperate:        true,
-			ActionWrite:          false,
-			ActionSensitiveWrite: true,
-			ActionSecretView:     false,
-		},
-	}, ExplicitUserPermissions(42))
+	assert.Equal(t, map[string]bool{
+		ActionRead:           true,
+		ActionOperate:        true,
+		ActionWrite:          false,
+		ActionSensitiveWrite: true,
+		ActionSecretView:     false,
+	}, ExplicitUserPermissions(42)[ResourceChannel])
 	assert.Equal(t, PermissionsMap{
 		ResourceChannel: {
 			ActionSensitiveWrite: true,
@@ -125,15 +123,13 @@ func TestSetUserPermissionsStoresOnlyOverrides(t *testing.T) {
 		ActionSecretView:     false,
 	}}))
 	assert.False(t, Can(42, common.RoleAdminUser, ChannelSensitiveWrite))
-	assert.Equal(t, PermissionsMap{
-		ResourceChannel: {
-			ActionRead:           true,
-			ActionOperate:        true,
-			ActionWrite:          true,
-			ActionSensitiveWrite: false,
-			ActionSecretView:     false,
-		},
-	}, ExplicitUserPermissions(42))
+	assert.Equal(t, map[string]bool{
+		ActionRead:           true,
+		ActionOperate:        true,
+		ActionWrite:          true,
+		ActionSensitiveWrite: false,
+		ActionSecretView:     false,
+	}, ExplicitUserPermissions(42)[ResourceChannel])
 	assert.Empty(t, ExplicitUserOverrides(42))
 }
 
@@ -226,4 +222,11 @@ func TestCapabilitiesUseCatalogShape(t *testing.T) {
 	assert.True(t, capabilities[ResourceChannel][ActionWrite])
 	assert.False(t, capabilities[ResourceChannel][ActionSensitiveWrite])
 	assert.False(t, capabilities[ResourceChannel][ActionSecretView])
+	assert.True(t, capabilities[ResourceUserManage][ActionRead])
+	assert.True(t, capabilities[ResourceUserManage][ActionWrite])
+	assert.True(t, capabilities[ResourceUserManage][ActionGroupWrite])
+	assert.False(t, capabilities[ResourceModelPricing][ActionWrite])
+	assert.False(t, capabilities[ResourceUserQuota][ActionWrite])
+	assert.False(t, capabilities[ResourceUserRatio][ActionWrite])
+	assert.True(t, capabilities[ResourceGeneralAdmin][ActionAccess])
 }

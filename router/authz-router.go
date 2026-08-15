@@ -12,8 +12,9 @@ import (
 // actions, and role baselines) used by the client permission editor.
 func registerAuthzRoutes(apiRouter *gin.RouterGroup) {
 	authzRoute := apiRouter.Group("/authz")
-	authzRoute.Use(middleware.AdminAuth())
 	{
-		authzRoute.GET("/catalog", controller.GetPermissionCatalog)
+		authzRoute.GET("/catalog", middleware.AdminAuth(), controller.GetPermissionCatalog)
+		authzRoute.GET("/admins", middleware.RootAuth(), controller.GetManagedAdmins)
+		authzRoute.PUT("/admins/:id", middleware.RootAuth(), controller.UpdateManagedAdminPermissions)
 	}
 }

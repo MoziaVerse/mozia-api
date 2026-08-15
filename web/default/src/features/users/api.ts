@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
-import type { PermissionCatalog } from '@/lib/admin-permissions'
+
 import type {
   User,
   GetUsersParams,
@@ -97,6 +97,14 @@ export async function updateUser(
   return res.data
 }
 
+export async function updateUserGroup(
+  id: number,
+  group: string
+): Promise<ApiResponse<Partial<User>>> {
+  const res = await api.put(`/api/user/${id}/group`, { group })
+  return res.data
+}
+
 /**
  * Delete a single user (hard delete)
  */
@@ -148,18 +156,6 @@ export async function resetUserTwoFA(id: number): Promise<ApiResponse> {
 export async function getGroups(): Promise<ApiResponse<string[]>> {
   const res = await api.get('/api/group/')
   return res.data
-}
-
-/**
- * Get the permission catalog (resources, actions, and role baselines).
- * Source of truth lives in the backend authz package.
- */
-export async function getPermissionCatalog(): Promise<PermissionCatalog> {
-  const res = await api.get('/api/authz/catalog')
-  return {
-    resources: res.data?.data?.resources ?? [],
-    roles: res.data?.data?.roles ?? [],
-  }
 }
 
 // ============================================================================

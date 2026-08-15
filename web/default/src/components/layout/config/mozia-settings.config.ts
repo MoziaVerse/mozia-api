@@ -19,11 +19,16 @@ For commercial licensing, please contact support@quantumnous.com
 import type { TFunction } from 'i18next'
 import { Settings } from 'lucide-react'
 
-import { getMoziaSettingsSectionNavItems } from '@/features/mozia-settings/section-registry'
+import {
+  canAccessMoziaSettingsSection,
+  getMoziaSettingsSectionNavItems,
+} from '@/features/mozia-settings/section-registry'
+import { useAuthStore } from '@/stores/auth-store'
 
 import type { NavGroup, SidebarView } from '../types'
 
 function getMoziaSettingsNavGroups(t: TFunction): NavGroup[] {
+  const user = useAuthStore.getState().auth.user
   return [
     {
       id: 'mozia-administration',
@@ -32,7 +37,12 @@ function getMoziaSettingsNavGroups(t: TFunction): NavGroup[] {
         {
           title: t('Mozia Settings'),
           icon: Settings,
-          items: getMoziaSettingsSectionNavItems(t),
+          items: getMoziaSettingsSectionNavItems(t).filter((item) => {
+            const section = item.url.split('/').pop()
+            return section
+              ? canAccessMoziaSettingsSection(section, user)
+              : false
+          }),
         },
       ],
     },

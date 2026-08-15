@@ -25,6 +25,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -34,11 +35,29 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
+import { useAuthStore } from '@/stores/auth-store'
+
 import { useModels } from './models-provider'
 
 export function ModelsPrimaryButtons() {
   const { t } = useTranslation()
+  const currentUser = useAuthStore((state) => state.auth.user)
   const { setOpen, setCurrentRow } = useModels()
+
+  if (
+    !hasPermission(
+      currentUser,
+      ADMIN_PERMISSION_RESOURCES.GENERAL_ADMIN,
+      ADMIN_PERMISSION_ACTIONS.ACCESS
+    )
+  ) {
+    return null
+  }
 
   const handleCreateModel = () => {
     setCurrentRow(null)

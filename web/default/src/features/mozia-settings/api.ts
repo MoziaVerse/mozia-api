@@ -16,11 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
+import type {
+  AdminPermissionMatrix,
+  PermissionCatalog,
+} from '@/lib/admin-permissions'
 import { api } from '@/lib/api'
 
 import type {
   ApiEnvelope,
+  ManagedAdminPage,
   MoziaUserModelRatio,
   MoziaUserModelRatioPayload,
 } from './types'
@@ -74,6 +78,34 @@ export async function deleteMoziaUserModelRatio(rule: MoziaUserModelRatio) {
       skipBusinessError: true,
       skipErrorHandler: true,
     }
+  )
+  return unwrapResponse(response.data)
+}
+
+export async function getOperationsPermissionCatalog(): Promise<PermissionCatalog> {
+  const response = await api.get<
+    ApiEnvelope<{
+      resources: PermissionCatalog['resources']
+      roles: PermissionCatalog['roles']
+    }>
+  >('/api/authz/catalog')
+  return unwrapResponse(response.data)
+}
+
+export async function getManagedAdmins(): Promise<ManagedAdminPage> {
+  const response = await api.get<ApiEnvelope<ManagedAdminPage>>(
+    '/api/authz/admins?page_size=200'
+  )
+  return unwrapResponse(response.data)
+}
+
+export async function saveManagedAdminPermissions(
+  userId: number,
+  permissions: AdminPermissionMatrix
+) {
+  const response = await api.put<ApiEnvelope<null>>(
+    `/api/authz/admins/${userId}`,
+    { permissions }
   )
   return unwrapResponse(response.data)
 }

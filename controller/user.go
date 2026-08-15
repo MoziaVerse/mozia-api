@@ -336,7 +336,6 @@ func GetUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionSameLevel)
 		return
 	}
-	user.AdminPermissions = authz.Capabilities(user.Id, user.Role)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -643,6 +642,11 @@ func UpdateUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if updatedUser.Group != originUser.Group &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.UserManageGroupWrite) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
+		return
+	}
 	if updatedUser.Role != common.RoleGuestUser && updatedUser.Role != originUser.Role {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -657,23 +661,9 @@ func UpdateUser(c *gin.Context) {
 		updatedUser.Password = "" // rollback to what it should be
 	}
 	updatePassword := updatedUser.Password != ""
-	authzTouched := false
-	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := updatedUser.EditWithTx(tx, updatePassword); err != nil {
-			return err
-		}
-		touched, err := updateAdminPermissionsForUserInTx(c, tx, updatedUser.Id, originUser.Role, updatedUser.AdminPermissions)
-		authzTouched = touched
-		return err
-	}); err != nil {
+	if err := updatedUser.Edit(updatePassword); err != nil {
 		common.ApiError(c, err)
 		return
-	}
-	if authzTouched {
-		if err := authz.ReloadPolicy(); err != nil {
-			common.ApiError(c, err)
-			return
-		}
 	}
 	if err := model.InvalidateUserCache(updatedUser.Id); err != nil {
 		common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", updatedUser.Id, err.Error()))
@@ -687,6 +677,51 @@ func UpdateUser(c *gin.Context) {
 		"message": "",
 	})
 	return
+}
+
+type updateUserGroupRequest struct {
+	Group string `json:"group"`
+}
+
+func UpdateUserGroup(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userId <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	var req updateUserGroupRequest
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil || strings.TrimSpace(req.Group) == "" {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	user, err := model.GetUserById(userId, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !canManageTargetRole(c.GetInt("role"), user.Role) {
+		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+		return
+	}
+	oldGroup := user.Group
+	newGroup := strings.TrimSpace(req.Group)
+	if oldGroup == newGroup {
+		common.ApiSuccess(c, nil)
+		return
+	}
+	if err := model.DB.Model(&model.User{}).Where("id = ?", userId).Update("group", newGroup).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.InvalidateUserCache(userId); err != nil {
+		common.SysLog(fmt.Sprintf("failed to invalidate user cache for user %d: %s", userId, err.Error()))
+	}
+	recordManageAuditFor(c, userId, "user.group_update", map[string]interface{}{
+		"username": user.Username,
+		"from":     oldGroup,
+		"to":       newGroup,
+	})
+	common.ApiSuccess(c, nil)
 }
 
 func AdminClearUserBinding(c *gin.Context) {
@@ -942,25 +977,10 @@ func CreateUser(c *gin.Context) {
 		DisplayName: user.DisplayName,
 		Role:        user.Role, // 保持管理员设置的角色
 	}
-	authzTouched := false
-	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := cleanUser.InsertWithTx(tx, 0); err != nil {
-			return err
-		}
-		touched, err := updateAdminPermissionsForUserInTx(c, tx, cleanUser.Id, cleanUser.Role, user.AdminPermissions)
-		authzTouched = touched
-		return err
-	}); err != nil {
+	if err := cleanUser.Insert(0); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if authzTouched {
-		if err := authz.ReloadPolicy(); err != nil {
-			common.ApiError(c, err)
-			return
-		}
-	}
-	cleanUser.FinishInsert(0)
 
 	recordManageAuditFor(c, cleanUser.Id, "user.create", map[string]interface{}{
 		"username": cleanUser.Username,
@@ -971,22 +991,6 @@ func CreateUser(c *gin.Context) {
 		"message": "",
 	})
 	return
-}
-
-func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, userRole int, permissions map[string]map[string]bool) (bool, error) {
-	if permissions == nil {
-		if userRole < common.RoleAdminUser && c.GetInt("role") == common.RoleRootUser {
-			return true, authz.ClearUserAuthorizationInTx(tx, userID)
-		}
-		return false, nil
-	}
-	if c.GetInt("role") != common.RoleRootUser {
-		return false, fmt.Errorf("only root can update admin permissions")
-	}
-	if userRole < common.RoleAdminUser {
-		return true, authz.ClearUserAuthorizationInTx(tx, userID)
-	}
-	return true, authz.SetUserPermissionsInTx(tx, userID, permissions)
 }
 
 type ManageRequest struct {
@@ -1017,6 +1021,14 @@ func ManageUser(c *gin.Context) {
 	myRole := c.GetInt("role")
 	if !canManageTargetRole(myRole, user.Role) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
+		return
+	}
+	requiredPermission := authz.UserManageWrite
+	if req.Action == "add_quota" {
+		requiredPermission = authz.UserQuotaWrite
+	}
+	if !authz.Can(c.GetInt("id"), c.GetInt("role"), requiredPermission) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
 	switch req.Action {
@@ -1111,7 +1123,6 @@ func ManageUser(c *gin.Context) {
 		})
 		return
 	}
-
 	authzTouched := false
 	if req.Action == "demote" {
 		if err := model.DB.Transaction(func(tx *gorm.DB) error {

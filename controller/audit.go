@@ -16,19 +16,22 @@ import (
 // action 的 params 填充。本地化展示文案在前端 i18n 模板中维护，本表是语言中立的
 // 英文基线——调用方因此无需在每个埋点处手写句子（避免与 params 重复书写同一份值）。
 var auditContentTemplates = map[string]string{
-	"user.create":           "Created user ${username} (role ${role})",
-	"user.update":           "Updated user ${username} (ID: ${id})",
-	"user.delete":           "Deleted user ${username} (ID: ${id})",
-	"user.manage":           "Performed ${action} on user ${username} (ID: ${id})",
-	"user.quota_add":        "Increased user quota by ${quota}",
-	"user.quota_subtract":   "Decreased user quota by ${quota}",
-	"user.quota_override":   "Overrode user quota from ${from} to ${to}",
-	"user.binding_clear":    "Cleared ${bindingType} binding for user ${username}",
-	"user.2fa_disable":      "Force-disabled two-factor authentication for the user",
-	"user.passkey_register": "Registered a passkey",
-	"user.passkey_delete":   "Deleted a passkey",
-	"user.reset_passkey":    "Reset the user passkey",
-	"option.update":         "Updated system setting ${key}",
+	"user.create":              "Created user ${username} (role ${role})",
+	"user.update":              "Updated user ${username} (ID: ${id})",
+	"user.delete":              "Deleted user ${username} (ID: ${id})",
+	"user.manage":              "Performed ${action} on user ${username} (ID: ${id})",
+	"user.quota_add":           "Increased user quota by ${quota}",
+	"user.quota_subtract":      "Decreased user quota by ${quota}",
+	"user.quota_override":      "Overrode user quota from ${from} to ${to}",
+	"user.group_update":        "Changed user ${username} group from ${from} to ${to}",
+	"user.binding_clear":       "Cleared ${bindingType} binding for user ${username}",
+	"user.2fa_disable":         "Force-disabled two-factor authentication for the user",
+	"user.passkey_register":    "Registered a passkey",
+	"user.passkey_delete":      "Deleted a passkey",
+	"user.reset_passkey":       "Reset the user passkey",
+	"option.update":            "Updated system setting ${key}",
+	"model_pricing.update":     "Updated model pricing setting ${key}",
+	"authz.permissions_update": "Updated operating permissions for ${username} (ID: ${target_user_id})",
 
 	"channel.create":             "Created channel ${name} (type ${type}, count ${count})",
 	"channel.update":             "Updated channel ${name} (ID: ${id})",
@@ -50,6 +53,11 @@ var auditContentTemplates = map[string]string{
 	"mozia.wallet_balance_add":      "Increased Mozia ${source} wallet balance for user ${target_user_id} by ${quota} (balance after: ${balance_after_display}; reason: ${reason})",
 	"mozia.wallet_balance_subtract": "Decreased Mozia ${source} wallet balance for user ${target_user_id} by ${quota} (balance after: ${balance_after_display}; reason: ${reason})",
 	"mozia.wallet_balance_set":      "Set Mozia ${source} wallet balance for user ${target_user_id} to ${balance_after_display} (reason: ${reason})",
+	"mozia.user_ratio_upsert":       "Set user ${target_user_id} billing ratio for ${scope} ${target} to ${ratio}",
+	"mozia.user_ratio_delete":       "Removed user ${target_user_id} billing ratio for ${scope} ${target}",
+	"mozia.quota_policy_create":     "Created quota policy ${pattern}",
+	"mozia.quota_policy_update":     "Updated quota policy ${pattern} (ID: ${id})",
+	"mozia.quota_policy_delete":     "Deleted quota policy ${pattern} (ID: ${id})",
 }
 
 // auditContentEN 按 action 模板渲染英文兜底文本；未登记的 action 退回 action 本身。

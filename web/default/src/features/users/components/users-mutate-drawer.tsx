@@ -16,26 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import {
-  ADMIN_PERMISSION_ACTIONS,
-  ADMIN_PERMISSION_RESOURCES,
-  EMPTY_PERMISSION_CATALOG,
-  hasPermission,
-  normalizeAdminPermissions,
-} from '@/lib/admin-permissions'
-import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
-import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
-import { ROLE } from '@/lib/roles'
-import { useAuthStore } from '@/stores/auth-store'
+  SideDrawerSection,
+  sideDrawerContentClassName,
+  sideDrawerFooterClassName,
+  sideDrawerFormClassName,
+  sideDrawerHeaderClassName,
+} from '@/components/drawer-layout'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Form,
   FormControl,
@@ -66,18 +62,20 @@ import {
 } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  SideDrawerSection,
-  sideDrawerContentClassName,
-  sideDrawerFooterClassName,
-  sideDrawerFormClassName,
-  sideDrawerHeaderClassName,
-} from '@/components/drawer-layout'
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
+import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
+import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
+import { useAuthStore } from '@/stores/auth-store'
+
 import {
   createUser,
   updateUser,
+  updateUserGroup,
   getUser,
   getGroups,
-  getPermissionCatalog,
 } from '../api'
 import { BINDING_FIELDS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
@@ -87,7 +85,7 @@ import {
   transformFormDataToPayload,
   transformUserToFormDefaults,
 } from '../lib'
-import { type User } from '../types'
+import type { User } from '../types'
 import { UserQuotaDialog } from './user-quota-dialog'
 import { useUsers } from './users-provider'
 
@@ -118,13 +116,6 @@ export function UsersMutateDrawer({
 
   const groups = groupsData?.data || []
 
-  // Permission catalog is owned by the backend; fetched once and reused.
-  const { data: permissionCatalog = EMPTY_PERMISSION_CATALOG } = useQuery({
-    queryKey: ['admin-permission-catalog'],
-    queryFn: getPermissionCatalog,
-    staleTime: 5 * 60 * 1000,
-  })
-
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
     defaultValues: USER_FORM_DEFAULT_VALUES,
@@ -134,11 +125,13 @@ export function UsersMutateDrawer({
   useEffect(() => {
     if (open && isUpdate && currentRow) {
       // For update, fetch fresh data
-      getUser(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformUserToFormDefaults(result.data))
-        }
-      })
+      void getUser(currentRow.id)
+        .then((result) => {
+          if (result.success && result.data) {
+            form.reset(transformUserToFormDefaults(result.data))
+          }
+        })
+        .catch(() => undefined)
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(USER_FORM_DEFAULT_VALUES)
@@ -150,10 +143,21 @@ export function UsersMutateDrawer({
   const tokensOnly = currencyMeta.kind === 'tokens'
 
   const currentQuotaRaw = form.watch('quota_dollars') || 0
-  const selectedRole = form.watch('role')
-  const canEditAdminPermissions = currentUser?.role === ROLE.SUPER_ADMIN
-  const targetIsAdmin = (selectedRole ?? currentRow?.role ?? 0) >= ROLE.ADMIN
-
+  const canEditUsers = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.USER_MANAGEMENT,
+    ADMIN_PERMISSION_ACTIONS.WRITE
+  )
+  const canEditGroups = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.USER_MANAGEMENT,
+    ADMIN_PERMISSION_ACTIONS.GROUP_WRITE
+  )
+  const canAdjustQuota = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.USER_QUOTA,
+    ADMIN_PERMISSION_ACTIONS.WRITE
+  )
   const onSubmit = async (data: UserFormValues) => {
     if (!isUpdate) {
       const passwordLength = data.password?.length || 0
@@ -168,14 +172,15 @@ export function UsersMutateDrawer({
 
     setIsSubmitting(true)
     try {
-      const payload = transformFormDataToPayload(
-        data,
-        currentRow?.id,
-        permissionCatalog
-      )
-      const result = isUpdate
-        ? await updateUser(payload as typeof payload & { id: number })
-        : await createUser(payload)
+      const payload = transformFormDataToPayload(data, currentRow?.id)
+      let result
+      if (isUpdate && currentRow) {
+        result = canEditUsers
+          ? await updateUser(payload as typeof payload & { id: number })
+          : await updateUserGroup(currentRow.id, data.group || '')
+      } else {
+        result = await createUser(payload)
+      }
 
       if (result.success) {
         toast.success(
@@ -193,7 +198,7 @@ export function UsersMutateDrawer({
               : t(ERROR_MESSAGES.CREATE_FAILED))
         )
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setIsSubmitting(false)
@@ -276,7 +281,8 @@ export function UsersMutateDrawer({
                             { value: '10', label: t('Admin') },
                           ]}
                           onValueChange={(value) =>
-                            value !== null && field.onChange(parseInt(value))
+                            value !== null &&
+                            field.onChange(Number.parseInt(value))
                           }
                           value={String(field.value)}
                         >
@@ -313,6 +319,7 @@ export function UsersMutateDrawer({
                         <Input
                           {...field}
                           placeholder={t('Enter display name')}
+                          disabled={isUpdate && !canEditUsers}
                         />
                       </FormControl>
                       <FormDescription>
@@ -333,6 +340,7 @@ export function UsersMutateDrawer({
                         <Input
                           {...field}
                           type='password'
+                          disabled={isUpdate && !canEditUsers}
                           placeholder={
                             isUpdate
                               ? t('Leave empty to keep unchanged')
@@ -358,14 +366,13 @@ export function UsersMutateDrawer({
                       <FormItem>
                         <FormLabel>{t('Group')}</FormLabel>
                         <Select
-                          items={[
-                            ...groups.map((group) => ({
-                              value: group,
-                              label: group,
-                            })),
-                          ]}
+                          items={groups.map((group) => ({
+                            value: group,
+                            label: group,
+                          }))}
                           onValueChange={field.onChange}
                           value={field.value}
+                          disabled={!canEditGroups}
                         >
                           <FormControl>
                             <SelectTrigger>
@@ -413,6 +420,7 @@ export function UsersMutateDrawer({
                             type='button'
                             variant='outline'
                             onClick={() => setQuotaDialogOpen(true)}
+                            disabled={!canAdjustQuota}
                           >
                             <Pencil className='mr-1 h-4 w-4' />
                             {t('Adjust Quota')}
@@ -435,6 +443,7 @@ export function UsersMutateDrawer({
                         <FormControl>
                           <Textarea
                             {...field}
+                            disabled={!canEditUsers}
                             placeholder={t(
                               'Admin notes (only visible to admins)'
                             )}
@@ -445,92 +454,6 @@ export function UsersMutateDrawer({
                       </FormItem>
                     )}
                   />
-                </SideDrawerSection>
-              )}
-
-              {canEditAdminPermissions &&
-                targetIsAdmin &&
-                permissionCatalog.resources.length > 0 && (
-                <SideDrawerSection>
-                  <h3 className='text-sm font-medium'>
-                    {t('Admin Permissions')}
-                  </h3>
-                  <p className='text-muted-foreground text-xs'>
-                    {t(
-                      'Default administrator permissions can be overridden for this user.'
-                    )}
-                  </p>
-                  <FormField
-                    control={form.control}
-                    name='admin_permissions'
-                    render={({ field }) => {
-                      const selected = normalizeAdminPermissions(
-                        field.value,
-                        permissionCatalog
-                      )
-                      return (
-                        <FormItem>
-                          <div className='space-y-3'>
-                            {permissionCatalog.resources.map((resource) => (
-                              <div
-                                key={resource.resource}
-                                className='space-y-2 rounded-md border p-3'
-                              >
-                                <div className='text-sm font-medium'>
-                                  {t(resource.label_key)}
-                                </div>
-                                <div className='space-y-2'>
-                                  {resource.actions.map((option) => (
-                                    <label
-                                      key={option.action}
-                                      className='flex items-start gap-3'
-                                    >
-                                      <Checkbox
-                                        checked={
-                                          selected[resource.resource]?.[
-                                            option.action
-                                          ] === true
-                                        }
-                                        onCheckedChange={(checked) => {
-                                          field.onChange({
-                                            ...selected,
-                                            [resource.resource]: {
-                                              ...selected[resource.resource],
-                                              [option.action]: checked === true,
-                                            },
-                                          })
-                                        }}
-                                      />
-                                      <span className='flex flex-col gap-1'>
-                                        <span className='text-sm font-medium'>
-                                          {t(option.label_key)}
-                                        </span>
-                                        <span className='text-muted-foreground text-xs'>
-                                          {t(option.description_key)}
-                                        </span>
-                                      </span>
-                                    </label>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                          <FormMessage />
-                        </FormItem>
-                      )
-                    }}
-                  />
-                  {currentUser && (
-                    <p className='text-muted-foreground text-xs'>
-                      {hasPermission(
-                        currentUser,
-                        ADMIN_PERMISSION_RESOURCES.CHANNEL,
-                        ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
-                      )
-                        ? t('Your account can edit sensitive channel settings.')
-                        : t('Your account cannot edit sensitive channel settings.')}
-                    </p>
-                  )}
                 </SideDrawerSection>
               )}
 
@@ -570,15 +493,17 @@ export function UsersMutateDrawer({
             <SheetClose render={<Button variant='outline' />}>
               {t('Close')}
             </SheetClose>
-            <Button form='user-form' type='submit' disabled={isSubmitting}>
-              {isSubmitting ? t('Saving...') : t('Save changes')}
-            </Button>
+            {(!isUpdate || canEditUsers || canEditGroups) && (
+              <Button form='user-form' type='submit' disabled={isSubmitting}>
+                {isSubmitting ? t('Saving...') : t('Save changes')}
+              </Button>
+            )}
           </SheetFooter>
         </SheetContent>
       </Sheet>
 
       {/* Adjust Quota Dialog */}
-      {currentRow && (
+      {currentRow && canAdjustQuota && (
         <UserQuotaDialog
           open={quotaDialogOpen}
           onOpenChange={setQuotaDialogOpen}

@@ -19,14 +19,27 @@ For commercial licensing, please contact support@quantumnous.com
 import { createElement } from 'react'
 
 import { createSectionRegistry } from '@/features/system-settings/utils/section-registry'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
+import { ROLE } from '@/lib/roles'
+import type { AuthUser } from '@/stores/auth-store'
 
 import { MoziaQuotaPolicySection } from './model-quota-policy-section'
+import { MoziaOperationsPermissionsSection } from './operations-permissions-section'
 import { MoziaUserModelRatioSection } from './user-model-ratio-section'
 import { MoziaWalletBalancesSection } from './wallet-balances-section'
 
 type MoziaSettingsState = Record<string, never>
 
 const MOZIA_SETTINGS_SECTIONS = [
+  {
+    id: 'operations-permissions',
+    titleKey: 'Operations Permissions',
+    build: () => createElement(MoziaOperationsPermissionsSection),
+  },
   {
     id: 'model-quota-policies',
     titleKey: 'Mozia Model Quota Policies',
@@ -65,3 +78,44 @@ export const getMoziaSettingsSectionNavItems =
 export const getMoziaSettingsSectionContent =
   moziaSettingsRegistry.getSectionContent
 export const getMoziaSettingsSectionMeta = moziaSettingsRegistry.getSectionMeta
+
+export function canAccessMoziaSettingsSection(
+  section: string,
+  user: AuthUser | null | undefined
+): section is MoziaSettingsSectionId {
+  if (!MOZIA_SETTINGS_SECTION_IDS.includes(section as MoziaSettingsSectionId)) {
+    return false
+  }
+  if (user?.role === ROLE.SUPER_ADMIN) return true
+
+  const permissionBySection: Partial<
+    Record<MoziaSettingsSectionId, readonly [string, string]>
+  > = {
+    'model-quota-policies': [
+      ADMIN_PERMISSION_RESOURCES.QUOTA_POLICY,
+      ADMIN_PERMISSION_ACTIONS.READ,
+    ],
+    'user-wallet-balances': [
+      ADMIN_PERMISSION_RESOURCES.USER_QUOTA,
+      ADMIN_PERMISSION_ACTIONS.READ,
+    ],
+    'user-model-ratios': [
+      ADMIN_PERMISSION_RESOURCES.USER_RATIO,
+      ADMIN_PERMISSION_ACTIONS.READ,
+    ],
+  }
+  const permission = permissionBySection[section as MoziaSettingsSectionId]
+  return Boolean(
+    permission && hasPermission(user, permission[0], permission[1])
+  )
+}
+
+export function getDefaultMoziaSettingsSection(
+  user: AuthUser | null | undefined
+): MoziaSettingsSectionId | null {
+  return (
+    MOZIA_SETTINGS_SECTION_IDS.find((section) =>
+      canAccessMoziaSettingsSection(section, user)
+    ) ?? null
+  )
+}

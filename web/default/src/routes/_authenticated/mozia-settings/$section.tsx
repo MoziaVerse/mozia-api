@@ -20,18 +20,21 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { MoziaSettingsSectionPage } from '@/features/mozia-settings'
 import {
-  MOZIA_SETTINGS_DEFAULT_SECTION,
-  MOZIA_SETTINGS_SECTION_IDS,
+  canAccessMoziaSettingsSection,
+  getDefaultMoziaSettingsSection,
 } from '@/features/mozia-settings/section-registry'
+import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/mozia-settings/$section')(
   {
     beforeLoad: ({ params }) => {
-      const validSections = MOZIA_SETTINGS_SECTION_IDS as unknown as string[]
-      if (!validSections.includes(params.section)) {
+      const user = useAuthStore.getState().auth.user
+      if (!canAccessMoziaSettingsSection(params.section, user)) {
+        const section = getDefaultMoziaSettingsSection(user)
+        if (!section) throw redirect({ to: '/403' })
         throw redirect({
           to: '/mozia-settings/$section',
-          params: { section: MOZIA_SETTINGS_DEFAULT_SECTION },
+          params: { section },
         })
       }
     },

@@ -18,12 +18,31 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { Button } from '@/components/ui/button'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
+import { useAuthStore } from '@/stores/auth-store'
+
 import { useUsers } from './users-provider'
 
 export function UsersPrimaryButtons() {
   const { t } = useTranslation()
   const { setOpen, setCurrentRow } = useUsers()
+  const currentUser = useAuthStore((state) => state.auth.user)
+
+  if (
+    !hasPermission(
+      currentUser,
+      ADMIN_PERMISSION_RESOURCES.USER_MANAGEMENT,
+      ADMIN_PERMISSION_ACTIONS.WRITE
+    )
+  ) {
+    return null
+  }
 
   const handleCreate = () => {
     setCurrentRow(null)

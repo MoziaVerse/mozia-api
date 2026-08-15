@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 export type MoziaUserRatioScope = 'model' | 'channel'
 
 type MoziaUserRatioBase = {
@@ -45,4 +44,19 @@ export type ApiEnvelope<T> = {
   success: boolean
   message?: string
   data: T
+}
+
+export type ManagedAdmin = {
+  id: number
+  username: string
+  display_name: string
+  status: number
+  permissions: import('@/lib/admin-permissions').AdminPermissionMatrix
+}
+
+export type ManagedAdminPage = {
+  items: ManagedAdmin[]
+  total: number
+  page: number
+  page_size: number
 }

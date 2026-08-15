@@ -18,13 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
-import { MOZIA_SETTINGS_DEFAULT_SECTION } from '@/features/mozia-settings/section-registry'
+import { getDefaultMoziaSettingsSection } from '@/features/mozia-settings/section-registry'
+import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/mozia-settings/')({
   beforeLoad: () => {
+    const section = getDefaultMoziaSettingsSection(
+      useAuthStore.getState().auth.user
+    )
+    if (!section) throw redirect({ to: '/403' })
     throw redirect({
       to: '/mozia-settings/$section',
-      params: { section: MOZIA_SETTINGS_DEFAULT_SECTION },
+      params: { section },
     })
   },
 })

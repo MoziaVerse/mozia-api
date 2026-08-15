@@ -195,7 +195,7 @@ export function decodeBillingExprB64(exprB64: string | undefined): string {
 
     return decodeURIComponent(
       Array.prototype.map
-        .call(bytes, (byte: number) => '%' + byte.toString(16).padStart(2, '0'))
+        .call(bytes, (byte: number) => `%${byte.toString(16).padStart(2, '0')}`)
         .join('')
     )
   } catch {
@@ -318,6 +318,8 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'user.quota_add': 'Increased user quota by {{quota}}',
   'user.quota_subtract': 'Decreased user quota by {{quota}}',
   'user.quota_override': 'Overrode user quota from {{from}} to {{to}}',
+  'user.group_update':
+    'Changed user {{username}} group from {{from}} to {{to}}',
   'user.binding_clear': 'Cleared {{bindingType}} binding for user {{username}}',
   'user.2fa_disable': 'Force-disabled two-factor authentication for the user',
   'user.passkey_register': 'Registered a passkey',
@@ -327,6 +329,9 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'user.oauth_unbind': 'Removed an OAuth binding for the user',
   // System settings
   'option.update': 'Updated system setting {{key}}',
+  'model_pricing.update': 'Updated model pricing setting {{key}}',
+  'authz.permissions_update':
+    'Updated operating permissions for {{username}} (ID: {{target_user_id}})',
   'option.payment_compliance': 'Confirmed payment compliance',
   'option.reset_ratio': 'Reset model ratios',
   'option.clear_affinity_cache': 'Cleared channel affinity cache',
@@ -369,6 +374,13 @@ const AUDIT_TEMPLATES: Record<string, string> = {
     'Decreased Mozia {{source}} wallet balance for user {{target_user_id}} by {{quota}} (balance after: {{balance_after_display}}; reason: {{reason}})',
   'mozia.wallet_balance_set':
     'Set Mozia {{source}} wallet balance for user {{target_user_id}} to {{balance_after_display}} (reason: {{reason}})',
+  'mozia.user_ratio_upsert':
+    'Set user {{target_user_id}} billing ratio for {{scope}} {{target}} to {{ratio}}',
+  'mozia.user_ratio_delete':
+    'Removed user {{target_user_id}} billing ratio for {{scope}} {{target}}',
+  'mozia.quota_policy_create': 'Created quota policy {{pattern}}',
+  'mozia.quota_policy_update': 'Updated quota policy {{pattern}} (ID: {{id}})',
+  'mozia.quota_policy_delete': 'Deleted quota policy {{pattern}} (ID: {{id}})',
   // Prefill groups
   'prefill_group.create': 'Created a prefill group',
   'prefill_group.update': 'Updated a prefill group',

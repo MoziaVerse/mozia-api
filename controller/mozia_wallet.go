@@ -171,6 +171,10 @@ func CreateMoziaQuotaPolicy(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAudit(c, "mozia.quota_policy_create", map[string]interface{}{
+		"id":      policy.Id,
+		"pattern": policy.ModelPattern,
+	})
 	common.ApiSuccess(c, &policy)
 }
 
@@ -190,6 +194,10 @@ func UpdateMoziaQuotaPolicy(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAudit(c, "mozia.quota_policy_update", map[string]interface{}{
+		"id":      policy.Id,
+		"pattern": policy.ModelPattern,
+	})
 	common.ApiSuccess(c, &policy)
 }
 
@@ -199,9 +207,18 @@ func DeleteMoziaQuotaPolicy(c *gin.Context) {
 		common.ApiErrorMsg(c, "无效的策略 ID")
 		return
 	}
+	policy, err := model.GetMoziaModelQuotaPolicyByID(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if err := model.DeleteMoziaModelQuotaPolicy(id); err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAudit(c, "mozia.quota_policy_delete", map[string]interface{}{
+		"id":      id,
+		"pattern": policy.ModelPattern,
+	})
 	common.ApiSuccess(c, nil)
 }

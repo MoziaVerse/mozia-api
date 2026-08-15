@@ -68,6 +68,15 @@ func UpsertMoziaUserModelRatio(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	target := rule.Model
+	if rule.Scope == mozia_setting.UserRatioScopeChannel {
+		target = strconv.Itoa(rule.ChannelId)
+	}
+	recordManageAuditFor(c, rule.UserId, "mozia.user_ratio_upsert", map[string]interface{}{
+		"scope":  rule.Scope,
+		"target": target,
+		"ratio":  rule.Ratio,
+	})
 	common.ApiSuccess(c, rule)
 }
 
@@ -98,5 +107,13 @@ func DeleteMoziaUserModelRatio(c *gin.Context) {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
+	target := rule.Model
+	if rule.Scope == mozia_setting.UserRatioScopeChannel {
+		target = strconv.Itoa(rule.ChannelId)
+	}
+	recordManageAuditFor(c, rule.UserId, "mozia.user_ratio_delete", map[string]interface{}{
+		"scope":  rule.Scope,
+		"target": target,
+	})
 	common.ApiSuccess(c, nil)
 }

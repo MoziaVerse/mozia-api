@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import type { Row } from '@tanstack/react-table'
 import {
   Pencil,
@@ -30,22 +29,31 @@ import {
   Link2,
   CreditCard,
 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuShortcut,
 } from '@/components/ui/dropdown-menu'
-import { DataTableRowActionMenu } from '@/components/data-table/core/row-action-menu'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+  hasPermission,
+} from '@/lib/admin-permissions'
+import { useAuthStore } from '@/stores/auth-store'
+
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
   USER_STATUS,
@@ -64,6 +72,7 @@ interface DataTableRowActionsProps {
 
 export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const { t } = useTranslation()
+  const currentUser = useAuthStore((state) => state.auth.user)
   const user = row.original
   const { setOpen, setCurrentRow, triggerRefresh } = useUsers()
   const [resetPasskeyOpen, setResetPasskeyOpen] = useState(false)
@@ -132,6 +141,16 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const isDisabled = user.status === USER_STATUS.DISABLED
   const isAdmin = user.role >= USER_ROLE.ADMIN
   const isRoot = user.role === USER_ROLE.ROOT
+  const canEditUsers = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.USER_MANAGEMENT,
+    ADMIN_PERMISSION_ACTIONS.WRITE
+  )
+  const canEditGroups = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.USER_MANAGEMENT,
+    ADMIN_PERMISSION_ACTIONS.GROUP_WRITE
+  )
 
   if (isUserDeleted(user)) {
     return null
@@ -139,41 +158,47 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
 
   return (
     <div className='-ml-1.5 flex items-center gap-1'>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant='ghost'
-              size='icon-sm'
-              onClick={handleEdit}
-              aria-label={t('Edit')}
-            />
-          }
-        >
-          <Pencil />
-        </TooltipTrigger>
-        <TooltipContent>{t('Edit')}</TooltipContent>
-      </Tooltip>
-
-      <DataTableRowActionMenu ariaLabel={t('Open menu')} contentClassName='w-48'>
-        {isDisabled ? (
-          <DropdownMenuItem onClick={() => handleManage('enable')}>
-            {t('Enable')}
-            <DropdownMenuShortcut>
-              <Power size={16} />
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-        ) : (
-          <DropdownMenuItem
-            onClick={() => handleManage('disable')}
-            disabled={isRoot}
+      {(canEditUsers || canEditGroups) && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                onClick={handleEdit}
+                aria-label={t('Edit')}
+              />
+            }
           >
-            {t('Disable')}
-            <DropdownMenuShortcut>
-              <PowerOff size={16} />
-            </DropdownMenuShortcut>
-          </DropdownMenuItem>
-        )}
+            <Pencil />
+          </TooltipTrigger>
+          <TooltipContent>{t('Edit')}</TooltipContent>
+        </Tooltip>
+      )}
+
+      {canEditUsers && (
+        <DataTableRowActionMenu
+          ariaLabel={t('Open menu')}
+          contentClassName='w-48'
+        >
+          {isDisabled ? (
+            <DropdownMenuItem onClick={() => handleManage('enable')}>
+              {t('Enable')}
+              <DropdownMenuShortcut>
+                <Power size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onClick={() => handleManage('disable')}
+              disabled={isRoot}
+            >
+              {t('Disable')}
+              <DropdownMenuShortcut>
+                <PowerOff size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
 
           {isAdmin && !isRoot && (
             <DropdownMenuItem onClick={() => handleManage('demote')}>
@@ -257,7 +282,8 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
               <Trash2 size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
-      </DataTableRowActionMenu>
+        </DataTableRowActionMenu>
+      )}
 
       <ConfirmDialog
         open={resetPasskeyOpen}

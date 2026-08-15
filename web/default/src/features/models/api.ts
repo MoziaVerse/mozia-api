@@ -16,7 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type {
+  SystemOptionsResponse,
+  UpdateOptionRequest,
+  UpdateOptionResponse,
+} from '@/features/system-settings/types'
 import { api } from '@/lib/api'
+
 import type {
   GetModelsParams,
   GetModelsResponse,
@@ -40,6 +46,19 @@ import type {
 // ============================================================================
 // Model CRUD Operations
 // ============================================================================
+
+export async function getModelPricingOptions() {
+  const res = await api.get<SystemOptionsResponse>('/api/mozia/model-pricing/')
+  return res.data
+}
+
+export async function updateModelPricingOption(request: UpdateOptionRequest) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/mozia/model-pricing/',
+    request
+  )
+  return res.data
+}
 
 /**
  * Get paginated list of models

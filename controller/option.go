@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,8 @@ var completionRatioMetaOptionKeys = []string{
 	"AudioRatio",
 	"AudioCompletionRatio",
 }
+
+const contextKeyModelPricingOptionOnly = "model_pricing_option_only"
 
 func isPaymentComplianceOptionKey(key string) bool {
 	return strings.HasPrefix(key, "payment_setting.compliance_")
@@ -112,6 +115,28 @@ func GetOptions(c *gin.Context) {
 	})
 }
 
+func GetModelPricingOptions(c *gin.Context) {
+	options := make([]*model.Option, 0, len(completionRatioMetaOptionKeys)+1)
+	optionValues := make(map[string]string, len(completionRatioMetaOptionKeys))
+	common.OptionMapRWMutex.RLock()
+	for _, key := range completionRatioMetaOptionKeys {
+		value := common.Interface2String(common.OptionMap[key])
+		optionValues[key] = value
+		options = append(options, &model.Option{Key: key, Value: value})
+	}
+	common.OptionMapRWMutex.RUnlock()
+	options = append(options, &model.Option{
+		Key:   "CompletionRatioMeta",
+		Value: buildCompletionRatioMetaValue(optionValues),
+	})
+	common.ApiSuccess(c, options)
+}
+
+func UpdateModelPricingOption(c *gin.Context) {
+	c.Set(contextKeyModelPricingOptionOnly, true)
+	UpdateOption(c)
+}
+
 type OptionUpdateRequest struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`
@@ -126,6 +151,12 @@ func UpdateOption(c *gin.Context) {
 			"message": "无效的参数",
 		})
 		return
+	}
+	if c.GetBool(contextKeyModelPricingOptionOnly) {
+		if !slices.Contains(completionRatioMetaOptionKeys, option.Key) {
+			common.ApiErrorMsg(c, "该接口只允许修改模型定价配置")
+			return
+		}
 	}
 	switch option.Value.(type) {
 	case bool:
@@ -338,7 +369,11 @@ func UpdateOption(c *gin.Context) {
 		return
 	}
 	// 出于安全考虑只记录被修改的配置项名称，不记录配置值（可能含密钥等敏感信息）。
-	recordManageAudit(c, "option.update", map[string]interface{}{
+	action := "option.update"
+	if c.GetBool(contextKeyModelPricingOptionOnly) {
+		action = "model_pricing.update"
+	}
+	recordManageAudit(c, action, map[string]interface{}{
 		"key": option.Key,
 	})
 	c.JSON(http.StatusOK, gin.H{

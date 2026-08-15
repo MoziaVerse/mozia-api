@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/service/authz"
 
 	// Import oauth package to register providers via init()
 	_ "github.com/QuantumNous/new-api/oauth"
@@ -25,7 +26,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/status", controller.GetStatus)
 		apiRouter.GET("/uptime/status", controller.GetUptimeKumaStatus)
 		apiRouter.GET("/models", middleware.UserAuth(), controller.DashboardListModels)
-		apiRouter.GET("/status/test", middleware.AdminAuth(), controller.TestStatus)
+		apiRouter.GET("/status/test", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.TestStatus)
 		apiRouter.GET("/notice", controller.GetNotice)
 		apiRouter.GET("/user-agreement", controller.GetUserAgreement)
 		apiRouter.GET("/privacy-policy", controller.GetPrivacyPolicy)
@@ -128,23 +129,24 @@ func SetApiRouter(router *gin.Engine) {
 			adminRoute := userRoute.Group("/")
 			adminRoute.Use(middleware.AdminAuth())
 			{
-				adminRoute.GET("/", controller.GetAllUsers)
-				adminRoute.GET("/topup", controller.GetAllTopUps)
-				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
-				adminRoute.GET("/search", controller.SearchUsers)
-				adminRoute.GET("/:id/oauth/bindings", controller.GetUserOAuthBindingsByAdmin)
-				adminRoute.DELETE("/:id/oauth/bindings/:provider_id", controller.UnbindCustomOAuthByAdmin)
-				adminRoute.DELETE("/:id/bindings/:binding_type", controller.AdminClearUserBinding)
-				adminRoute.GET("/:id", controller.GetUser)
-				adminRoute.POST("/", controller.CreateUser)
+				adminRoute.GET("/", middleware.RequirePermission(authz.UserManageRead), controller.GetAllUsers)
+				adminRoute.GET("/topup", middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetAllTopUps)
+				adminRoute.POST("/topup/complete", middleware.RequirePermission(authz.GeneralAdminAccess), controller.AdminCompleteTopUp)
+				adminRoute.GET("/search", middleware.RequirePermission(authz.UserManageRead), controller.SearchUsers)
+				adminRoute.GET("/:id/oauth/bindings", middleware.RequirePermission(authz.UserManageRead), controller.GetUserOAuthBindingsByAdmin)
+				adminRoute.DELETE("/:id/oauth/bindings/:provider_id", middleware.RequirePermission(authz.UserManageWrite), controller.UnbindCustomOAuthByAdmin)
+				adminRoute.DELETE("/:id/bindings/:binding_type", middleware.RequirePermission(authz.UserManageWrite), controller.AdminClearUserBinding)
+				adminRoute.GET("/:id", middleware.RequirePermission(authz.UserManageRead), controller.GetUser)
+				adminRoute.POST("/", middleware.RequirePermission(authz.UserManageWrite), controller.CreateUser)
 				adminRoute.POST("/manage", controller.ManageUser)
-				adminRoute.PUT("/", controller.UpdateUser)
-				adminRoute.DELETE("/:id", controller.DeleteUser)
-				adminRoute.DELETE("/:id/reset_passkey", controller.AdminResetPasskey)
+				adminRoute.PUT("/", middleware.RequirePermission(authz.UserManageWrite), controller.UpdateUser)
+				adminRoute.PUT("/:id/group", middleware.RequirePermission(authz.UserManageGroupWrite), controller.UpdateUserGroup)
+				adminRoute.DELETE("/:id", middleware.RequirePermission(authz.UserManageWrite), controller.DeleteUser)
+				adminRoute.DELETE("/:id/reset_passkey", middleware.RequirePermission(authz.UserManageWrite), controller.AdminResetPasskey)
 
 				// Admin 2FA routes
-				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)
-				adminRoute.DELETE("/:id/2fa", controller.AdminDisable2FA)
+				adminRoute.GET("/2fa/stats", middleware.RequirePermission(authz.UserManageRead), controller.Admin2FAStats)
+				adminRoute.DELETE("/:id/2fa", middleware.RequirePermission(authz.UserManageWrite), controller.AdminDisable2FA)
 			}
 		}
 
@@ -163,6 +165,7 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		subscriptionAdminRoute := apiRouter.Group("/subscription/admin")
 		subscriptionAdminRoute.Use(middleware.AdminAuth())
+		subscriptionAdminRoute.Use(middleware.RequirePermission(authz.GeneralAdminAccess))
 		{
 			subscriptionAdminRoute.GET("/plans", controller.AdminListSubscriptionPlans)
 			subscriptionAdminRoute.POST("/plans", controller.AdminCreateSubscriptionPlan)
@@ -254,6 +257,7 @@ func SetApiRouter(router *gin.Engine) {
 
 		redemptionRoute := apiRouter.Group("/redemption")
 		redemptionRoute.Use(middleware.AdminAuth())
+		redemptionRoute.Use(middleware.RequirePermission(authz.GeneralAdminAccess))
 		{
 			redemptionRoute.GET("/", controller.GetAllRedemptions)
 			redemptionRoute.GET("/search", controller.SearchRedemptions)
@@ -264,14 +268,14 @@ func SetApiRouter(router *gin.Engine) {
 			redemptionRoute.DELETE("/:id", controller.DeleteRedemption)
 		}
 		logRoute := apiRouter.Group("/log")
-		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
+		logRoute.GET("/", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetAllLogs)
 		// Legacy synchronous direct-delete route used only by the classic frontend.
 		// TODO: remove once the classic frontend is removed; the default frontend uses /system-task/log-cleanup.
 		logRoute.DELETE("/", middleware.RootAuth(), controller.DeleteHistoryLogs)
-		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
+		logRoute.GET("/stat", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetLogsStat)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
-		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)
-		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
+		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetChannelAffinityUsageCacheStats)
+		logRoute.GET("/search", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.SearchAllLogs)
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 
@@ -290,10 +294,10 @@ func SetApiRouter(router *gin.Engine) {
 		}
 
 		dataRoute := apiRouter.Group("/data")
-		dataRoute.GET("/", middleware.AdminAuth(), controller.GetAllQuotaDates)
-		dataRoute.GET("/users", middleware.AdminAuth(), controller.GetQuotaDatesByUser)
+		dataRoute.GET("/", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetAllQuotaDates)
+		dataRoute.GET("/users", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetQuotaDatesByUser)
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
-		dataRoute.GET("/flow", middleware.AdminAuth(), controller.GetAllFlowQuotaDates)
+		dataRoute.GET("/flow", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetAllFlowQuotaDates)
 		dataRoute.GET("/flow/self", middleware.UserAuth(), controller.GetUserFlowQuotaDates)
 
 		logRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())
@@ -302,12 +306,14 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		groupRoute := apiRouter.Group("/group")
 		groupRoute.Use(middleware.AdminAuth())
+		groupRoute.Use(middleware.RequirePermission(authz.UserManageRead))
 		{
 			groupRoute.GET("/", controller.GetGroups)
 		}
 
 		prefillGroupRoute := apiRouter.Group("/prefill_group")
 		prefillGroupRoute.Use(middleware.AdminAuth())
+		prefillGroupRoute.Use(middleware.RequirePermission(authz.GeneralAdminAccess))
 		{
 			prefillGroupRoute.GET("/", controller.GetPrefillGroups)
 			prefillGroupRoute.POST("/", controller.CreatePrefillGroup)
@@ -317,42 +323,43 @@ func SetApiRouter(router *gin.Engine) {
 
 		mjRoute := apiRouter.Group("/mj")
 		mjRoute.GET("/self", middleware.UserAuth(), controller.GetUserMidjourney)
-		mjRoute.GET("/", middleware.AdminAuth(), controller.GetAllMidjourney)
+		mjRoute.GET("/", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetAllMidjourney)
 
 		taskRoute := apiRouter.Group("/task")
 		{
 			taskRoute.GET("/self", middleware.UserAuth(), controller.GetUserTask)
-			taskRoute.GET("/", middleware.AdminAuth(), controller.GetAllTask)
+			taskRoute.GET("/", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetAllTask)
 		}
 
 		vendorRoute := apiRouter.Group("/vendors")
 		vendorRoute.Use(middleware.AdminAuth())
 		{
-			vendorRoute.GET("/", controller.GetAllVendors)
-			vendorRoute.GET("/search", controller.SearchVendors)
-			vendorRoute.GET("/:id", controller.GetVendorMeta)
-			vendorRoute.POST("/", controller.CreateVendorMeta)
-			vendorRoute.PUT("/", controller.UpdateVendorMeta)
-			vendorRoute.DELETE("/:id", controller.DeleteVendorMeta)
+			vendorRoute.GET("/", middleware.RequireAnyPermission(authz.GeneralAdminAccess, authz.ModelPricingRead), controller.GetAllVendors)
+			vendorRoute.GET("/search", middleware.RequireAnyPermission(authz.GeneralAdminAccess, authz.ModelPricingRead), controller.SearchVendors)
+			vendorRoute.GET("/:id", middleware.RequireAnyPermission(authz.GeneralAdminAccess, authz.ModelPricingRead), controller.GetVendorMeta)
+			vendorRoute.POST("/", middleware.RequirePermission(authz.GeneralAdminAccess), controller.CreateVendorMeta)
+			vendorRoute.PUT("/", middleware.RequirePermission(authz.GeneralAdminAccess), controller.UpdateVendorMeta)
+			vendorRoute.DELETE("/:id", middleware.RequirePermission(authz.GeneralAdminAccess), controller.DeleteVendorMeta)
 		}
 
 		modelsRoute := apiRouter.Group("/models")
 		modelsRoute.Use(middleware.AdminAuth())
 		{
-			modelsRoute.GET("/sync_upstream/preview", controller.SyncUpstreamPreview)
-			modelsRoute.POST("/sync_upstream", controller.SyncUpstreamModels)
-			modelsRoute.GET("/missing", controller.GetMissingModels)
-			modelsRoute.GET("/", controller.GetAllModelsMeta)
-			modelsRoute.GET("/search", controller.SearchModelsMeta)
-			modelsRoute.GET("/:id", controller.GetModelMeta)
-			modelsRoute.POST("/", controller.CreateModelMeta)
-			modelsRoute.PUT("/", controller.UpdateModelMeta)
-			modelsRoute.DELETE("/:id", controller.DeleteModelMeta)
+			modelsRoute.GET("/sync_upstream/preview", middleware.RequirePermission(authz.GeneralAdminAccess), controller.SyncUpstreamPreview)
+			modelsRoute.POST("/sync_upstream", middleware.RequirePermission(authz.GeneralAdminAccess), controller.SyncUpstreamModels)
+			modelsRoute.GET("/missing", middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetMissingModels)
+			modelsRoute.GET("/", middleware.RequireAnyPermission(authz.GeneralAdminAccess, authz.ModelPricingRead), controller.GetAllModelsMeta)
+			modelsRoute.GET("/search", middleware.RequireAnyPermission(authz.GeneralAdminAccess, authz.ModelPricingRead), controller.SearchModelsMeta)
+			modelsRoute.GET("/:id", middleware.RequireAnyPermission(authz.GeneralAdminAccess, authz.ModelPricingRead), controller.GetModelMeta)
+			modelsRoute.POST("/", middleware.RequirePermission(authz.GeneralAdminAccess), controller.CreateModelMeta)
+			modelsRoute.PUT("/", middleware.RequirePermission(authz.GeneralAdminAccess), controller.UpdateModelMeta)
+			modelsRoute.DELETE("/:id", middleware.RequirePermission(authz.GeneralAdminAccess), controller.DeleteModelMeta)
 		}
 
 		// Deployments (model deployment management)
 		deploymentsRoute := apiRouter.Group("/deployments")
 		deploymentsRoute.Use(middleware.AdminAuth())
+		deploymentsRoute.Use(middleware.RequirePermission(authz.GeneralAdminAccess))
 		{
 			deploymentsRoute.GET("/settings", controller.GetModelDeploymentSettings)
 			deploymentsRoute.POST("/settings/test-connection", controller.TestIoNetConnection)
@@ -441,27 +448,34 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 	}
 
 	walletRoute := moziaRouter.Group("/wallet")
-	walletRoute.Use(middleware.RootOnlyAuth())
+	walletRoute.Use(middleware.AdminAuth())
 	{
-		walletRoute.GET("/users/:id", controller.GetMoziaUserWallet)
-		walletRoute.POST("/users/:id/adjust", controller.AdjustMoziaUserWallet)
+		walletRoute.GET("/users/:id", middleware.RequirePermission(authz.UserQuotaRead), controller.GetMoziaUserWallet)
+		walletRoute.POST("/users/:id/adjust", middleware.RequirePermission(authz.UserQuotaWrite), controller.AdjustMoziaUserWallet)
 	}
 
 	quotaPolicyRoute := moziaRouter.Group("/quota-policy")
-	quotaPolicyRoute.Use(middleware.RootOnlyAuth())
+	quotaPolicyRoute.Use(middleware.AdminAuth())
 	{
-		quotaPolicyRoute.GET("/", controller.GetAllMoziaQuotaPolicies)
-		quotaPolicyRoute.POST("/", controller.CreateMoziaQuotaPolicy)
-		quotaPolicyRoute.PUT("/:id", controller.UpdateMoziaQuotaPolicy)
-		quotaPolicyRoute.DELETE("/:id", controller.DeleteMoziaQuotaPolicy)
+		quotaPolicyRoute.GET("/", middleware.RequirePermission(authz.QuotaPolicyRead), controller.GetAllMoziaQuotaPolicies)
+		quotaPolicyRoute.POST("/", middleware.RequirePermission(authz.QuotaPolicyWrite), controller.CreateMoziaQuotaPolicy)
+		quotaPolicyRoute.PUT("/:id", middleware.RequirePermission(authz.QuotaPolicyWrite), controller.UpdateMoziaQuotaPolicy)
+		quotaPolicyRoute.DELETE("/:id", middleware.RequirePermission(authz.QuotaPolicyWrite), controller.DeleteMoziaQuotaPolicy)
 	}
 
 	userModelRatioRoute := moziaRouter.Group("/user-model-ratio")
-	userModelRatioRoute.Use(middleware.RootOnlyAuth())
+	userModelRatioRoute.Use(middleware.AdminAuth())
 	{
-		userModelRatioRoute.GET("/", controller.GetMoziaUserModelRatios)
-		userModelRatioRoute.POST("/", controller.UpsertMoziaUserModelRatio)
-		userModelRatioRoute.DELETE("/:user_id", controller.DeleteMoziaUserModelRatio)
+		userModelRatioRoute.GET("/", middleware.RequirePermission(authz.UserRatioRead), controller.GetMoziaUserModelRatios)
+		userModelRatioRoute.POST("/", middleware.RequirePermission(authz.UserRatioWrite), controller.UpsertMoziaUserModelRatio)
+		userModelRatioRoute.DELETE("/:user_id", middleware.RequirePermission(authz.UserRatioWrite), controller.DeleteMoziaUserModelRatio)
+	}
+
+	modelPricingRoute := moziaRouter.Group("/model-pricing")
+	modelPricingRoute.Use(middleware.AdminAuth())
+	{
+		modelPricingRoute.GET("/", middleware.RequirePermission(authz.ModelPricingRead), controller.GetModelPricingOptions)
+		modelPricingRoute.PUT("/", middleware.RequirePermission(authz.ModelPricingWrite), controller.UpdateModelPricingOption)
 	}
 }
 
