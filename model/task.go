@@ -78,6 +78,13 @@ type Properties struct {
 	Input             string `json:"input"`
 	UpstreamModelName string `json:"upstream_model_name,omitempty"`
 	OriginModelName   string `json:"origin_model_name,omitempty"`
+	// Output geometry of the submitted task, normalized by the adaptor.
+	// Recorded so failures stay analyzable from the tasks table alone —
+	// see TaskRelayInfo.ResolvedSize for the full rationale.
+	// omitempty keeps rows for platforms that do not set them byte-identical
+	// to before, and old rows simply decode these as zero values.
+	Size     string `json:"size,omitempty"`
+	Duration int    `json:"duration,omitempty"`
 }
 
 func (m *Properties) Scan(val interface{}) error {
@@ -191,6 +198,11 @@ func InitTask(platform constant.TaskPlatform, relayInfo *commonRelay.RelayInfo) 
 		if relayInfo.OriginModelName != "" {
 			properties.OriginModelName = relayInfo.OriginModelName
 		}
+	}
+	// Geometry lives on TaskRelayInfo, which is nil for non-task platforms.
+	if relayInfo != nil && relayInfo.TaskRelayInfo != nil {
+		properties.Size = relayInfo.ResolvedSize
+		properties.Duration = relayInfo.ResolvedDuration
 	}
 	if relayInfo != nil && relayInfo.ResellerBilling != nil {
 		privateData.ResellerSettlementRequestId = relayInfo.ResellerBilling.SettlementRequestId

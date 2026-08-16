@@ -106,10 +106,19 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		if err := validateMiniMaxH3Images(modelName, &req, summary, fields); err != nil {
 			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
-		if _, err := resolveMiniMaxH3Size(&req, fields); err != nil {
+		size, err := resolveMiniMaxH3Size(&req, fields)
+		if err != nil {
 			return service.TaskErrorWrapperLocal(err, "invalid_size", http.StatusBadRequest)
 		}
+		// Persist the geometry we resolved here rather than the raw request field:
+		// this is the value BuildRequestBody will send upstream, and it is what a
+		// later OOM post-mortem needs. See TaskRelayInfo.ResolvedSize.
+		info.ResolvedSize = size
 	}
+	if info.ResolvedSize == "" {
+		info.ResolvedSize = strings.TrimSpace(req.Size)
+	}
+	info.ResolvedDuration = duration
 	info.Action = "generate"
 	return nil
 }

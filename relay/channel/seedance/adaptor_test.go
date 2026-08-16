@@ -350,6 +350,66 @@ func TestValidateRequestRejectsMiniMaxH3UnsupportedResolution(t *testing.T) {
 	}
 }
 
+// Geometry has to reach tasks.properties, otherwise an OOM failure cannot be
+// classified afterwards as "card was busy, retry helps" versus "allocation
+// exceeds card capacity, retry is futile" — the two need opposite advice.
+func TestValidateRequestRecordsResolvedGeometry(t *testing.T) {
+	tests := []struct {
+		name         string
+		body         string
+		originModel  string
+		wantSize     string
+		wantDuration int
+	}{
+		{
+			name:         "explicit size is recorded verbatim",
+			body:         `{"model":"MiniMax-H3","prompt":"p","duration":15,"size":"1344x768"}`,
+			originModel:  "MiniMax-H3",
+			wantSize:     "1344x768",
+			wantDuration: 15,
+		},
+		{
+			// resolution+ratio callers would be lost entirely if we recorded the raw
+			// size field, which is empty here — the adaptor normalizes them instead.
+			name:         "resolution and ratio normalize to a concrete size",
+			body:         `{"model":"MiniMax-H3","prompt":"p","duration":5,"resolution":"768P","ratio":"16:9"}`,
+			originModel:  "MiniMax-H3",
+			wantSize:     "1344x768",
+			wantDuration: 5,
+		},
+		{
+			// No geometry at all = the client's default tier. Empty is the correct
+			// record here: the upstream picks its own default, and we must not
+			// invent a value the gateway never sent.
+			name:         "default tier records empty size, not a guess",
+			body:         `{"model":"MiniMax-H3","prompt":"p","duration":15}`,
+			originModel:  "MiniMax-H3",
+			wantSize:     "",
+			wantDuration: 15,
+		},
+		{
+			name:         "non-H3 models still record duration",
+			body:         `{"model":"cool:seedance_2_720p","prompt":"p","duration":10}`,
+			originModel:  "cool:seedance_2_720p",
+			wantDuration: 10,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			adaptor, c, info := prepareRequestWithoutValidation(t, tc.body)
+			info.OriginModelName = tc.originModel
+			info.UpstreamModelName = tc.originModel
+
+			taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+
+			require.Nil(t, taskErr)
+			assert.Equal(t, tc.wantSize, info.ResolvedSize)
+			assert.Equal(t, tc.wantDuration, info.ResolvedDuration)
+		})
+	}
+}
+
 func TestEstimateBillingMultipliesByRequestedSeconds(t *testing.T) {
 	adaptor, c, info := prepareRequest(t, `{
 		"model":"cool:seedance_2_720p",

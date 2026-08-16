@@ -685,6 +685,27 @@ type TaskRelayInfo struct {
 	// a specific channel (e.g., remix on origin task's channel). Stored as any
 	// to avoid an import cycle with model; callers type-assert to *model.Channel.
 	LockedChannel any
+
+	// ResolvedSize / ResolvedDuration record the **normalized** output geometry an
+	// adaptor actually sent upstream, so they land in tasks.properties and make
+	// failures analyzable without reading container logs.
+	//
+	// Why this matters: MiniMax H3 OOM failures (181 of them in production as of
+	// 2026-08-16) split into two classes with opposite remedies — transient card
+	// contention (retry works) versus an allocation that exceeds single-card
+	// capacity outright (retry can never work). Telling them apart requires
+	// knowing the resolution and duration of the failed task, and until now
+	// neither was persisted anywhere: properties held only the model names.
+	//
+	// Normalized, not raw: callers may express geometry as size, resolution or
+	// ratio, and the adaptor resolves those to one canonical WxH before sending.
+	// Recording the raw field would lose every request that used resolution+ratio.
+	//
+	// ResolvedSize stays empty when the request specified no geometry at all —
+	// that is a meaningful value, not a gap: it means the upstream default tier
+	// was used, and it is exactly what the client sends for the default option.
+	ResolvedSize     string
+	ResolvedDuration int
 }
 
 type TaskSubmitReq struct {
