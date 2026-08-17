@@ -36,6 +36,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerRegistrationRoute.POST("/invitations/consume", controller.ConsumeResellerRegistrationInvitation)
 	resellerRegistrationRoute.POST("/customers/profile", controller.SyncResellerRegistrationCustomerIdentity)
 	resellerRegistrationRoute.GET("/customers/pending-profiles", controller.ListPendingResellerRegistrationCustomerProfiles)
+	resellerRegistrationRoute.POST("/verified-identities/claim", controller.ClaimResellerVerifiedIdentity)
 
 	resellerAdminRoute := apiRouter.Group("/internal/v1/platform/resellers")
 	resellerAdminRoute.Use(middleware.ResellerAdminServiceAuth())
@@ -47,6 +48,10 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerAdminRoute.GET("/:id/customers", controller.ListResellerAdminCustomers)
 	resellerAdminRoute.DELETE("/:id/customers/:customer_id", controller.UnbindResellerAdminCustomer)
 	resellerAdminRoute.POST("/:id/customers/batch-assign", controller.BatchAssignResellerAdminCustomers)
+	resellerAdminRoute.GET("/identity-routes/:provider", controller.GetResellerIdentityRoute)
+	resellerAdminRoute.PUT("/identity-routes/:provider", controller.UpsertResellerIdentityRoute)
+	resellerAdminRoute.GET("/assignment-conflicts", controller.ListResellerAssignmentConflicts)
+	resellerAdminRoute.POST("/assignment-conflicts/:id/resolve", controller.ResolveResellerAssignmentConflict)
 	resellerAdminRoute.GET("/:id/pricing", controller.GetResellerPlatformPricing)
 	resellerAdminRoute.POST("/:id/pricing/wholesale", controller.CreateResellerPlatformWholesalePrice)
 	resellerAdminRoute.POST("/:id/pricing/preview", controller.PreviewResellerPlatformPricing)

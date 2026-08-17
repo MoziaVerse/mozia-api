@@ -86,16 +86,17 @@ type ResellerMember struct {
 }
 
 type ResellerCustomer struct {
-	Id              int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ResellerId      int    `json:"reseller_id" gorm:"not null;index"`
-	Subject         string `json:"subject" gorm:"type:varchar(255);not null;uniqueIndex"`
-	MatrixName      string `json:"matrix_name" gorm:"type:varchar(255);not null;default:''"`
-	Phone           string `json:"phone" gorm:"type:varchar(50);not null;default:''"`
-	ProfileSyncedAt int64  `json:"profile_synced_at" gorm:"not null;default:0;index"`
-	Remark          string `json:"-" gorm:"type:varchar(255);not null;default:''"`
-	Status          string `json:"status" gorm:"type:varchar(16);not null;index"`
-	CreatedAt       int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt       int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
+	Id               int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	ResellerId       int    `json:"reseller_id" gorm:"not null;index"`
+	Subject          string `json:"subject" gorm:"type:varchar(255);not null;uniqueIndex"`
+	MatrixName       string `json:"matrix_name" gorm:"type:varchar(255);not null;default:''"`
+	Phone            string `json:"phone" gorm:"type:varchar(50);not null;default:''"`
+	ProfileSyncedAt  int64  `json:"profile_synced_at" gorm:"not null;default:0;index"`
+	Remark           string `json:"-" gorm:"type:varchar(255);not null;default:''"`
+	AssignmentSource string `json:"assignment_source" gorm:"type:varchar(32);not null;default:'legacy';index"`
+	Status           string `json:"status" gorm:"type:varchar(16);not null;index"`
+	CreatedAt        int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt        int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
 }
 
 type ResellerInvitation struct {
