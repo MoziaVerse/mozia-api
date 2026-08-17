@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -18,8 +19,22 @@ const resellerTaskDefaultPageSize = 20
 const resellerTaskMaxPageSize = 100
 
 type resellerUsageResponse struct {
-	Summary resellerUsageSummaryResponse `json:"summary"`
-	Items   []resellerUsageItemResponse  `json:"items"`
+	Summary       resellerUsageSummaryResponse    `json:"summary"`
+	Items         []resellerUsageItemResponse     `json:"items"`
+	CustomerSpend []resellerCustomerSpendResponse `json:"customer_spend"`
+	ModelSpend    []resellerModelSpendResponse    `json:"model_spend"`
+}
+
+type resellerCustomerSpendResponse struct {
+	CustomerId           int    `json:"customer_id"`
+	CustomerQuota        string `json:"customer_quota"`
+	CustomerQuotaDisplay string `json:"customer_quota_display"`
+}
+
+type resellerModelSpendResponse struct {
+	Model                string `json:"model"`
+	CustomerQuota        string `json:"customer_quota"`
+	CustomerQuotaDisplay string `json:"customer_quota_display"`
 }
 
 type resellerUsageSummaryResponse struct {
@@ -81,7 +96,9 @@ func GetResellerManagementUsage(c *gin.Context) {
 			CustomerQuotaDisplay: formatResellerUsageQuota(result.Summary.CustomerQuota),
 			ModelCount:           result.Summary.ModelCount,
 		},
-		Items: resellerUsageItemsResponse(result.Items),
+		Items:         resellerUsageItemsResponse(result.Items),
+		CustomerSpend: resellerCustomerSpendResponseFromItems(result.Items),
+		ModelSpend:    resellerModelSpendResponseFromItems(result.Items),
 	})
 }
 
@@ -141,6 +158,54 @@ func resellerUsageItemsResponse(items []model.ResellerUsageItem) []resellerUsage
 			CustomerQuotaDisplay: formatResellerUsageQuota(item.CustomerQuota),
 		})
 	}
+	return response
+}
+
+func resellerCustomerSpendResponseFromItems(items []model.ResellerUsageItem) []resellerCustomerSpendResponse {
+	totals := make(map[int]int64)
+	for _, item := range items {
+		totals[item.CustomerId] += item.CustomerQuota
+	}
+	response := make([]resellerCustomerSpendResponse, 0, len(totals))
+	for customerId, quota := range totals {
+		response = append(response, resellerCustomerSpendResponse{
+			CustomerId:           customerId,
+			CustomerQuota:        strconv.FormatInt(quota, 10),
+			CustomerQuotaDisplay: formatResellerUsageQuota(quota),
+		})
+	}
+	sort.Slice(response, func(i, j int) bool {
+		left, _ := strconv.ParseInt(response[i].CustomerQuota, 10, 64)
+		right, _ := strconv.ParseInt(response[j].CustomerQuota, 10, 64)
+		if left != right {
+			return left > right
+		}
+		return response[i].CustomerId < response[j].CustomerId
+	})
+	return response
+}
+
+func resellerModelSpendResponseFromItems(items []model.ResellerUsageItem) []resellerModelSpendResponse {
+	totals := make(map[string]int64)
+	for _, item := range items {
+		totals[item.Model] += item.CustomerQuota
+	}
+	response := make([]resellerModelSpendResponse, 0, len(totals))
+	for modelName, quota := range totals {
+		response = append(response, resellerModelSpendResponse{
+			Model:                modelName,
+			CustomerQuota:        strconv.FormatInt(quota, 10),
+			CustomerQuotaDisplay: formatResellerUsageQuota(quota),
+		})
+	}
+	sort.Slice(response, func(i, j int) bool {
+		left, _ := strconv.ParseInt(response[i].CustomerQuota, 10, 64)
+		right, _ := strconv.ParseInt(response[j].CustomerQuota, 10, 64)
+		if left != right {
+			return left > right
+		}
+		return response[i].Model < response[j].Model
+	})
 	return response
 }
 

@@ -35,6 +35,16 @@ type resellerUsageEnvelopeData struct {
 		CustomerQuota        string `json:"customer_quota"`
 		CustomerQuotaDisplay string `json:"customer_quota_display"`
 	} `json:"items"`
+	CustomerSpend []struct {
+		CustomerId           int    `json:"customer_id"`
+		CustomerQuota        string `json:"customer_quota"`
+		CustomerQuotaDisplay string `json:"customer_quota_display"`
+	} `json:"customer_spend"`
+	ModelSpend []struct {
+		Model                string `json:"model"`
+		CustomerQuota        string `json:"customer_quota"`
+		CustomerQuotaDisplay string `json:"customer_quota_display"`
+	} `json:"model_spend"`
 }
 
 type resellerTasksEnvelopeData struct {
@@ -392,6 +402,14 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		assert.Equal(t, "0", data.Items[1].CompletionTokens)
 		assert.Equal(t, "99", data.Items[1].TotalTokens)
 		assert.Equal(t, "60", data.Items[1].CustomerQuota)
+		require.Len(t, data.CustomerSpend, 1)
+		assert.Equal(t, customerA.Id, data.CustomerSpend[0].CustomerId)
+		assert.Equal(t, "200", data.CustomerSpend[0].CustomerQuota)
+		assert.Equal(t, logger.FormatQuota(200), data.CustomerSpend[0].CustomerQuotaDisplay)
+		require.Len(t, data.ModelSpend, 2)
+		assert.Equal(t, []string{"alpha-model", "beta-task-model"}, []string{data.ModelSpend[0].Model, data.ModelSpend[1].Model})
+		assert.Equal(t, []string{"140", "60"}, []string{data.ModelSpend[0].CustomerQuota, data.ModelSpend[1].CustomerQuota})
+		assert.Equal(t, logger.FormatQuota(140), data.ModelSpend[0].CustomerQuotaDisplay)
 
 		body := recorder.Body.String()
 		assert.NotContains(t, body, "wholesale-secret")
