@@ -14,15 +14,11 @@ func TestClaimAndResolveResellerVerifiedIdentity(t *testing.T) {
 	current := Reseller{Name: "Current", Status: ResellerStatusActive}
 	require.NoError(t, db.Create(&target).Error)
 	require.NoError(t, db.Create(&current).Error)
-	_, err := UpsertResellerIdentityRoute(ResellerIdentityProviderHduCAS, target.Id, ResellerIdentityRouteStatusActive)
+	_, err := UpsertHduResellerIdentityRoute(target.Id)
 	require.NoError(t, err)
 
 	claim := func(subject string) *ResellerVerifiedIdentityClaimRecord {
-		record, claimErr := ClaimResellerVerifiedIdentity(ResellerVerifiedIdentityClaimInput{
-			ProviderKey: ResellerIdentityProviderHduCAS,
-			Subject:     subject,
-			VerifiedAt:  1,
-		})
+		record, claimErr := ClaimHduResellerIdentity(subject, "", "")
 		require.NoError(t, claimErr)
 		return record
 	}
@@ -32,7 +28,6 @@ func TestClaimAndResolveResellerVerifiedIdentity(t *testing.T) {
 	assert.Equal(t, ResellerVerifiedIdentityClaimAlreadyInTarget, claim("unowned-subject").Status)
 	var customer ResellerCustomer
 	require.NoError(t, db.Where("subject = ?", "unowned-subject").Take(&customer).Error)
-	assert.Equal(t, ResellerCustomerAssignmentSourceHduCAS, customer.AssignmentSource)
 
 	require.NoError(t, db.Create(&ResellerCustomer{
 		ResellerId: current.Id, Subject: "conflict-subject", Status: ResellerCustomerStatusActive,
@@ -47,5 +42,4 @@ func TestClaimAndResolveResellerVerifiedIdentity(t *testing.T) {
 	customer = ResellerCustomer{}
 	require.NoError(t, db.Where("subject = ?", "conflict-subject").Take(&customer).Error)
 	assert.Equal(t, target.Id, customer.ResellerId)
-	assert.Equal(t, ResellerCustomerAssignmentSourcePlatformTransfer, customer.AssignmentSource)
 }

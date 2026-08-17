@@ -12,8 +12,7 @@ import (
 const (
 	ResellerIdentityProviderHduCAS = "hdu_cas"
 
-	ResellerIdentityRouteStatusActive   = "active"
-	ResellerIdentityRouteStatusInactive = "inactive"
+	ResellerIdentityRouteStatusActive = "active"
 
 	ResellerVerifiedIdentityClaimAssigned        = "assigned"
 	ResellerVerifiedIdentityClaimAlreadyInTarget = "already_in_target"
@@ -26,29 +25,25 @@ const (
 
 	ResellerAssignmentConflictActionKeepCurrent = "keep_current"
 	ResellerAssignmentConflictActionTransfer    = "transfer"
-
-	ResellerCustomerAssignmentSourceHduCAS           = "hdu_cas"
-	ResellerCustomerAssignmentSourcePlatformTransfer = "platform_transfer"
 )
 
 var (
-	ErrInvalidResellerIdentityProvider    = errors.New("invalid reseller identity provider")
 	ErrInvalidResellerIdentityRoute       = errors.New("invalid reseller identity route")
 	ErrResellerAssignmentConflictNotFound = errors.New("reseller assignment conflict not found")
 )
 
 type ResellerIdentityRoute struct {
 	Id          int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ProviderKey string `json:"provider_key" gorm:"type:varchar(64);not null;uniqueIndex"`
+	ProviderKey string `json:"-" gorm:"type:varchar(64);not null;uniqueIndex"`
 	ResellerId  int    `json:"reseller_id" gorm:"not null;index"`
-	Status      string `json:"status" gorm:"type:varchar(16);not null;index"`
+	Status      string `json:"-" gorm:"type:varchar(16);not null;index"`
 	CreatedAt   int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt   int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
 }
 
 type ResellerAssignmentConflict struct {
 	Id                int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ProviderKey       string `json:"provider_key" gorm:"type:varchar(64);not null;uniqueIndex:uq_reseller_assignment_conflicts_provider_subject,priority:1"`
+	ProviderKey       string `json:"-" gorm:"type:varchar(64);not null;uniqueIndex:uq_reseller_assignment_conflicts_provider_subject,priority:1"`
 	Subject           string `json:"subject" gorm:"type:varchar(255);not null;uniqueIndex:uq_reseller_assignment_conflicts_provider_subject,priority:2;index"`
 	TargetResellerId  int    `json:"target_reseller_id" gorm:"not null;index"`
 	CurrentResellerId int    `json:"current_reseller_id" gorm:"not null;index"`
@@ -59,14 +54,6 @@ type ResellerAssignmentConflict struct {
 	ResolvedBySubject string `json:"resolved_by_subject" gorm:"type:varchar(255);not null;default:''"`
 }
 
-type ResellerVerifiedIdentityClaimInput struct {
-	ProviderKey string `json:"provider_key"`
-	Subject     string `json:"subject"`
-	VerifiedAt  int64  `json:"verified_at"`
-	MatrixName  string `json:"matrix_name"`
-	Phone       string `json:"phone"`
-}
-
 type ResellerVerifiedIdentityClaimRecord struct {
 	Status     string `json:"status"`
 	ResellerId *int   `json:"reseller_id,omitempty"`
@@ -74,12 +61,8 @@ type ResellerVerifiedIdentityClaimRecord struct {
 	ConflictId *int   `json:"conflict_id,omitempty"`
 }
 
-func validResellerIdentityProvider(providerKey string) bool {
-	return providerKey == ResellerIdentityProviderHduCAS
-}
-
-func UpsertResellerIdentityRoute(providerKey string, resellerId int, status string) (*ResellerIdentityRoute, error) {
-	if !validResellerIdentityProvider(providerKey) || resellerId < 1 || (status != ResellerIdentityRouteStatusActive && status != ResellerIdentityRouteStatusInactive) {
+func UpsertHduResellerIdentityRoute(resellerId int) (*ResellerIdentityRoute, error) {
+	if resellerId < 1 {
 		return nil, ErrInvalidResellerIdentityRoute
 	}
 	var reseller Reseller
@@ -89,28 +72,25 @@ func UpsertResellerIdentityRoute(providerKey string, resellerId int, status stri
 		}
 		return nil, err
 	}
-	if status == ResellerIdentityRouteStatusActive && reseller.Status != ResellerStatusActive {
+	if reseller.Status != ResellerStatusActive {
 		return nil, ErrResellerNotFound
 	}
-	route := ResellerIdentityRoute{ProviderKey: providerKey, ResellerId: resellerId, Status: status}
+	route := ResellerIdentityRoute{ProviderKey: ResellerIdentityProviderHduCAS, ResellerId: resellerId, Status: ResellerIdentityRouteStatusActive}
 	if err := DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "provider_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"reseller_id", "status", "updated_at"}),
 	}).Create(&route).Error; err != nil {
 		return nil, err
 	}
-	if err := DB.Where("provider_key = ?", providerKey).Take(&route).Error; err != nil {
+	if err := DB.Where("provider_key = ?", ResellerIdentityProviderHduCAS).Take(&route).Error; err != nil {
 		return nil, err
 	}
 	return &route, nil
 }
 
-func GetResellerIdentityRoute(providerKey string) (*ResellerIdentityRoute, error) {
-	if !validResellerIdentityProvider(providerKey) {
-		return nil, ErrInvalidResellerIdentityProvider
-	}
+func GetHduResellerIdentityRoute() (*ResellerIdentityRoute, error) {
 	var route ResellerIdentityRoute
-	if err := DB.Where("provider_key = ?", providerKey).Take(&route).Error; err != nil {
+	if err := DB.Where("provider_key = ?", ResellerIdentityProviderHduCAS).Take(&route).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -119,17 +99,17 @@ func GetResellerIdentityRoute(providerKey string) (*ResellerIdentityRoute, error
 	return &route, nil
 }
 
-func ClaimResellerVerifiedIdentity(input ResellerVerifiedIdentityClaimInput) (*ResellerVerifiedIdentityClaimRecord, error) {
-	input.MatrixName = strings.TrimSpace(input.MatrixName)
-	input.Phone = strings.TrimSpace(input.Phone)
-	if !validResellerIdentityProvider(input.ProviderKey) || !ValidResellerSubject(input.Subject) || input.VerifiedAt < 1 || !validResellerCustomerText(input.MatrixName, 255) || !validResellerCustomerText(input.Phone, 50) {
+func ClaimHduResellerIdentity(subject string, matrixName string, phone string) (*ResellerVerifiedIdentityClaimRecord, error) {
+	matrixName = strings.TrimSpace(matrixName)
+	phone = strings.TrimSpace(phone)
+	if !ValidResellerSubject(subject) || !validResellerCustomerText(matrixName, 255) || !validResellerCustomerText(phone, 50) {
 		return nil, ErrInvalidResellerCustomerIdentity
 	}
 
 	var record *ResellerVerifiedIdentityClaimRecord
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var route ResellerIdentityRoute
-		if err := tx.Where("provider_key = ? AND status = ?", input.ProviderKey, ResellerIdentityRouteStatusActive).Take(&route).Error; err != nil {
+		if err := tx.Where("provider_key = ? AND status = ?", ResellerIdentityProviderHduCAS, ResellerIdentityRouteStatusActive).Take(&route).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				record = &ResellerVerifiedIdentityClaimRecord{Status: ResellerVerifiedIdentityClaimRouteInactive}
 				return nil
@@ -147,13 +127,12 @@ func ClaimResellerVerifiedIdentity(input ResellerVerifiedIdentityClaimInput) (*R
 
 		now := common.GetTimestamp()
 		customer := ResellerCustomer{
-			ResellerId:       route.ResellerId,
-			Subject:          input.Subject,
-			MatrixName:       input.MatrixName,
-			Phone:            input.Phone,
-			ProfileSyncedAt:  now,
-			AssignmentSource: input.ProviderKey,
-			Status:           ResellerCustomerStatusActive,
+			ResellerId:      route.ResellerId,
+			Subject:         subject,
+			MatrixName:      matrixName,
+			Phone:           phone,
+			ProfileSyncedAt: now,
+			Status:          ResellerCustomerStatusActive,
 		}
 		created := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&customer)
 		if created.Error != nil {
@@ -165,7 +144,7 @@ func ClaimResellerVerifiedIdentity(input ResellerVerifiedIdentityClaimInput) (*R
 		}
 
 		var existing ResellerCustomer
-		if err := tx.Select("id", "reseller_id").Where("subject = ?", input.Subject).Take(&existing).Error; err != nil {
+		if err := tx.Select("id", "reseller_id").Where("subject = ?", subject).Take(&existing).Error; err != nil {
 			return err
 		}
 		if existing.ResellerId == route.ResellerId {
@@ -174,7 +153,7 @@ func ClaimResellerVerifiedIdentity(input ResellerVerifiedIdentityClaimInput) (*R
 		}
 
 		conflict := ResellerAssignmentConflict{
-			ProviderKey: input.ProviderKey, Subject: input.Subject, TargetResellerId: route.ResellerId,
+			ProviderKey: ResellerIdentityProviderHduCAS, Subject: subject, TargetResellerId: route.ResellerId,
 			CurrentResellerId: existing.ResellerId, Status: ResellerAssignmentConflictPending,
 			FirstSeenAt: now, LastSeenAt: now,
 		}
@@ -188,7 +167,7 @@ func ClaimResellerVerifiedIdentity(input ResellerVerifiedIdentityClaimInput) (*R
 		}).Create(&conflict).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("provider_key = ? AND subject = ?", input.ProviderKey, input.Subject).Take(&conflict).Error; err != nil {
+		if err := tx.Where("provider_key = ? AND subject = ?", ResellerIdentityProviderHduCAS, subject).Take(&conflict).Error; err != nil {
 			return err
 		}
 		record = &ResellerVerifiedIdentityClaimRecord{Status: ResellerVerifiedIdentityClaimOwnedByOther, ResellerId: &route.ResellerId, CustomerId: &existing.Id, ConflictId: &conflict.Id}
@@ -197,16 +176,9 @@ func ClaimResellerVerifiedIdentity(input ResellerVerifiedIdentityClaimInput) (*R
 	return record, err
 }
 
-func ListResellerAssignmentConflicts(status string) ([]ResellerAssignmentConflict, error) {
-	query := DB.Order("last_seen_at DESC, id DESC")
-	if status != "" {
-		if status != ResellerAssignmentConflictPending && status != ResellerAssignmentConflictKeptCurrent && status != ResellerAssignmentConflictTransferred {
-			return nil, ErrInvalidResellerIdentityRoute
-		}
-		query = query.Where("status = ?", status)
-	}
+func ListPendingResellerAssignmentConflicts() ([]ResellerAssignmentConflict, error) {
 	records := make([]ResellerAssignmentConflict, 0)
-	return records, query.Find(&records).Error
+	return records, DB.Where("status = ?", ResellerAssignmentConflictPending).Order("last_seen_at DESC, id DESC").Find(&records).Error
 }
 
 func ResolveResellerAssignmentConflict(id int, action string, actorSubject string) (*ResellerAssignmentConflict, error) {
@@ -234,7 +206,7 @@ func ResolveResellerAssignmentConflict(id int, action string, actorSubject strin
 			}
 			update := tx.Model(&ResellerCustomer{}).
 				Where("subject = ? AND reseller_id = ?", conflict.Subject, conflict.CurrentResellerId).
-				Updates(map[string]any{"reseller_id": conflict.TargetResellerId, "assignment_source": ResellerCustomerAssignmentSourcePlatformTransfer})
+				Update("reseller_id", conflict.TargetResellerId)
 			if update.Error != nil {
 				return update.Error
 			}

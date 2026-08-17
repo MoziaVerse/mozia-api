@@ -52,10 +52,11 @@ type resellerInvitationConsumeRequest struct {
 }
 
 type resellerCustomerIdentitySyncRequest struct {
-	Subject    string          `json:"subject"`
-	MatrixName string          `json:"matrix_name"`
-	Phone      string          `json:"phone"`
-	ResellerId json.RawMessage `json:"reseller_id"`
+	Subject     string          `json:"subject"`
+	MatrixName  string          `json:"matrix_name"`
+	Phone       string          `json:"phone"`
+	HduVerified bool            `json:"hdu_verified"`
+	ResellerId  json.RawMessage `json:"reseller_id"`
 }
 
 type resellerCustomerBatchAssignRequest struct {
@@ -409,6 +410,9 @@ func SyncResellerRegistrationCustomerIdentity(c *gin.Context) {
 		return
 	}
 	updated, err := model.SyncResellerCustomerIdentity(request.Subject, request.MatrixName, request.Phone)
+	if err == nil && request.HduVerified {
+		_, err = model.ClaimHduResellerIdentity(request.Subject, request.MatrixName, request.Phone)
+	}
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, gin.H{"updated": updated})
