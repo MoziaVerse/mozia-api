@@ -28,6 +28,36 @@ type resellerContextRequest struct {
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
+type resellerPresentationRequest struct {
+	Host       string          `json:"host"`
+	ResellerId json.RawMessage `json:"reseller_id"`
+}
+
+func GetResellerPresentation(c *gin.Context) {
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerContextBodyLimit))
+	var request resellerPresentationRequest
+	if err != nil || common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	host, err := model.NormalizeResellerHost(request.Host)
+	if err != nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	presentation, err := model.ResolveResellerPresentation(host)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorContextNotFound, "reseller context not found")
+		return
+	}
+	if err != nil {
+		logger.LogError(c.Request.Context(), "ResolveResellerPresentation database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, presentation)
+}
+
 func GetResellerContext(c *gin.Context) {
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerContextBodyLimit))
 	var request resellerContextRequest

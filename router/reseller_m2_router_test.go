@@ -37,6 +37,30 @@ type resellerM2Profile struct {
 	Subject      string   `json:"subject"`
 	Role         string   `json:"role"`
 	Permissions  []string `json:"permissions"`
+	Logo         string   `json:"logo"`
+}
+
+func TestResellerManagementLogoContract(t *testing.T) {
+	_, db, request := setupResellerM2Test(t)
+	seedResellerM2(t, db, "Logo Agency", "logo.example.com", model.ResellerRoleOwner, "logo-owner", "logo-admin", "logo-viewer")
+	logo := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+	headers := func(subject string) map[string]string {
+		return map[string]string{"X-Reseller-Subject": subject, "X-Reseller-Host": "logo.example.com"}
+	}
+
+	for _, subject := range []string{"logo-admin", "logo-viewer"} {
+		recorder := request(http.MethodPut, "/api/internal/v1/reseller/management/logo", fmt.Sprintf(`{"logo":%q}`, logo), "matrix-reseller-management-test-token", "logo-forbidden_123", headers(subject))
+		require.Equal(t, http.StatusForbidden, recorder.Code)
+	}
+
+	recorder := request(http.MethodPut, "/api/internal/v1/reseller/management/logo", fmt.Sprintf(`{"logo":%q}`, logo), "matrix-reseller-management-test-token", "logo-owner_123", headers("logo-owner"))
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	profileRecorder := request(http.MethodGet, "/api/internal/v1/reseller/management/profile", "", "matrix-reseller-management-test-token", "logo-profile_123", headers("logo-owner"))
+	response := decodeM2Envelope(t, profileRecorder)
+	var profile resellerM2Profile
+	require.NoError(t, common.Unmarshal(response.RawData, &profile))
+	assert.Equal(t, logo, profile.Logo)
 }
 
 type resellerM2Customer struct {

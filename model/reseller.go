@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -41,6 +42,7 @@ const (
 
 var (
 	ErrInvalidResellerHost             = errors.New("invalid reseller host")
+	ErrInvalidResellerLogo             = errors.New("invalid reseller logo")
 	ErrInvalidResellerName             = errors.New("invalid reseller name")
 	ErrInvalidResellerOwnerSubject     = errors.New("invalid reseller owner subject")
 	ErrInvalidResellerStatus           = errors.New("invalid reseller status")
@@ -63,6 +65,7 @@ var (
 type Reseller struct {
 	Id     int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	Name   string `json:"name" gorm:"type:varchar(128);not null"`
+	Logo   string `json:"logo" gorm:"type:text;not null;default:''"`
 	Status string `json:"status" gorm:"type:varchar(16);not null;index"`
 }
 
@@ -120,6 +123,7 @@ type ResellerAdminRecord struct {
 	Name                  string  `json:"name"`
 	Status                string  `json:"status"`
 	Host                  string  `json:"host"`
+	Logo                  string  `json:"logo"`
 	OwnerSubject          string  `json:"owner_subject"`
 	OwnerUserId           int     `json:"owner_user_id"`
 	OwnerUsername         string  `json:"owner_username"`
@@ -134,6 +138,42 @@ type ResellerAdminRecord struct {
 	BalanceDisplayType    string  `json:"balance_display_type" gorm:"-"`
 	BalanceCurrencySymbol string  `json:"balance_currency_symbol" gorm:"-"`
 	MemberCount           int     `json:"member_count"`
+}
+
+type ResellerBranding struct {
+	Logo string `json:"logo"`
+}
+
+type ResellerPresentation struct {
+	ResellerId   int    `json:"reseller_id"`
+	ResellerName string `json:"reseller_name"`
+	Host         string `json:"host"`
+	Logo         string `json:"logo"`
+}
+
+const resellerLogoMaxBytes = 256 << 10
+
+func NormalizeResellerLogo(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	prefixes := map[string]string{
+		"data:image/jpeg;base64,": "image/jpeg",
+		"data:image/png;base64,":  "image/png",
+		"data:image/webp;base64,": "image/webp",
+	}
+	for prefix, mediaType := range prefixes {
+		if !strings.HasPrefix(raw, prefix) {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(raw, prefix))
+		if err != nil || len(data) == 0 || len(data) > resellerLogoMaxBytes || http.DetectContentType(data) != mediaType {
+			return "", ErrInvalidResellerLogo
+		}
+		// ponytail: inline logos keep deployment storage-free; move to object storage when list payload size matters.
+		return prefix + base64.StdEncoding.EncodeToString(data), nil
+	}
+	return "", ErrInvalidResellerLogo
 }
 
 type ResellerMemberRecord struct {
@@ -316,6 +356,19 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 		return nil, err
 	}
 	return &context, nil
+}
+
+func ResolveResellerPresentation(host string) (*ResellerPresentation, error) {
+	var presentation ResellerPresentation
+	err := DB.Table("reseller_domains AS rd").
+		Select("r.id AS reseller_id, r.name AS reseller_name, rd.host, r.logo").
+		Joins("JOIN resellers AS r ON r.id = rd.reseller_id AND r.status = ?", ResellerStatusActive).
+		Where("rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
+		Take(&presentation).Error
+	if err != nil {
+		return nil, err
+	}
+	return &presentation, nil
 }
 
 func ListResellerAdminRecords() ([]ResellerAdminRecord, error) {
@@ -820,6 +873,30 @@ func UpdateResellerAdminStatus(id int, status string) (*ResellerAdminRecord, err
 	return GetResellerAdminRecord(id)
 }
 
+func UpdateResellerLogo(id int, logo string) (*ResellerBranding, error) {
+	normalized, err := NormalizeResellerLogo(logo)
+	if err != nil {
+		return nil, err
+	}
+	result := DB.Model(&Reseller{}).Where("id = ?", id).Update("logo", normalized)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return GetResellerBranding(id)
+}
+
+func GetResellerBranding(id int) (*ResellerBranding, error) {
+	var branding ResellerBranding
+	result := DB.Model(&Reseller{}).Select("logo").Where("id = ?", id).Limit(1).Scan(&branding)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrResellerNotFound
+	}
+	return &branding, nil
+}
+
 func UpdateResellerAdminRecord(id int, name string, host string) (*ResellerAdminRecord, error) {
 	if !validResellerName(name) {
 		return nil, ErrInvalidResellerName
@@ -888,14 +965,14 @@ func GetResellerAdminRecord(id int) (*ResellerAdminRecord, error) {
 
 func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("resellers AS r").
-		Select("r.id, r.name, r.status, rd.host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
+		Select("r.id, r.name, r.logo, r.status, rd.host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
 		Joins("LEFT JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.verified = ? AND rd.status = ?", true, ResellerDomainStatusActive).
 		Joins("LEFT JOIN reseller_members AS owner ON owner.reseller_id = r.id AND owner.role = ? AND owner.status = ?", ResellerRoleOwner, ResellerMemberStatusActive).
 		Joins("LEFT JOIN user_ssos AS owner_sso ON owner_sso.sso_sub = owner.subject").
 		Joins("LEFT JOIN users AS owner_sso_user ON owner_sso_user.id = owner_sso.user_id AND owner_sso_user.deleted_at IS NULL").
 		Joins("LEFT JOIN users AS owner_oidc_user ON owner_oidc_user.id = (SELECT MIN(owner_candidate.id) FROM users AS owner_candidate WHERE owner_candidate.oidc_id = owner.subject AND owner_candidate.deleted_at IS NULL)").
 		Joins("LEFT JOIN reseller_members AS members ON members.reseller_id = r.id AND members.status = ?", ResellerMemberStatusActive).
-		Group("r.id, r.name, r.status, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
+		Group("r.id, r.name, r.logo, r.status, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
 }
 
 func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {

@@ -15,6 +15,7 @@ import (
 )
 
 const resellerManagementBodyLimit = 4 << 10
+const resellerLogoBodyLimit = 384 << 10
 const resellerPlatformBatchAssignBodyLimit = 64 << 10
 const resellerProfileBackfillDefaultLimit = 100
 const resellerProfileBackfillMaxLimit = 200
@@ -31,6 +32,10 @@ type resellerCustomerRemarkRequest struct {
 
 type resellerCustomerOverseasModelAccessRequest struct {
 	Allowed *bool `json:"allowed"`
+}
+
+type resellerLogoRequest struct {
+	Logo *string `json:"logo"`
 }
 
 type resellerInvitationCreateRequest struct {
@@ -68,6 +73,12 @@ func GetResellerManagementProfile(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorContextNotFound, "reseller context not found")
 		return
 	}
+	branding, err := model.GetResellerBranding(resellerContext.ResellerId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "GetResellerBranding database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
 	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
 		"reseller_id":   resellerContext.ResellerId,
 		"reseller_name": resellerContext.ResellerName,
@@ -75,7 +86,38 @@ func GetResellerManagementProfile(c *gin.Context) {
 		"subject":       resellerContext.Subject,
 		"role":          resellerContext.Role,
 		"permissions":   permissions,
+		"logo":          branding.Logo,
 	})
+}
+
+func UpdateResellerManagementLogo(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if resellerContext.Role != model.ResellerRoleOwner {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller owner access required")
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerLogoBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerLogoRequest
+	if common.Unmarshal(body, &request) != nil || request.Logo == nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	branding, err := model.UpdateResellerLogo(resellerContext.ResellerId, *request.Logo)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, branding)
+	case errors.Is(err, model.ErrInvalidResellerLogo):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid reseller logo")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerLogo database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
 }
 
 func ListResellerManagementMembers(c *gin.Context) {

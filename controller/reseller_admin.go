@@ -31,6 +31,10 @@ type updateResellerAdminRequest struct {
 	Host string `json:"host"`
 }
 
+type updateResellerAdminLogoRequest struct {
+	Logo *string `json:"logo"`
+}
+
 func ListResellerAdminRecords(c *gin.Context) {
 	records, err := model.ListResellerAdminRecords()
 	if err != nil {
@@ -142,6 +146,36 @@ func UpdateResellerAdmin(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "duplicate reseller")
 	default:
 		logger.LogError(c.Request.Context(), "UpdateResellerAdminRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func UpdateResellerAdminLogo(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id < 1 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerLogoBodyLimit))
+	if err != nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	var request updateResellerAdminLogoRequest
+	if common.Unmarshal(body, &request) != nil || request.Logo == nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	branding, err := model.UpdateResellerLogo(id, *request.Logo)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, branding)
+	case errors.Is(err, model.ErrInvalidResellerLogo):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid reseller logo")
+	case errors.Is(err, model.ErrResellerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerLogo database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }

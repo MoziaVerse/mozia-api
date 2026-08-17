@@ -23,6 +23,7 @@ type resellerAdminItem struct {
 	Name                  string  `json:"name"`
 	Status                string  `json:"status"`
 	Host                  string  `json:"host"`
+	Logo                  string  `json:"logo"`
 	OwnerSubject          string  `json:"owner_subject"`
 	OwnerUserId           int     `json:"owner_user_id"`
 	OwnerUsername         string  `json:"owner_username"`
@@ -34,6 +35,30 @@ type resellerAdminItem struct {
 	BalanceDisplayType    string  `json:"balance_display_type"`
 	BalanceCurrencySymbol string  `json:"balance_currency_symbol"`
 	MemberCount           int     `json:"member_count"`
+}
+
+func TestResellerAdminLogoContract(t *testing.T) {
+	_, db, request := setupResellerAdminTest(t)
+	reseller := seedReseller(t, db, "Logo Agency", model.ResellerStatusActive, "logo.example.com", "logo-owner", "logo-viewer")
+	logo := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/logo", reseller.Id), fmt.Sprintf(`{"logo":%q}`, logo), "mozia-mega-test-token", "admin-logo_123")
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	list := request(http.MethodGet, "/api/internal/v1/platform/resellers", "", "mozia-mega-test-token", "admin-logo-list_123")
+	var response resellerAdminListResponse
+	require.NoError(t, common.Unmarshal(list.Body.Bytes(), &response))
+	require.Len(t, response.Data, 1)
+	assert.Equal(t, logo, response.Data[0].Logo)
+
+	presentationRecorder := request(http.MethodPost, "/api/internal/v1/reseller/presentation", `{"host":"logo.example.com"}`, "matrix-reseller-test-token", "presentation_123")
+	var presentationEnvelope resellerM2Envelope
+	require.NoError(t, common.Unmarshal(presentationRecorder.Body.Bytes(), &presentationEnvelope))
+	require.Equal(t, http.StatusOK, presentationRecorder.Code)
+	var presentation model.ResellerPresentation
+	require.NoError(t, common.Unmarshal(presentationEnvelope.RawData, &presentation))
+	assert.Equal(t, reseller.Id, presentation.ResellerId)
+	assert.Equal(t, logo, presentation.Logo)
 }
 
 type resellerAdminListResponse struct {
