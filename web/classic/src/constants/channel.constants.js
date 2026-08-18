@@ -30,6 +30,11 @@ export const CHANNEL_OPTIONS = [
     label: 'Globalaiopc',
   },
   {
+    value: 205,
+    color: 'orange',
+    label: 'Globalaiopc-ModelCenter',
+  },
+  {
     value: 202,
     color: 'purple',
     label: 'Cool（图片/视频异步生成）',

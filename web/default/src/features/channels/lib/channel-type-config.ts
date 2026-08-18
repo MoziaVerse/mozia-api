@@ -122,6 +122,20 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         '兼容 POST/GET /v1/videos；duration 必须显式传正整数。模型价格按每秒价格填写，实际费用 = 模型价格 × duration；失败或超时自动退款',
     },
   },
+  205: {
+    id: 205,
+    name: CHANNEL_TYPES[205],
+    icon: 'openai',
+    defaultBaseUrl: 'https://zcbservice.aizfw.cn/kyyReactApiServer',
+    hints: {
+      baseUrl: 'Default: https://zcbservice.aizfw.cn/kyyReactApiServer',
+      key: 'Globalaiopc 控制台分发的 API Key',
+      models:
+        '模型列表填写对外名称，并在“模型映射”中映射到 Model Center 模型：videos、videos_stable、videos_stable_fast、videos_pro 或 videos_pro_fast',
+      other:
+        '客户端统一调用 /v1/videos 或 /v1/video/generations；上游提交使用 /v2/model-center/tasks，查询使用 /v2/model-center/tasks/{id}；支持图片、视频、音频参考素材映射，模型价格按次填写',
+    },
+  },
   // ===== NewAPI default =====
   1: {
     id: 1,
