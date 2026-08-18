@@ -38,6 +38,18 @@ type resellerLogoRequest struct {
 	Logo *string `json:"logo"`
 }
 
+type resellerBankTransferRequest struct {
+	AccountName   string          `json:"account_name"`
+	AccountNumber string          `json:"account_number"`
+	BankName      string          `json:"bank_name"`
+	ResellerId    json.RawMessage `json:"reseller_id"`
+}
+
+type resellerCustomerPaymentMethodRequest struct {
+	Subject    string          `json:"subject"`
+	ResellerId json.RawMessage `json:"reseller_id"`
+}
+
 type resellerInvitationCreateRequest struct {
 	ExpiresInHours *int            `json:"expires_in_hours"`
 	ResellerId     json.RawMessage `json:"reseller_id"`
@@ -80,6 +92,12 @@ func GetResellerManagementProfile(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 		return
 	}
+	bankTransfer, err := model.GetResellerBankTransferConfig(resellerContext.ResellerId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "GetResellerBankTransferConfig database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
 	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
 		"reseller_id":   resellerContext.ResellerId,
 		"reseller_name": resellerContext.ResellerName,
@@ -88,7 +106,67 @@ func GetResellerManagementProfile(c *gin.Context) {
 		"role":          resellerContext.Role,
 		"permissions":   permissions,
 		"logo":          branding.Logo,
+		"bank_transfer": bankTransfer,
 	})
+}
+
+func UpdateResellerManagementBankTransfer(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if resellerContext.Role != model.ResellerRoleOwner {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller owner access required")
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerBankTransferRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	current, err := model.GetResellerBankTransferConfig(resellerContext.ResellerId)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "GetResellerBankTransferConfig database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	if !current.Enabled {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "bank transfer configuration is not enabled")
+		return
+	}
+	config, err := model.UpdateResellerBankTransferConfig(resellerContext.ResellerId, nil, request.AccountName, request.AccountNumber, request.BankName, true)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, config)
+	case errors.Is(err, model.ErrInvalidResellerBankTransfer):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid bank transfer config")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerManagementBankTransfer database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func GetResellerRegistrationCustomerPaymentMethod(c *gin.Context) {
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerCustomerPaymentMethodRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || !model.ValidResellerSubject(request.Subject) {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	paymentMethod, err := model.ResolveResellerCustomerPaymentMethod(request.Subject)
+	if err != nil {
+		logger.LogError(c.Request.Context(), "ResolveResellerCustomerPaymentMethod database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, paymentMethod)
 }
 
 func UpdateResellerManagementLogo(c *gin.Context) {

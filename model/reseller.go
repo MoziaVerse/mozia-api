@@ -49,6 +49,7 @@ var (
 	ErrInvalidResellerCustomerStatus   = errors.New("invalid reseller customer status")
 	ErrInvalidResellerCustomerIdentity = errors.New("invalid reseller customer identity")
 	ErrInvalidResellerCustomerRemark   = errors.New("invalid reseller customer remark")
+	ErrInvalidResellerBankTransfer     = errors.New("invalid reseller bank transfer")
 	ErrInvalidResellerInvitation       = errors.New("invalid reseller invitation")
 	ErrInvalidResellerSubject          = errors.New("invalid reseller subject")
 	ErrResellerConflict                = errors.New("reseller conflict")
@@ -63,10 +64,14 @@ var (
 )
 
 type Reseller struct {
-	Id     int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name   string `json:"name" gorm:"type:varchar(128);not null"`
-	Logo   string `json:"logo" gorm:"type:text;not null;default:''"`
-	Status string `json:"status" gorm:"type:varchar(16);not null;index"`
+	Id                  int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name                string `json:"name" gorm:"type:varchar(128);not null"`
+	Logo                string `json:"logo" gorm:"type:text;not null;default:''"`
+	Status              string `json:"status" gorm:"type:varchar(16);not null;index"`
+	BankTransferEnabled bool   `json:"bank_transfer_enabled"`
+	BankAccountName     string `json:"bank_account_name" gorm:"type:varchar(128);not null;default:''"`
+	BankAccountNumber   string `json:"bank_account_number" gorm:"type:varchar(64);not null;default:''"`
+	BankName            string `json:"bank_name" gorm:"type:varchar(255);not null;default:''"`
 }
 
 type ResellerDomain struct {
@@ -138,6 +143,24 @@ type ResellerAdminRecord struct {
 	BalanceDisplayType    string  `json:"balance_display_type" gorm:"-"`
 	BalanceCurrencySymbol string  `json:"balance_currency_symbol" gorm:"-"`
 	MemberCount           int     `json:"member_count"`
+	BankTransferEnabled   bool    `json:"bank_transfer_enabled"`
+	BankAccountName       string  `json:"bank_account_name"`
+	BankAccountNumber     string  `json:"bank_account_number"`
+	BankName              string  `json:"bank_name"`
+}
+
+type ResellerBankTransferConfig struct {
+	Enabled       bool   `json:"enabled"`
+	Configured    bool   `json:"configured"`
+	AccountName   string `json:"account_name"`
+	AccountNumber string `json:"account_number"`
+	BankName      string `json:"bank_name"`
+}
+
+type ResellerCustomerPaymentMethod struct {
+	Mode         string                      `json:"mode"`
+	ResellerName string                      `json:"reseller_name,omitempty"`
+	BankTransfer *ResellerBankTransferConfig `json:"bank_transfer,omitempty"`
 }
 
 type ResellerBranding struct {
@@ -897,6 +920,73 @@ func GetResellerBranding(id int) (*ResellerBranding, error) {
 	return &branding, nil
 }
 
+func resellerBankTransferConfig(reseller Reseller) *ResellerBankTransferConfig {
+	return &ResellerBankTransferConfig{
+		Enabled:       reseller.BankTransferEnabled,
+		Configured:    reseller.BankAccountName != "" && reseller.BankAccountNumber != "" && reseller.BankName != "",
+		AccountName:   reseller.BankAccountName,
+		AccountNumber: reseller.BankAccountNumber,
+		BankName:      reseller.BankName,
+	}
+}
+
+func GetResellerBankTransferConfig(id int) (*ResellerBankTransferConfig, error) {
+	var reseller Reseller
+	if err := DB.Select("bank_transfer_enabled", "bank_account_name", "bank_account_number", "bank_name").Where("id = ?", id).Take(&reseller).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrResellerNotFound
+		}
+		return nil, err
+	}
+	return resellerBankTransferConfig(reseller), nil
+}
+
+func UpdateResellerBankTransferConfig(id int, enabled *bool, accountName string, accountNumber string, bankName string, requireComplete bool) (*ResellerBankTransferConfig, error) {
+	accountName = strings.TrimSpace(accountName)
+	accountNumber = strings.TrimSpace(accountNumber)
+	bankName = strings.TrimSpace(bankName)
+	if !validResellerCustomerText(accountName, 128) || !validResellerCustomerText(accountNumber, 64) || !validResellerCustomerText(bankName, 255) ||
+		(requireComplete && (accountName == "" || accountNumber == "" || bankName == "")) {
+		return nil, ErrInvalidResellerBankTransfer
+	}
+	updates := map[string]any{
+		"bank_account_name": accountName, "bank_account_number": accountNumber, "bank_name": bankName,
+	}
+	if enabled != nil {
+		updates["bank_transfer_enabled"] = *enabled
+	}
+	result := DB.Model(&Reseller{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return GetResellerBankTransferConfig(id)
+	}
+	return GetResellerBankTransferConfig(id)
+}
+
+func ResolveResellerCustomerPaymentMethod(subject string) (*ResellerCustomerPaymentMethod, error) {
+	if !ValidResellerSubject(subject) {
+		return nil, ErrInvalidResellerSubject
+	}
+	var reseller Reseller
+	result := DB.Table("reseller_customers AS customer").
+		Select("reseller.name, reseller.bank_transfer_enabled, reseller.bank_account_name, reseller.bank_account_number, reseller.bank_name").
+		Joins("JOIN resellers AS reseller ON reseller.id = customer.reseller_id AND reseller.status = ?", ResellerStatusActive).
+		Where("customer.subject = ? AND customer.status = ?", subject, ResellerCustomerStatusActive).
+		Limit(1).
+		Scan(&reseller)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 || !reseller.BankTransferEnabled {
+		return &ResellerCustomerPaymentMethod{Mode: "platform"}, nil
+	}
+	return &ResellerCustomerPaymentMethod{
+		Mode: "bank_transfer", ResellerName: reseller.Name, BankTransfer: resellerBankTransferConfig(reseller),
+	}, nil
+}
+
 func UpdateResellerAdminRecord(id int, name string, host string) (*ResellerAdminRecord, error) {
 	if !validResellerName(name) {
 		return nil, ErrInvalidResellerName
@@ -965,14 +1055,14 @@ func GetResellerAdminRecord(id int) (*ResellerAdminRecord, error) {
 
 func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("resellers AS r").
-		Select("r.id, r.name, r.logo, r.status, rd.host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
+		Select("r.id, r.name, r.logo, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
 		Joins("LEFT JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.verified = ? AND rd.status = ?", true, ResellerDomainStatusActive).
 		Joins("LEFT JOIN reseller_members AS owner ON owner.reseller_id = r.id AND owner.role = ? AND owner.status = ?", ResellerRoleOwner, ResellerMemberStatusActive).
 		Joins("LEFT JOIN user_ssos AS owner_sso ON owner_sso.sso_sub = owner.subject").
 		Joins("LEFT JOIN users AS owner_sso_user ON owner_sso_user.id = owner_sso.user_id AND owner_sso_user.deleted_at IS NULL").
 		Joins("LEFT JOIN users AS owner_oidc_user ON owner_oidc_user.id = (SELECT MIN(owner_candidate.id) FROM users AS owner_candidate WHERE owner_candidate.oidc_id = owner.subject AND owner_candidate.deleted_at IS NULL)").
 		Joins("LEFT JOIN reseller_members AS members ON members.reseller_id = r.id AND members.status = ?", ResellerMemberStatusActive).
-		Group("r.id, r.name, r.logo, r.status, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
+		Group("r.id, r.name, r.logo, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
 }
 
 func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {

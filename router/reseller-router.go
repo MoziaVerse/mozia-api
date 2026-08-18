@@ -16,6 +16,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerManagementRoute.Use(middleware.ResellerManagementServiceAuth())
 	resellerManagementRoute.GET("/profile", controller.GetResellerManagementProfile)
 	resellerManagementRoute.PUT("/logo", controller.UpdateResellerManagementLogo)
+	resellerManagementRoute.PUT("/payment/bank-transfer", controller.UpdateResellerManagementBankTransfer)
 	resellerManagementRoute.GET("/members", controller.ListResellerManagementMembers)
 	resellerManagementRoute.GET("/customers", controller.ListResellerManagementCustomers)
 	resellerManagementRoute.GET("/customers/:id", controller.GetResellerManagementCustomer)
@@ -36,6 +37,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerRegistrationRoute.POST("/invitations/consume", controller.ConsumeResellerRegistrationInvitation)
 	resellerRegistrationRoute.POST("/customers/profile", controller.SyncResellerRegistrationCustomerIdentity)
 	resellerRegistrationRoute.GET("/customers/pending-profiles", controller.ListPendingResellerRegistrationCustomerProfiles)
+	resellerRegistrationRoute.POST("/customers/payment-method", controller.GetResellerRegistrationCustomerPaymentMethod)
 
 	resellerAdminRoute := apiRouter.Group("/internal/v1/platform/resellers")
 	resellerAdminRoute.Use(middleware.ResellerAdminServiceAuth())
@@ -43,6 +45,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerAdminRoute.POST("", controller.CreateResellerAdmin)
 	resellerAdminRoute.PATCH("/:id", controller.UpdateResellerAdmin)
 	resellerAdminRoute.PUT("/:id/logo", controller.UpdateResellerAdminLogo)
+	resellerAdminRoute.PUT("/:id/payment/bank-transfer", controller.UpdateResellerAdminBankTransfer)
 	resellerAdminRoute.PATCH("/:id/status", controller.UpdateResellerAdminStatus)
 	resellerAdminRoute.GET("/:id/customers", controller.ListResellerAdminCustomers)
 	resellerAdminRoute.DELETE("/:id/customers/:customer_id", controller.UnbindResellerAdminCustomer)

@@ -31,6 +31,13 @@ type updateResellerAdminRequest struct {
 	Host string `json:"host"`
 }
 
+type updateResellerAdminBankTransferRequest struct {
+	Enabled       *bool  `json:"enabled"`
+	AccountName   string `json:"account_name"`
+	AccountNumber string `json:"account_number"`
+	BankName      string `json:"bank_name"`
+}
+
 type updateResellerAdminLogoRequest struct {
 	Logo *string `json:"logo"`
 }
@@ -176,6 +183,32 @@ func UpdateResellerAdminLogo(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
 	default:
 		logger.LogError(c.Request.Context(), "UpdateResellerLogo database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func UpdateResellerAdminBankTransfer(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id < 1 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerAdminBodyLimit))
+	var request updateResellerAdminBankTransferRequest
+	if err != nil || common.Unmarshal(body, &request) != nil || request.Enabled == nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	config, err := model.UpdateResellerBankTransferConfig(id, request.Enabled, request.AccountName, request.AccountNumber, request.BankName, false)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, config)
+	case errors.Is(err, model.ErrInvalidResellerBankTransfer):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid bank transfer config")
+	case errors.Is(err, model.ErrResellerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerAdminBankTransfer database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }
