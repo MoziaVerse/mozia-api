@@ -32,10 +32,10 @@ type updateResellerAdminRequest struct {
 }
 
 type updateResellerAdminBankTransferRequest struct {
-	Enabled       *bool  `json:"enabled"`
-	AccountName   string `json:"account_name"`
-	AccountNumber string `json:"account_number"`
-	BankName      string `json:"bank_name"`
+	PaymentConfigEnabled *bool  `json:"payment_config_enabled"`
+	AccountName          string `json:"account_name"`
+	AccountNumber        string `json:"account_number"`
+	BankName             string `json:"bank_name"`
 }
 
 type updateResellerAdminLogoRequest struct {
@@ -195,11 +195,11 @@ func UpdateResellerAdminBankTransfer(c *gin.Context) {
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerAdminBodyLimit))
 	var request updateResellerAdminBankTransferRequest
-	if err != nil || common.Unmarshal(body, &request) != nil || request.Enabled == nil {
+	if err != nil || common.Unmarshal(body, &request) != nil || request.PaymentConfigEnabled == nil {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
-	config, err := model.UpdateResellerBankTransferConfig(id, request.Enabled, request.AccountName, request.AccountNumber, request.BankName, false)
+	config, err := model.UpdateResellerBankTransferConfig(id, request.PaymentConfigEnabled, request.AccountName, request.AccountNumber, request.BankName, false)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, config)

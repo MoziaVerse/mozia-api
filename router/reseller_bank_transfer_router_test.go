@@ -27,7 +27,7 @@ func TestResellerBankTransferContract(t *testing.T) {
 		assert.Equal(t, middleware.ResellerErrorForbidden, response.Error.Code)
 	}
 
-	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/payment/bank-transfer", reseller.Id), `{"enabled":true,"account_name":"","account_number":"","bank_name":""}`, "mozia-mega-test-token", "bank-enable_123", nil)
+	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/payment/bank-transfer", reseller.Id), `{"payment_config_enabled":true,"account_name":"","account_number":"","bank_name":""}`, "mozia-mega-test-token", "bank-enable_123", nil)
 	require.Equal(t, http.StatusOK, recorder.Code)
 
 	recorder = request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/payment-method", `{"subject":"bank-customer"}`, "matrix-reseller-registration-test-token", "bank-pending_123", nil)

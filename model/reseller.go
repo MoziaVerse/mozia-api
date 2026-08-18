@@ -64,14 +64,14 @@ var (
 )
 
 type Reseller struct {
-	Id                  int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name                string `json:"name" gorm:"type:varchar(128);not null"`
-	Logo                string `json:"logo" gorm:"type:text;not null;default:''"`
-	Status              string `json:"status" gorm:"type:varchar(16);not null;index"`
-	BankTransferEnabled bool   `json:"bank_transfer_enabled"`
-	BankAccountName     string `json:"bank_account_name" gorm:"type:varchar(128);not null;default:''"`
-	BankAccountNumber   string `json:"bank_account_number" gorm:"type:varchar(64);not null;default:''"`
-	BankName            string `json:"bank_name" gorm:"type:varchar(255);not null;default:''"`
+	Id                   int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name                 string `json:"name" gorm:"type:varchar(128);not null"`
+	Logo                 string `json:"logo" gorm:"type:text;not null;default:''"`
+	Status               string `json:"status" gorm:"type:varchar(16);not null;index"`
+	PaymentConfigEnabled bool   `json:"payment_config_enabled" gorm:"column:bank_transfer_enabled"`
+	BankAccountName      string `json:"bank_account_name" gorm:"type:varchar(128);not null;default:''"`
+	BankAccountNumber    string `json:"bank_account_number" gorm:"type:varchar(64);not null;default:''"`
+	BankName             string `json:"bank_name" gorm:"type:varchar(255);not null;default:''"`
 }
 
 type ResellerDomain struct {
@@ -143,14 +143,14 @@ type ResellerAdminRecord struct {
 	BalanceDisplayType    string  `json:"balance_display_type" gorm:"-"`
 	BalanceCurrencySymbol string  `json:"balance_currency_symbol" gorm:"-"`
 	MemberCount           int     `json:"member_count"`
-	BankTransferEnabled   bool    `json:"bank_transfer_enabled"`
+	PaymentConfigEnabled  bool    `json:"payment_config_enabled" gorm:"column:bank_transfer_enabled"`
 	BankAccountName       string  `json:"bank_account_name"`
 	BankAccountNumber     string  `json:"bank_account_number"`
 	BankName              string  `json:"bank_name"`
 }
 
 type ResellerBankTransferConfig struct {
-	Enabled       bool   `json:"enabled"`
+	Allowed       bool   `json:"allowed"`
 	Configured    bool   `json:"configured"`
 	AccountName   string `json:"account_name"`
 	AccountNumber string `json:"account_number"`
@@ -922,7 +922,7 @@ func GetResellerBranding(id int) (*ResellerBranding, error) {
 
 func resellerBankTransferConfig(reseller Reseller) *ResellerBankTransferConfig {
 	return &ResellerBankTransferConfig{
-		Enabled:       reseller.BankTransferEnabled,
+		Allowed:       reseller.PaymentConfigEnabled,
 		Configured:    reseller.BankAccountName != "" && reseller.BankAccountNumber != "" && reseller.BankName != "",
 		AccountName:   reseller.BankAccountName,
 		AccountNumber: reseller.BankAccountNumber,
@@ -976,7 +976,7 @@ func ResolveResellerCustomerPaymentMethod(subject string) (*ResellerCustomerPaym
 	if result.Error != nil {
 		return nil, result.Error
 	}
-	if result.RowsAffected == 0 || !reseller.BankTransferEnabled {
+	if result.RowsAffected == 0 || !reseller.PaymentConfigEnabled {
 		return &ResellerCustomerPaymentMethod{Mode: "platform"}, nil
 	}
 	return &ResellerCustomerPaymentMethod{

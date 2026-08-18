@@ -134,8 +134,8 @@ func UpdateResellerManagementBankTransfer(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 		return
 	}
-	if !current.Enabled {
-		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "bank transfer configuration is not enabled")
+	if !current.Allowed {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "custom payment configuration is not enabled")
 		return
 	}
 	config, err := model.UpdateResellerBankTransferConfig(resellerContext.ResellerId, nil, request.AccountName, request.AccountNumber, request.BankName, true)
