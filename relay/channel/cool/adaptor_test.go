@@ -114,9 +114,7 @@ func TestConvertPayloadContentFramesOverrideLegacyFiles(t *testing.T) {
 	require.Len(t, r.Files, 2)
 	assert.Equal(t, fileRef{URL: "https://example.com/start.png", Type: "image", Name: "start"}, r.Files[0])
 	assert.Equal(t, fileRef{URL: "https://example.com/end.png", Type: "image", Name: "end"}, r.Files[1])
-	assert.Contains(t, r.Prompt, "@start is the first frame.")
-	assert.Contains(t, r.Prompt, "@end is the last frame.")
-	assert.Contains(t, r.Prompt, "make it cinematic")
+	assert.Equal(t, "make it cinematic", r.Prompt)
 }
 
 func TestConvertPayloadContentReferenceMediaTypes(t *testing.T) {

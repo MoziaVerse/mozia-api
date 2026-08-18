@@ -247,7 +247,7 @@ func (a *TaskAdaptor) convertToRequestPayload(c *gin.Context, req *relaycommon.T
 
 	if len(req.Content) > 0 {
 		r.Files = buildContentFiles(content)
-		r.Prompt = applyFramePromptBindings(firstNonEmpty(content.Prompt, r.Prompt), content)
+		r.Prompt = firstNonEmpty(content.Prompt, r.Prompt)
 	} else if prompt := strings.TrimSpace(req.Prompt); prompt != "" {
 		r.Prompt = prompt
 	}
@@ -324,30 +324,6 @@ func appendContentRefs(files []fileRef, urls []string, fileType string) []fileRe
 		files = append(files, fileRef{URL: u, Type: fileType})
 	}
 	return files
-}
-
-func applyFramePromptBindings(prompt string, summary relaycommon.VideoContentSummary) string {
-	prompt = strings.TrimSpace(prompt)
-	if summary.FirstFrameURL == "" && summary.LastFrameURL == "" {
-		return prompt
-	}
-
-	bindings := make([]string, 0, 2)
-	lowerPrompt := strings.ToLower(prompt)
-	if summary.FirstFrameURL != "" && !strings.Contains(lowerPrompt, "@start") {
-		bindings = append(bindings, "@start is the first frame.")
-	}
-	if summary.LastFrameURL != "" && !strings.Contains(lowerPrompt, "@end") {
-		bindings = append(bindings, "@end is the last frame.")
-	}
-	if len(bindings) == 0 {
-		return prompt
-	}
-	prefix := strings.Join(bindings, " ")
-	if prompt == "" {
-		return prefix
-	}
-	return prefix + " " + prompt
 }
 
 func resolveCoolRatio(req *relaycommon.TaskSubmitReq) string {
