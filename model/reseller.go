@@ -959,9 +959,6 @@ func UpdateResellerBankTransferConfig(id int, enabled *bool, accountName string,
 	if result.Error != nil {
 		return nil, result.Error
 	}
-	if result.RowsAffected == 0 {
-		return GetResellerBankTransferConfig(id)
-	}
 	return GetResellerBankTransferConfig(id)
 }
 
