@@ -191,6 +191,38 @@ func TestConfiguredModelMappingControlsVideosModel(t *testing.T) {
 	}
 }
 
+func TestSD20ModelCenterContract(t *testing.T) {
+	adaptor := NewModelCenterTaskAdaptor()
+	_, c, info := prepareRequestWithoutValidation(t, `{"model":"sd_2.0_discount","prompt":"cinematic shot","duration":5,"size":"16:9","resolution":"480p","images":["https://example.com/ref.png"]}`)
+	info.ChannelMeta.ChannelBaseUrl = "https://zcbservice.aizfw.cn/kyyReactApiServer"
+	adaptor.Init(info)
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	url, err := adaptor.BuildRequestURL(info)
+	require.NoError(t, err)
+	assert.Equal(t, "https://zcbservice.aizfw.cn/kyyReactApiServer/v2/model-center/tasks", url)
+
+	body := buildPayload(t, adaptor, c, info)
+	assert.Equal(t, "sd_2.0_discount", body["model"])
+	assert.Equal(t, "16:9", body["aspect_ratio"])
+	assert.Equal(t, []any{"https://example.com/ref.png"}, body["reference_images"])
+	assert.Nil(t, body["referenceImages"])
+}
+
+func TestModelCenterAcceptsConfiguredMiniMaxH3Model(t *testing.T) {
+	adaptor := NewModelCenterTaskAdaptor()
+	_, c, info := prepareRequestWithoutValidation(t, `{"model":"MiniMax-H3","prompt":"cinematic shot","duration":5,"resolution":"2k","aspect_ratio":"16:9","reference_images":["https://example.com/ref.png"],"reference_audios":["https://example.com/ref.mp3"]}`)
+	c.Set("model_mapping", `{"MiniMax-H3":"minimax-h3"}`)
+	info.ChannelMeta.ChannelBaseUrl = "https://zcbservice.aizfw.cn/kyyReactApiServer"
+	adaptor.Init(info)
+
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	body := buildPayload(t, adaptor, c, info)
+	assert.Equal(t, "minimax-h3", body["model"])
+	assert.Equal(t, "2k", body["resolution"])
+	assert.Equal(t, []any{"https://example.com/ref.mp3"}, body["reference_audios"])
+}
+
 func TestValidateRejectsUnsupportedMappedModel(t *testing.T) {
 	adaptor, c, info := prepareRequestWithoutValidation(t, `{
 		"model":"public-special",

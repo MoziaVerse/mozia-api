@@ -31,6 +31,8 @@ func GetMoziaTaskAdaptor(channelType int) channel.TaskAdaptor {
 	switch channelType {
 	case constant.ChannelTypeMoziaGlobalaiopc:
 		return &taskglobalaiopc.TaskAdaptor{}
+	case constant.ChannelTypeMoziaGlobalaiopcModelCenter:
+		return taskglobalaiopc.NewModelCenterTaskAdaptor()
 	case constant.ChannelTypeMoziaCool:
 		return &cool.TaskAdaptor{}
 	case constant.ChannelTypeMoziaSeedanceGen:

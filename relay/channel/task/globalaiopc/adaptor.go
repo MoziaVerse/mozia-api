@@ -26,22 +26,27 @@ import (
 )
 
 const (
-	videosSubmitPath = "/videos/videos"
-	resultPathPrefix = "/result/"
+	videosSubmitPath      = "/videos/videos"
+	resultPathPrefix      = "/result/"
+	modelCenterSubmitPath = "/v2/model-center/tasks"
+	modelCenterResultPath = "/v2/model-center/tasks/"
 )
 
 type videosModelSpec struct {
-	Name               string
-	MaxPromptChars     int
-	MaxImages          int
-	MaxVideos          int
-	MaxAudios          int
-	MinDuration        int
-	MaxDuration        int
-	ExactDurations     []int
-	AllowedRatios      []string
-	AudioRequiresImage bool
-	SupportsAutoFace   bool
+	Name                   string
+	MaxPromptChars         int
+	MaxImages              int
+	MaxVideos              int
+	MaxAudios              int
+	MinDuration            int
+	MaxDuration            int
+	ExactDurations         []int
+	AllowedResolutions     []string
+	AllowedRatios          []string
+	AudioRequiresImage     bool
+	AudioRequiresReference bool
+	SupportsAutoFace       bool
+	Generic                bool
 }
 
 type requestSummary struct {
@@ -66,8 +71,11 @@ type requestSummary struct {
 // referenceImages, referenceVideos, and referenceAudios fields.
 type TaskAdaptor struct {
 	taskcommon.BaseBilling
-	baseURL string
+	baseURL     string
+	modelCenter bool
 }
+
+func NewModelCenterTaskAdaptor() *TaskAdaptor { return &TaskAdaptor{modelCenter: true} }
 
 func (a *TaskAdaptor) Init(info *relaycommon.RelayInfo) {
 	if info != nil && info.ChannelMeta != nil {
@@ -88,7 +96,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 	}
-	modelName, spec, err := resolveModelSpec(c, info, payload)
+	modelName, spec, err := a.resolveModelSpec(c, info, payload)
 	if err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_model", http.StatusBadRequest)
 	}
@@ -118,6 +126,13 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 }
 
 func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) {
+	if a.modelCenter {
+		baseURL := strings.TrimRight(strings.TrimSpace(a.baseURL), "/")
+		if baseURL == "" {
+			return "", fmt.Errorf("channel base URL is required")
+		}
+		return baseURL + modelCenterSubmitPath, nil
+	}
 	baseURL, err := apiBaseURL(a.baseURL)
 	if err != nil {
 		return "", err
@@ -147,13 +162,18 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
-	modelName, spec, err := resolveModelSpec(c, info, payload)
+	modelName, spec, err := a.resolveModelSpec(c, info, payload)
 	if err != nil {
 		return nil, err
 	}
 	setResolvedModel(info, modelName)
 
-	normalized, err := buildProviderPayload(spec, payload, modelName)
+	var normalized map[string]any
+	if a.modelCenter {
+		normalized, err = buildModelCenterPayload(spec, payload, modelName)
+	} else {
+		normalized, err = buildProviderPayload(spec, payload, modelName)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -220,11 +240,18 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, body map[string]any, proxy 
 	if taskID == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
-	baseURL, err := apiBaseURL(baseURL)
-	if err != nil {
-		return nil, err
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	pathPrefix := resultPathPrefix
+	var err error
+	if a.modelCenter {
+		pathPrefix = modelCenterResultPath
+	} else {
+		base, err = apiBaseURL(baseURL)
+		if err != nil {
+			return nil, err
+		}
 	}
-	req, err := http.NewRequest(http.MethodGet, baseURL+resultPathPrefix+url.PathEscape(taskID), nil)
+	req, err := http.NewRequest(http.MethodGet, base+pathPrefix+url.PathEscape(taskID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +304,9 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
+	if a.modelCenter {
+		return []string{}
+	}
 	return globalaiopcchannel.ModelList
 }
 
@@ -284,7 +314,7 @@ func (a *TaskAdaptor) GetChannelName() string {
 	return globalaiopcchannel.ChannelName
 }
 
-func resolveModelSpec(c *gin.Context, info *relaycommon.RelayInfo, payload map[string]any) (string, videosModelSpec, error) {
+func (a *TaskAdaptor) resolveModelSpec(c *gin.Context, info *relaycommon.RelayInfo, payload map[string]any) (string, videosModelSpec, error) {
 	requestModel := ""
 	if payload != nil {
 		requestModel = stringField(payload, "model")
@@ -297,25 +327,33 @@ func resolveModelSpec(c *gin.Context, info *relaycommon.RelayInfo, payload map[s
 	if err != nil {
 		return "", videosModelSpec{}, err
 	}
-	spec, err := videosModelSpecification(finalModel)
+	spec, err := videosModelSpecification(finalModel, a.modelCenter)
 	if err != nil {
 		return "", videosModelSpec{}, err
 	}
 	return finalModel, spec, nil
 }
 
-func videosModelSpecification(modelName string) (videosModelSpec, error) {
+func videosModelSpecification(modelName string, generic bool) (videosModelSpec, error) {
+	if generic {
+		return videosModelSpec{Name: modelName, Generic: true}, nil
+	}
 	spec := videosModelSpec{
-		Name:           modelName,
-		MaxPromptChars: 5000,
-		MaxImages:      9,
-		MaxVideos:      3,
-		MaxAudios:      3,
-		MinDuration:    4,
-		MaxDuration:    15,
-		AllowedRatios:  []string{"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"},
+		Name:               modelName,
+		MaxPromptChars:     5000,
+		MaxImages:          9,
+		MaxVideos:          3,
+		MaxAudios:          3,
+		MinDuration:        4,
+		MaxDuration:        15,
+		AllowedResolutions: []string{"720p"},
+		AllowedRatios:      []string{"21:9", "16:9", "4:3", "1:1", "3:4", "9:16"},
 	}
 	switch strings.ToLower(strings.TrimSpace(modelName)) {
+	case "sd_2.0_discount":
+		spec.AllowedResolutions = []string{"480p", "720p", "1080p"}
+		spec.AllowedRatios = []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"}
+		spec.AudioRequiresReference = true
 	case "videos":
 		spec.MaxPromptChars = 0
 		spec.SupportsAutoFace = true
@@ -392,7 +430,7 @@ func validatePayload(spec videosModelSpec, payload map[string]any) (requestSumma
 	}
 	firstImage := firstFrameValue(fields)
 	lastImage := lastFrameValue(fields)
-	images, err := firstStringSlice(fields, "referenceImages", "image_urls", "images")
+	images, err := firstStringSlice(fields, "reference_images", "referenceImages", "image_urls", "images")
 	if err != nil {
 		return requestSummary{}, err
 	}
@@ -401,11 +439,11 @@ func validatePayload(spec videosModelSpec, payload map[string]any) (requestSumma
 			images = []string{image}
 		}
 	}
-	videos, err := firstStringSlice(fields, "referenceVideos", "video_urls", "videos")
+	videos, err := firstStringSlice(fields, "reference_videos", "referenceVideos", "video_urls", "videos")
 	if err != nil {
 		return requestSummary{}, err
 	}
-	audios, err := firstStringSlice(fields, "referenceAudios", "audio_urls", "audios")
+	audios, err := firstStringSlice(fields, "reference_audios", "referenceAudios", "audio_urls", "audios")
 	if err != nil {
 		return requestSummary{}, err
 	}
@@ -497,6 +535,12 @@ func validateVideosSummary(spec videosModelSpec, fields map[string]any, summary 
 	if summary.Prompt == "" {
 		return fmt.Errorf("prompt is required")
 	}
+	if spec.Generic {
+		if !summary.HasDuration || summary.Duration <= 0 {
+			return fmt.Errorf("duration is required and must be a positive integer number of seconds")
+		}
+		return nil
+	}
 	if spec.MaxPromptChars > 0 && utf8.RuneCountInString(summary.Prompt) > spec.MaxPromptChars {
 		return fmt.Errorf("prompt for model %s must not exceed %d characters", spec.Name, spec.MaxPromptChars)
 	}
@@ -523,6 +567,9 @@ func validateVideosSummary(spec videosModelSpec, fields map[string]any, summary 
 	}
 	if spec.AudioRequiresImage && len(summary.Audios) > 0 && len(summary.Images) == 0 {
 		return fmt.Errorf("model %s requires referenceImages when referenceAudios is provided", spec.Name)
+	}
+	if spec.AudioRequiresReference && len(summary.Audios) > 0 && len(summary.Images) == 0 && len(summary.Videos) == 0 {
+		return fmt.Errorf("model %s requires a reference image or video when referenceAudios is provided", spec.Name)
 	}
 	if _, exists, err := autoFaceValue(fields); err != nil {
 		return err
@@ -575,6 +622,46 @@ func buildProviderPayload(spec videosModelSpec, payload map[string]any, modelNam
 		normalized["autoFace"] = autoFace
 	}
 	return normalized, nil
+}
+
+func buildModelCenterPayload(spec videosModelSpec, payload map[string]any, modelName string) (map[string]any, error) {
+	fields := mergedRequestFields(payload)
+	summary, err := validatePayload(spec, payload)
+	if err != nil {
+		return nil, err
+	}
+	resolution, ratio, err := requestResolutionAndRatio(fields)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]any{"model": modelName, "prompt": summary.Prompt, "duration": summary.Duration}
+	if len(summary.Images) > 0 {
+		result["reference_images"] = summary.Images
+	}
+	if len(summary.Videos) > 0 {
+		result["reference_videos"] = summary.Videos
+	}
+	if len(summary.Audios) > 0 {
+		result["reference_audios"] = summary.Audios
+	}
+	if summary.FirstImage != "" {
+		result["first_image"] = []string{summary.FirstImage}
+	}
+	if summary.LastImage != "" {
+		result["last_image"] = []string{summary.LastImage}
+	}
+	if ratio != "" {
+		result["aspect_ratio"] = ratio
+	}
+	if resolution != "" {
+		result["resolution"] = resolution
+	}
+	for _, key := range []string{"seed", "generate_audio", "tools", "watermark"} {
+		if value, ok := fields[key]; ok {
+			result[key] = value
+		}
+	}
+	return result, nil
 }
 
 func autoFaceValue(fields map[string]any) (bool, bool, error) {
@@ -631,8 +718,17 @@ func validateResolutionAndRatio(spec videosModelSpec, fields map[string]any) err
 	if err != nil {
 		return err
 	}
-	if resolution != "" && resolution != "720p" {
-		return fmt.Errorf("model %s only supports 720p resolution", spec.Name)
+	if resolution != "" {
+		validResolution := false
+		for _, allowed := range spec.AllowedResolutions {
+			if resolution == allowed {
+				validResolution = true
+				break
+			}
+		}
+		if !validResolution {
+			return fmt.Errorf("model %s does not support resolution %q", spec.Name, resolution)
+		}
 	}
 	if ratio != "" {
 		for _, allowed := range spec.AllowedRatios {
@@ -925,7 +1021,7 @@ func decodeResponse(body []byte) (map[string]any, error) {
 }
 
 func responseVideoURL(root map[string]any) string {
-	return firstString(stringField(root, "video_url"), stringField(root, "url"))
+	return firstString(stringField(root, "video_url"), stringField(root, "result_url"), stringField(root, "url"))
 }
 
 func responseFailureMessage(root map[string]any) string {
