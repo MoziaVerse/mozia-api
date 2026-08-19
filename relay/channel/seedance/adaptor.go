@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -103,7 +106,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 				http.StatusBadRequest,
 			)
 		}
-		if err := validateMiniMaxH3Images(modelName, &req, summary, fields); err != nil {
+		if err := validateMiniMaxH3Images(modelName, &req, summary, fields, uploadedFileCount(c)); err != nil {
 			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
 		if _, err := resolveMiniMaxH3Size(&req, fields); err != nil {
@@ -129,7 +132,18 @@ func (a *TaskAdaptor) BuildRequestURL(_ *relaycommon.RelayInfo) (string, error) 
 func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info *relaycommon.RelayInfo) error {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+info.ApiKey)
-	req.Header.Set("Content-Type", "application/json")
+	// BuildRequestBody runs first and switches to multipart when the caller
+	// uploaded files; the boundary it chose must be advertised here verbatim,
+	// otherwise the upstream cannot split the parts.
+	if boundary, ok := c.Get(multipartBoundaryKey); ok {
+		if s, isString := boundary.(string); isString && s != "" {
+			req.Header.Set("Content-Type", "multipart/form-data; boundary="+s)
+		} else {
+			req.Header.Set("Content-Type", "application/json")
+		}
+	} else {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if idempotencyKey == "" {
 		idempotencyKey = info.PublicTaskID
@@ -222,11 +236,160 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	payload["duration"] = duration
 	payload["async"] = true
 
+	if hasUploadedFiles(c) {
+		return buildMultipartBody(c, payload)
+	}
+
 	data, err := common.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	return bytes.NewReader(data), nil
+}
+
+// multipartBoundaryKey carries the boundary from BuildRequestBody to
+// BuildRequestHeader. The two run in that order (relay_task -> DoTaskApiRequest),
+// and the header must advertise the exact boundary used to encode the body.
+const multipartBoundaryKey = "seedance_multipart_boundary"
+
+// hasUploadedFiles reports whether the inbound request carried file parts.
+//
+// ValidateBasicTaskRequest already called c.MultipartForm() for multipart
+// requests, so the parsed form (including its file parts) is available here and
+// stays alive until net/http tears the request down. JSON requests leave
+// MultipartForm nil, so this is a no-op for them.
+func hasUploadedFiles(c *gin.Context) bool {
+	return uploadedFileCount(c) > 0
+}
+
+// uploadedFileCount counts the file parts carried by the inbound request.
+func uploadedFileCount(c *gin.Context) int {
+	form := c.Request.MultipartForm
+	if form == nil {
+		return 0
+	}
+	total := 0
+	for _, headers := range form.File {
+		total += len(headers)
+	}
+	return total
+}
+
+// buildMultipartBody re-encodes the normalized payload as multipart/form-data
+// and copies the caller's file parts through untouched.
+//
+// Why this exists: upstream providers that accept binary reference assets (the
+// MiniMax H3 backend takes either JSON+URL or multipart) are unreachable with
+// files today, because the gateway decodes every request body into a Go struct
+// and re-marshals it as JSON — the file parts are dropped on the floor. Callers
+// are therefore forced to publish their assets to a public HTTPS URL first,
+// which not every caller can do.
+//
+// The normalized scalars still win over anything the client sent: they are
+// written from `payload`, which BuildRequestBody has already sanitized (model,
+// prompt, duration and async are recomputed, never taken from user input).
+// Only the opaque file parts are passed through verbatim.
+func buildMultipartBody(c *gin.Context, payload map[string]any) (io.Reader, error) {
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	keys := make([]string, 0, len(payload))
+	for key := range payload {
+		keys = append(keys, key)
+	}
+	// Deterministic field order keeps request bodies reproducible, which makes
+	// upstream logs and idempotency comparisons stable.
+	sort.Strings(keys)
+	for _, key := range keys {
+		value, err := formFieldValue(payload[key])
+		if err != nil {
+			return nil, fmt.Errorf("encode field %q: %w", key, err)
+		}
+		if err := writer.WriteField(key, value); err != nil {
+			return nil, err
+		}
+	}
+
+	form := c.Request.MultipartForm
+	fileNames := make([]string, 0, len(form.File))
+	for name := range form.File {
+		fileNames = append(fileNames, name)
+	}
+	sort.Strings(fileNames)
+	for _, name := range fileNames {
+		for _, header := range form.File[name] {
+			if err := copyFilePart(writer, name, header); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+	c.Set(multipartBoundaryKey, writer.Boundary())
+	return bytes.NewReader(buf.Bytes()), nil
+}
+
+// formFieldValue renders a normalized payload value as a form field.
+//
+// Scalars are written bare so upstreams that expect plain form semantics (e.g.
+// duration=5) read them correctly; composites fall back to JSON, which is the
+// only lossless option in a form encoding.
+func formFieldValue(value any) (string, error) {
+	switch v := value.(type) {
+	case nil:
+		return "", nil
+	case string:
+		return v, nil
+	case bool:
+		return strconv.FormatBool(v), nil
+	case int:
+		return strconv.Itoa(v), nil
+	case int64:
+		return strconv.FormatInt(v, 10), nil
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), nil
+	default:
+		encoded, err := common.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return string(encoded), nil
+	}
+}
+
+// copyFilePart streams one uploaded part into the outbound body, preserving the
+// field name, filename and declared content type. Streaming rather than reading
+// into memory matters: reference image sets can reach 9 files.
+func copyFilePart(writer *multipart.Writer, field string, header *multipart.FileHeader) error {
+	src, err := header.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	partHeader := make(textproto.MIMEHeader)
+	partHeader.Set("Content-Disposition", fmt.Sprintf(
+		`form-data; name="%s"; filename="%s"`,
+		escapeFormValue(field), escapeFormValue(header.Filename),
+	))
+	if contentType := header.Header.Get("Content-Type"); contentType != "" {
+		partHeader.Set("Content-Type", contentType)
+	}
+	part, err := writer.CreatePart(partHeader)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(part, src)
+	return err
+}
+
+// escapeFormValue mirrors mime/multipart's own quoting of name and filename.
+var formValueEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"", "\r", "", "\n", "")
+
+func escapeFormValue(v string) string {
+	return formValueEscaper.Replace(v)
 }
 
 func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error) {
@@ -512,7 +675,7 @@ func isExternalMiniMaxH3Model(modelName string) bool {
 	return strings.EqualFold(strings.TrimSpace(modelName), "MiniMax-H3")
 }
 
-func validateMiniMaxH3Images(modelName string, req *relaycommon.TaskSubmitReq, summary relaycommon.VideoContentSummary, fields map[string]any) error {
+func validateMiniMaxH3Images(modelName string, req *relaycommon.TaskSubmitReq, summary relaycommon.VideoContentSummary, fields map[string]any, uploadedImageCount int) error {
 	imageCount := len(summary.LegacyImages())
 	if imageCount == 0 && req != nil {
 		switch {
@@ -530,6 +693,11 @@ func validateMiniMaxH3Images(modelName string, req *relaycommon.TaskSubmitReq, s
 			imageCount = len(values)
 		}
 	}
+	// Uploaded binaries count as reference images too. Without this the request
+	// is rejected here — before BuildRequestBody ever gets a chance to forward
+	// the files — with a message that reads as "you sent no image" even though
+	// the caller did attach one.
+	imageCount += uploadedImageCount
 	switch strings.ToLower(strings.TrimSpace(modelName)) {
 	case "minimax/minimax-h3-ref2va", "minimax-h3-ref2va-int8":
 		if imageCount == 0 {
