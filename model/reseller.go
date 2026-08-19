@@ -989,11 +989,15 @@ func ResolveResellerCustomerPaymentMethod(subject string) (*ResellerCustomerPaym
 	if result.Error != nil {
 		return nil, result.Error
 	}
-	if result.RowsAffected == 0 || !reseller.PaymentConfigEnabled {
+	if result.RowsAffected == 0 {
+		return &ResellerCustomerPaymentMethod{Mode: "platform"}, nil
+	}
+	bankTransfer := resellerBankTransferConfig(reseller)
+	if !bankTransfer.Allowed && !bankTransfer.Configured {
 		return &ResellerCustomerPaymentMethod{Mode: "platform"}, nil
 	}
 	return &ResellerCustomerPaymentMethod{
-		Mode: "bank_transfer", ResellerName: reseller.Name, BankTransfer: resellerBankTransferConfig(reseller),
+		Mode: "bank_transfer", ResellerName: reseller.Name, BankTransfer: bankTransfer,
 	}, nil
 }
 
