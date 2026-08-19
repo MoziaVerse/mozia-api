@@ -55,6 +55,7 @@ import {
   ModelPricingSheet,
   type ModelRatioData,
 } from './model-pricing-sheet'
+import type { PricingMode } from './model-pricing-core'
 import {
   buildModelSnapshots,
   getSnapshotSignature,
@@ -73,6 +74,7 @@ type ModelRatioVisualEditorProps = {
   savedAudioCompletionRatio: string
   savedBillingMode: string
   savedBillingExpr: string
+  savedTaskBilling: string
   modelPrice: string
   modelRatio: string
   cacheRatio: string
@@ -83,6 +85,7 @@ type ModelRatioVisualEditorProps = {
   audioCompletionRatio: string
   billingMode: string
   billingExpr: string
+  taskBilling: string
   onChange: (field: string, value: string) => void
   onSave: () => void | Promise<void>
   isSaving: boolean
@@ -109,6 +112,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioCompletionRatio,
     savedBillingMode,
     savedBillingExpr,
+    savedTaskBilling,
     modelPrice,
     modelRatio,
     cacheRatio,
@@ -119,6 +123,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     audioCompletionRatio,
     billingMode,
     billingExpr,
+    taskBilling,
     onChange,
     onSave,
     isSaving,
@@ -190,6 +195,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioCompletionRatio: savedAudioCompletionRatio,
       billingMode: savedBillingMode,
       billingExpr: savedBillingExpr,
+      taskBilling: savedTaskBilling,
     })
     const draftRows = buildModelSnapshots({
       modelPrice,
@@ -202,6 +208,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioCompletionRatio,
       billingMode,
       billingExpr,
+      taskBilling,
     })
 
     const savedByName = new Map(savedRows.map((row) => [row.name, row]))
@@ -238,6 +245,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioCompletionRatio,
     savedBillingMode,
     savedBillingExpr,
+    savedTaskBilling,
     modelPrice,
     modelRatio,
     cacheRatio,
@@ -248,6 +256,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     audioCompletionRatio,
     billingMode,
     billingExpr,
+    taskBilling,
   ])
 
   const modeCounts = useMemo(
@@ -256,7 +265,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
         (acc, model) => {
           const mode =
             model.billingMode === 'per-request' ||
-            model.billingMode === 'tiered_expr'
+            model.billingMode === 'tiered_expr' ||
+            model.billingMode === 'task-parameter'
               ? model.billingMode
               : 'per-token'
           acc[mode] += 1
@@ -266,7 +276,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
           'per-token': 0,
           'per-request': 0,
           tiered_expr: 0,
-        } as Record<'per-token' | 'per-request' | 'tiered_expr', number>
+          'task-parameter': 0,
+        } as Record<PricingMode, number>
       ),
     [models]
   )
@@ -285,13 +296,15 @@ const ModelRatioVisualEditorComponent = forwardRef<
         audioRatio: editableModel.audioRatio,
         audioCompletionRatio: editableModel.audioCompletionRatio,
         billingMode:
-          editableModel.billingMode === 'tiered_expr'
-            ? 'tiered_expr'
+          editableModel.billingMode === 'tiered_expr' ||
+            editableModel.billingMode === 'task-parameter'
+            ? editableModel.billingMode
             : editableModel.price && editableModel.price !== ''
               ? 'per-request'
               : 'per-token',
         billingExpr: editableModel.billingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
+        taskBilling: editableModel.taskBilling,
       })
       setEditorOpen(true)
       if (isMobile) setSheetOpen(true)
@@ -362,6 +375,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         billingExpr,
         { fallback: {}, silent: true }
       )
+      const taskBillingMap = safeJsonParse<Record<string, unknown>>(
+        taskBilling,
+        { fallback: {}, silent: true }
+      )
 
       delete priceMap[name]
       delete ratioMap[name]
@@ -373,6 +390,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       delete audioCompletionMap[name]
       delete billingModeMap[name]
       delete billingExprMap[name]
+      delete taskBillingMap[name]
 
       onChange('ModelPrice', JSON.stringify(priceMap, null, 2))
       onChange('ModelRatio', JSON.stringify(ratioMap, null, 2))
@@ -393,6 +411,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         'billing_setting.billing_expr',
         JSON.stringify(billingExprMap, null, 2)
       )
+      onChange(
+        'billing_setting.task_billing',
+        JSON.stringify(taskBillingMap, null, 2)
+      )
 
       if (editData?.name === name) {
         setEditData(null)
@@ -411,6 +433,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioCompletionRatio,
       billingMode,
       billingExpr,
+      taskBilling,
       onChange,
       editData,
     ]
@@ -491,6 +514,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         billingExpr,
         { fallback: {}, silent: true }
       )
+      const taskBillingMap = safeJsonParse<Record<string, unknown>>(
+        taskBilling,
+        { fallback: {}, silent: true }
+      )
 
       const setIfPresent = (
         target: Record<string, number>,
@@ -513,8 +540,12 @@ const ModelRatioVisualEditorComponent = forwardRef<
         delete audioCompletionMap[name]
         delete billingModeMap[name]
         delete billingExprMap[name]
+        delete taskBillingMap[name]
 
-        if (data.billingMode === 'tiered_expr') {
+        if (data.billingMode === 'task-parameter') {
+          taskBillingMap[name] = JSON.parse(data.taskBilling || '{}')
+          setIfPresent(priceMap, name, data.price)
+        } else if (data.billingMode === 'tiered_expr') {
           const combined = combineBillingExpr(
             data.billingExpr || '',
             data.requestRuleExpr || ''
@@ -567,6 +598,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         'billing_setting.billing_expr',
         JSON.stringify(billingExprMap, null, 2)
       )
+      onChange(
+        'billing_setting.task_billing',
+        JSON.stringify(taskBillingMap, null, 2)
+      )
     },
     [
       modelPrice,
@@ -579,6 +614,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioCompletionRatio,
       billingMode,
       billingExpr,
+      taskBilling,
       onChange,
     ]
   )
@@ -651,6 +687,11 @@ const ModelRatioVisualEditorComponent = forwardRef<
                     label: 'Expression',
                     value: 'tiered_expr',
                     count: modeCounts.tiered_expr,
+                  },
+                  {
+                    label: 'Parameter',
+                    value: 'task-parameter',
+                    count: modeCounts['task-parameter'],
                   },
                 ],
               },
@@ -788,6 +829,7 @@ export const ModelRatioVisualEditor = memo(
       prevProps.audioCompletionRatio === nextProps.audioCompletionRatio &&
       prevProps.billingMode === nextProps.billingMode &&
       prevProps.billingExpr === nextProps.billingExpr &&
+      prevProps.taskBilling === nextProps.taskBilling &&
       prevProps.onChange === nextProps.onChange &&
       prevProps.onSave === nextProps.onSave &&
       prevProps.isSaving === nextProps.isSaving

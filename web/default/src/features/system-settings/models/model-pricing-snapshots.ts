@@ -31,6 +31,7 @@ export type ModelPricingSnapshotInput = {
   audioCompletionRatio: string
   billingMode: string
   billingExpr: string
+  taskBilling: string
 }
 
 export type ModelPricingSnapshot = {
@@ -46,6 +47,7 @@ export type ModelPricingSnapshot = {
   billingMode?: string
   billingExpr?: string
   requestRuleExpr?: string
+  taskBilling?: string
   hasConflict: boolean
 }
 
@@ -74,6 +76,7 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
 }
 
 export const getModeLabel = (mode?: string) => {
+  if (mode === 'task-parameter') return 'Parameter'
   if (mode === 'per-request') return 'Per-request'
   if (mode === 'tiered_expr') return 'Expression'
   return 'Per-token'
@@ -82,6 +85,7 @@ export const getModeLabel = (mode?: string) => {
 export const getModeVariant = (
   mode?: string
 ): 'warning' | 'info' | 'success' => {
+  if (mode === 'task-parameter') return 'warning'
   if (mode === 'per-request') return 'warning'
   if (mode === 'tiered_expr') return 'info'
   return 'success'
@@ -107,6 +111,11 @@ export const getPriceSummary = (
   }
   if (row.billingMode === 'per-request') {
     return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
+  }
+  if (row.billingMode === 'task-parameter') {
+    return row.price
+      ? `$${row.price} / ${t('parameter')}`
+      : t('Unset price')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -138,6 +147,9 @@ export const getPriceDetail = (
   if (row.billingMode === 'per-request') {
     return t('Fixed request price')
   }
+  if (row.billingMode === 'task-parameter') {
+    return t('Task parameter billing')
+  }
 
   const inputPrice = ratioToPrice(row.ratio)
   if (!inputPrice) return t('No base input price')
@@ -167,6 +179,7 @@ export const buildModelSnapshots = ({
   audioCompletionRatio,
   billingMode,
   billingExpr,
+  taskBilling,
 }: ModelPricingSnapshotInput): ModelPricingSnapshot[] => {
   const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
     fallback: {},
@@ -208,6 +221,10 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'billing expression',
   })
+  const taskBillingMap = safeJsonParse<Record<string, unknown>>(taskBilling, {
+    fallback: {},
+    context: 'task parameter billing',
+  })
 
   const modelNames = new Set([
     ...Object.keys(priceMap),
@@ -220,6 +237,7 @@ export const buildModelSnapshots = ({
     ...Object.keys(audioCompletionMap),
     ...Object.keys(billingModeMap),
     ...Object.keys(billingExprMap),
+    ...Object.keys(taskBillingMap),
   ])
 
   return Array.from(modelNames).map((name) => {
@@ -233,6 +251,23 @@ export const buildModelSnapshots = ({
     const audioCompletion = audioCompletionMap[name]?.toString() || ''
 
     const modeForModel = billingModeMap[name]
+    const taskBillingRule = taskBillingMap[name]
+    if (taskBillingRule) {
+      return {
+        name,
+        billingMode: 'task-parameter',
+        taskBilling: JSON.stringify(taskBillingRule, null, 2),
+        price,
+        ratio,
+        cacheRatio: cache,
+        createCacheRatio: createCache,
+        completionRatio: completion,
+        imageRatio: image,
+        audioRatio: audio,
+        audioCompletionRatio: audioCompletion,
+        hasConflict: false,
+      }
+    }
     if (modeForModel === 'tiered_expr') {
       const fullExpr = billingExprMap[name] || ''
       const { billingExpr: pureExpr, requestRuleExpr } =
@@ -292,5 +327,6 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     billingMode: snapshot.billingMode || 'per-token',
     billingExpr: snapshot.billingExpr || '',
     requestRuleExpr: snapshot.requestRuleExpr || '',
+    taskBilling: snapshot.taskBilling || '',
   })
 }
