@@ -34,6 +34,10 @@ type resellerCustomerOverseasModelAccessRequest struct {
 	Allowed *bool `json:"allowed"`
 }
 
+type resellerCustomerPaymentPreferenceRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
 type resellerLogoRequest struct {
 	Logo *string `json:"logo"`
 }
@@ -358,6 +362,45 @@ func UpdateResellerManagementCustomerOverseasModelAccess(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller customer user unavailable")
 	default:
 		logger.LogError(c.Request.Context(), "UpdateResellerCustomerOverseasModelAccess database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func UpdateResellerManagementCustomerPaymentPreference(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if !resellerManagementWriteAllowed(resellerContext.Role) {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
+		return
+	}
+	customerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerCustomerPaymentPreferenceRequest
+	var fields map[string]json.RawMessage
+	requestErr := common.Unmarshal(body, &request)
+	fieldsErr := common.Unmarshal(body, &fields)
+	_, hasEnabled := fields["enabled"]
+	if requestErr != nil || fieldsErr != nil || request.Enabled == nil || len(fields) != 1 || !hasEnabled {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+
+	record, err := model.UpdateResellerCustomerPaymentPreference(resellerContext.ResellerId, customerId, *request.Enabled, resellerContext.Role == model.ResellerRoleOwner)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrResellerCustomerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerCustomerPaymentPreference database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }
