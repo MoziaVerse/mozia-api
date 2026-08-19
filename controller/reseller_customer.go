@@ -30,16 +30,20 @@ type resellerCustomerRemarkRequest struct {
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
-type resellerCustomerOverseasModelAccessRequest struct {
-	Allowed *bool `json:"allowed"`
-}
-
-type resellerCustomerPaymentPreferenceRequest struct {
-	Enabled *bool `json:"enabled"`
-}
-
 type resellerLogoRequest struct {
 	Logo *string `json:"logo"`
+}
+
+func resellerBooleanField(body []byte, field string) (bool, bool) {
+	var fields map[string]json.RawMessage
+	if common.Unmarshal(body, &fields) != nil || len(fields) != 1 {
+		return false, false
+	}
+	var value *bool
+	if common.Unmarshal(fields[field], &value) != nil || value == nil {
+		return false, false
+	}
+	return *value, true
 }
 
 type resellerBankTransferRequest struct {
@@ -342,17 +346,13 @@ func UpdateResellerManagementCustomerOverseasModelAccess(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var request resellerCustomerOverseasModelAccessRequest
-	var fields map[string]json.RawMessage
-	requestErr := common.Unmarshal(body, &request)
-	fieldsErr := common.Unmarshal(body, &fields)
-	_, hasAllowed := fields["allowed"]
-	if requestErr != nil || fieldsErr != nil || request.Allowed == nil || len(fields) != 1 || !hasAllowed {
+	allowed, valid := resellerBooleanField(body, "allowed")
+	if !valid {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
 
-	record, err := model.UpdateResellerCustomerOverseasModelAccess(resellerContext.ResellerId, customerId, *request.Allowed, resellerContext.Role == model.ResellerRoleOwner)
+	record, err := model.UpdateResellerCustomerOverseasModelAccess(resellerContext.ResellerId, customerId, allowed, resellerContext.Role == model.ResellerRoleOwner)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, record)
@@ -383,17 +383,13 @@ func UpdateResellerManagementCustomerPaymentPreference(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var request resellerCustomerPaymentPreferenceRequest
-	var fields map[string]json.RawMessage
-	requestErr := common.Unmarshal(body, &request)
-	fieldsErr := common.Unmarshal(body, &fields)
-	_, hasEnabled := fields["enabled"]
-	if requestErr != nil || fieldsErr != nil || request.Enabled == nil || len(fields) != 1 || !hasEnabled {
+	enabled, valid := resellerBooleanField(body, "enabled")
+	if !valid {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
 
-	record, err := model.UpdateResellerCustomerPaymentPreference(resellerContext.ResellerId, customerId, *request.Enabled, resellerContext.Role == model.ResellerRoleOwner)
+	record, err := model.UpdateResellerCustomerPaymentPreference(resellerContext.ResellerId, customerId, enabled, resellerContext.Role == model.ResellerRoleOwner)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, record)
