@@ -5161,6 +5161,8 @@
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
+    "Task parameter billing": "Thanh toan theo tham so tac vu",
+    "JSON map of model → versioned task billing rule. Explicit rules use per_request, per_second, or parametric pricing and otherwise preserve channel defaults.": "Anh xa JSON tu mo hinh sang quy tac thanh toan tac vu co phien ban. Quy tac ro rang dung per_request, per_second hoac parametric; neu khong cau hinh thi giu hanh vi mac dinh cua kenh.",
     "Other Administration": "Quản trị khác",
     "Access other administration": "Truy cập các chức năng quản trị khác",
     "Use administrative features outside the operations permissions listed above.": "Sử dụng các chức năng quản trị ngoài những quyền vận hành được liệt kê ở trên."

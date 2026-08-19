@@ -19,10 +19,13 @@ import (
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
-	// 支持任务仅按次计费
-	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
+	if info.PriceData.TaskBillingMode != "" {
+		logContent = fmt.Sprintf("%s，任务参数计费：%s", logContent, info.PriceData.TaskBillingMode)
+	} else if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
+		// 支持任务仅按次计费
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
-	} else {
+	}
+	if !common.StringsContains(constant.TaskPricePatches, info.OriginModelName) || info.PriceData.TaskBillingMode != "" {
 		if len(info.PriceData.OtherRatios) > 0 {
 			var contents []string
 			for key, ra := range info.PriceData.OtherRatios {
@@ -39,6 +42,10 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
 	other["model_price"] = info.PriceData.ModelPrice
+	if info.PriceData.TaskBillingMode != "" {
+		other["task_billing_mode"] = info.PriceData.TaskBillingMode
+		other["task_billing_version"] = info.PriceData.TaskBillingVersion
+	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
 	}
@@ -149,6 +156,10 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			for k, v := range bc.OtherRatios {
 				other[k] = v
 			}
+		}
+		if bc.TaskBillingMode != "" {
+			other["task_billing_mode"] = bc.TaskBillingMode
+			other["task_billing_version"] = bc.TaskBillingVersion
 		}
 	}
 	props := task.Properties

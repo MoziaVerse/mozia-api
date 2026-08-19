@@ -5161,6 +5161,8 @@
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
+    "Task parameter billing": "Facturation par parametres de tache",
+    "JSON map of model → versioned task billing rule. Explicit rules use per_request, per_second, or parametric pricing and otherwise preserve channel defaults.": "Mappage JSON modele-vers-regle de facturation de tache versionnee. Les regles explicites utilisent per_request, per_second ou parametric; sans regle, le comportement du canal est preserve.",
     "Other Administration": "Autres fonctions administratives",
     "Access other administration": "Accéder aux autres fonctions administratives",
     "Use administrative features outside the operations permissions listed above.": "Utiliser les fonctions administratives autres que les autorisations opérationnelles listées ci-dessus."

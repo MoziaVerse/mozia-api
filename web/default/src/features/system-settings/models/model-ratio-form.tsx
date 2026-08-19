@@ -54,6 +54,7 @@ type ModelFormValues = {
   ExposeRatioEnabled: boolean
   BillingMode: string
   BillingExpr: string
+  TaskBilling: string
 }
 
 type ModelRatioFormProps = {
@@ -74,6 +75,7 @@ type ModelJsonFieldName =
   | 'ImageRatio'
   | 'AudioRatio'
   | 'AudioCompletionRatio'
+  | 'TaskBilling'
 
 const modelJsonFields: Array<{
   name: ModelJsonFieldName
@@ -123,6 +125,12 @@ const modelJsonFields: Array<{
     name: 'AudioCompletionRatio',
     labelKey: 'Audio completion ratio',
     descriptionKey: 'Ratio applied to audio completions for streaming models.',
+  },
+  {
+    name: 'TaskBilling',
+    labelKey: 'Task parameter billing',
+    descriptionKey:
+      'JSON map of model → versioned task billing rule. Explicit rules use per_request, per_second, or parametric pricing and otherwise preserve channel defaults.',
   },
 ]
 

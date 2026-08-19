@@ -5161,6 +5161,8 @@
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放",
+    "Task parameter billing": "任务参数计费",
+    "JSON map of model → versioned task billing rule. Explicit rules use per_request, per_second, or parametric pricing and otherwise preserve channel defaults.": "模型到版本化任务计费规则的 JSON 映射。显式规则可使用 per_request、per_second 或 parametric 定价；未配置时保留渠道默认行为。",
     "Other Administration": "其他管理功能",
     "Access other administration": "访问其他管理功能",
     "Use administrative features outside the operations permissions listed above.": "使用上述运营权限之外的其他管理功能。"
