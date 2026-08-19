@@ -106,7 +106,7 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 				http.StatusBadRequest,
 			)
 		}
-		if err := validateMiniMaxH3Images(modelName, &req, summary, fields, uploadedFileCount(c)); err != nil {
+		if err := validateMiniMaxH3Images(modelName, &req, summary, fields, uploadedImageCount(c)); err != nil {
 			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 		}
 		if _, err := resolveMiniMaxH3Size(&req, fields); err != nil {
@@ -259,17 +259,50 @@ const multipartBoundaryKey = "seedance_multipart_boundary"
 // stays alive until net/http tears the request down. JSON requests leave
 // MultipartForm nil, so this is a no-op for them.
 func hasUploadedFiles(c *gin.Context) bool {
-	return uploadedFileCount(c) > 0
+	form := c.Request.MultipartForm
+	if form == nil {
+		return false
+	}
+	for _, headers := range form.File {
+		if len(headers) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
-// uploadedFileCount counts the file parts carried by the inbound request.
-func uploadedFileCount(c *gin.Context) int {
+// Field names the upstream classifies as reference audio / video. Anything else
+// carrying a filename is treated as an image, mirroring the upstream's own
+// dispatch. Keeping the sets aligned matters because the count feeds the
+// per-model reference-image limits below: counting an uploaded clip as an image
+// would both inflate that count and let an audio-only submit satisfy a
+// "needs at least one image" check.
+var (
+	uploadedAudioFieldNames = map[string]struct{}{
+		"audio": {}, "audios": {}, "ref_audio": {}, "ref_audios": {},
+		"reference_audio": {}, "reference_audios": {},
+	}
+	uploadedVideoFieldNames = map[string]struct{}{
+		"video": {}, "videos": {}, "ref_video": {}, "ref_videos": {},
+		"reference_video": {}, "reference_videos": {},
+	}
+)
+
+// uploadedImageCount counts only the file parts the upstream would treat as
+// reference images.
+func uploadedImageCount(c *gin.Context) int {
 	form := c.Request.MultipartForm
 	if form == nil {
 		return 0
 	}
 	total := 0
-	for _, headers := range form.File {
+	for name, headers := range form.File {
+		if _, isAudio := uploadedAudioFieldNames[name]; isAudio {
+			continue
+		}
+		if _, isVideo := uploadedVideoFieldNames[name]; isVideo {
+			continue
+		}
 		total += len(headers)
 	}
 	return total
@@ -675,7 +708,7 @@ func isExternalMiniMaxH3Model(modelName string) bool {
 	return strings.EqualFold(strings.TrimSpace(modelName), "MiniMax-H3")
 }
 
-func validateMiniMaxH3Images(modelName string, req *relaycommon.TaskSubmitReq, summary relaycommon.VideoContentSummary, fields map[string]any, uploadedImageCount int) error {
+func validateMiniMaxH3Images(modelName string, req *relaycommon.TaskSubmitReq, summary relaycommon.VideoContentSummary, fields map[string]any, uploadedImages int) error {
 	imageCount := len(summary.LegacyImages())
 	if imageCount == 0 && req != nil {
 		switch {
@@ -697,7 +730,7 @@ func validateMiniMaxH3Images(modelName string, req *relaycommon.TaskSubmitReq, s
 	// is rejected here — before BuildRequestBody ever gets a chance to forward
 	// the files — with a message that reads as "you sent no image" even though
 	// the caller did attach one.
-	imageCount += uploadedImageCount
+	imageCount += uploadedImages
 	switch strings.ToLower(strings.TrimSpace(modelName)) {
 	case "minimax/minimax-h3-ref2va", "minimax-h3-ref2va-int8":
 		if imageCount == 0 {

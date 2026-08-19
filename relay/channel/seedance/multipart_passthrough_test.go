@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -208,4 +209,55 @@ func TestBuildRequestHeaderKeepsJSONContentType(t *testing.T) {
 	upstream := httptest.NewRequest(http.MethodPost, "https://provider.example/v1/videos", nil)
 	require.NoError(t, adaptor.BuildRequestHeader(c, upstream, info))
 	assert.Equal(t, "application/json", upstream.Header.Get("Content-Type"))
+}
+
+// Reference clips and audio must ride along too: the upstream classifies file
+// parts by field name and accepts audio/video directly, so the gateway has no
+// reason to treat them differently from images.
+func TestBuildRequestBodyForwardsReferenceVideoAndAudio(t *testing.T) {
+	adaptor, c, info := prepareMultipartRequest(t,
+		map[string]string{
+			"model":    "minimax/minimax-h3-ref2va",
+			"prompt":   "a cat, mood of Audio 1",
+			"duration": "5",
+		},
+		map[string][]byte{
+			"reference_images": []byte("\x89PNG\r\n\x1a\nimg"),
+			"reference_videos": []byte("\x00\x00\x00 ftypmp42clip"),
+			"reference_audios": []byte("ID3audio"),
+		},
+	)
+
+	body, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	_, files := readBackParts(t, c, body)
+
+	assert.Equal(t, []byte("\x89PNG\r\n\x1a\nimg"), files["reference_images"])
+	assert.Equal(t, []byte("\x00\x00\x00 ftypmp42clip"), files["reference_videos"])
+	assert.Equal(t, []byte("ID3audio"), files["reference_audios"])
+}
+
+// Uploaded clips and audio must not inflate the reference-image count: the
+// per-model limit is about images only. Nine images plus a clip is legal;
+// counting the clip would reject it as "at most 9 reference images".
+func TestUploadedClipsDoNotCountAsReferenceImages(t *testing.T) {
+	files := map[string][]byte{"reference_videos": []byte("\x00\x00\x00 ftypmp42")}
+	for i := 0; i < 9; i++ {
+		files["image"+strconv.Itoa(i)] = []byte("\x89PNG\r\n\x1a\n")
+	}
+
+	adaptor, c, info := prepareMultipartRequest(t,
+		map[string]string{
+			"model":    "minimax/minimax-h3-ref2va",
+			"prompt":   "p",
+			"duration": "5",
+		},
+		files,
+	)
+
+	// Reaching BuildRequestBody at all proves validation accepted 9 images
+	// alongside the clip.
+	_, err := adaptor.BuildRequestBody(c, info)
+	require.NoError(t, err)
+	assert.Equal(t, 9, uploadedImageCount(c))
 }
