@@ -15,7 +15,9 @@ import (
 func TestResellerBankTransferContract(t *testing.T) {
 	_, db, request := setupResellerM2Test(t)
 	reseller := seedResellerM2(t, db, "Bank Agency", "bank.example.com", model.ResellerRoleOwner, "bank-owner", "bank-admin", "bank-viewer")
-	seedCustomerM2(t, db, reseller.Id, "bank-customer", model.ResellerCustomerStatusActive)
+	customer := seedCustomerM2(t, db, reseller.Id, "bank-customer", model.ResellerCustomerStatusActive)
+	otherReseller := seedResellerM2(t, db, "Other Agency", "other-bank.example.com", model.ResellerRoleOwner, "other-bank-owner", "other-bank-admin", "other-bank-viewer")
+	otherCustomer := seedCustomerM2(t, db, otherReseller.Id, "other-bank-customer", model.ResellerCustomerStatusActive)
 	headers := func(subject string) map[string]string {
 		return map[string]string{"X-Reseller-Subject": subject, "X-Reseller-Host": "bank.example.com"}
 	}
@@ -55,6 +57,46 @@ func TestResellerBankTransferContract(t *testing.T) {
 	require.NotNil(t, configured.BankTransfer)
 	assert.True(t, configured.BankTransfer.Configured)
 	assert.Equal(t, "57192390001", configured.BankTransfer.AccountNumber)
+
+	defaultPreference := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d", customer.Id), "", "matrix-reseller-management-test-token", "bank-preference-default_123", headers("bank-admin"))
+	response = decodeM2Envelope(t, defaultPreference)
+	require.Equal(t, http.StatusOK, defaultPreference.Code)
+	var defaultCustomer resellerM2Customer
+	require.NoError(t, common.Unmarshal(response.RawData, &defaultCustomer))
+	assert.True(t, defaultCustomer.UseResellerPayment)
+
+	viewerPreference := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customer.Id), `{"enabled":false}`, "matrix-reseller-management-test-token", "bank-preference-viewer_123", headers("bank-viewer"))
+	require.Equal(t, http.StatusForbidden, viewerPreference.Code)
+
+	forgedPreference := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customer.Id), `{"enabled":false,"reseller_id":999}`, "matrix-reseller-management-test-token", "bank-preference-forged_123", headers("bank-admin"))
+	require.Equal(t, http.StatusBadRequest, forgedPreference.Code)
+
+	crossTenantPreference := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", otherCustomer.Id), `{"enabled":false}`, "matrix-reseller-management-test-token", "bank-preference-cross-tenant_123", headers("bank-admin"))
+	require.Equal(t, http.StatusNotFound, crossTenantPreference.Code)
+
+	disablePreference := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customer.Id), `{"enabled":false}`, "matrix-reseller-management-test-token", "bank-preference-disable_123", headers("bank-admin"))
+	response = decodeM2Envelope(t, disablePreference)
+	require.Equal(t, http.StatusOK, disablePreference.Code)
+	var disabledCustomer resellerM2Customer
+	require.NoError(t, common.Unmarshal(response.RawData, &disabledCustomer))
+	assert.False(t, disabledCustomer.UseResellerPayment)
+
+	platformPayment := request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/payment-method", `{"subject":"bank-customer"}`, "matrix-reseller-registration-test-token", "bank-preference-platform_123", nil)
+	response = decodeM2Envelope(t, platformPayment)
+	require.Equal(t, http.StatusOK, platformPayment.Code)
+	var customerPlatform model.ResellerCustomerPaymentMethod
+	require.NoError(t, common.Unmarshal(response.RawData, &customerPlatform))
+	assert.Equal(t, "platform", customerPlatform.Mode)
+
+	enablePreference := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customer.Id), `{"enabled":true}`, "matrix-reseller-management-test-token", "bank-preference-enable_123", headers("bank-owner"))
+	require.Equal(t, http.StatusOK, enablePreference.Code)
+
+	resellerPayment := request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/payment-method", `{"subject":"bank-customer"}`, "matrix-reseller-registration-test-token", "bank-preference-reseller_123", nil)
+	response = decodeM2Envelope(t, resellerPayment)
+	require.Equal(t, http.StatusOK, resellerPayment.Code)
+	var customerReseller model.ResellerCustomerPaymentMethod
+	require.NoError(t, common.Unmarshal(response.RawData, &customerReseller))
+	assert.Equal(t, "bank_transfer", customerReseller.Mode)
 
 	recorder = request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/payment-method", `{"subject":"ordinary-customer"}`, "matrix-reseller-registration-test-token", "bank-platform_123", nil)
 	response = decodeM2Envelope(t, recorder)

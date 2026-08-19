@@ -75,6 +75,7 @@ type resellerM2Customer struct {
 	Phone                 string  `json:"phone"`
 	ProfileSyncedAt       int64   `json:"profile_synced_at"`
 	OverseasModelAccess   bool    `json:"overseas_model_access"`
+	UseResellerPayment    bool    `json:"use_reseller_payment"`
 	Remark                *string `json:"remark,omitempty"`
 	Balance               float64 `json:"balance"`
 	GiftBalance           float64 `json:"gift_balance"`

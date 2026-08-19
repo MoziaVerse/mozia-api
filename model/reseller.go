@@ -91,16 +91,17 @@ type ResellerMember struct {
 }
 
 type ResellerCustomer struct {
-	Id              int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ResellerId      int    `json:"reseller_id" gorm:"not null;index"`
-	Subject         string `json:"subject" gorm:"type:varchar(255);not null;uniqueIndex"`
-	MatrixName      string `json:"matrix_name" gorm:"type:varchar(255);not null;default:''"`
-	Phone           string `json:"phone" gorm:"type:varchar(50);not null;default:''"`
-	ProfileSyncedAt int64  `json:"profile_synced_at" gorm:"not null;default:0;index"`
-	Remark          string `json:"-" gorm:"type:varchar(255);not null;default:''"`
-	Status          string `json:"status" gorm:"type:varchar(16);not null;index"`
-	CreatedAt       int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
-	UpdatedAt       int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
+	Id                 int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	ResellerId         int    `json:"reseller_id" gorm:"not null;index"`
+	Subject            string `json:"subject" gorm:"type:varchar(255);not null;uniqueIndex"`
+	MatrixName         string `json:"matrix_name" gorm:"type:varchar(255);not null;default:''"`
+	Phone              string `json:"phone" gorm:"type:varchar(50);not null;default:''"`
+	ProfileSyncedAt    int64  `json:"profile_synced_at" gorm:"not null;default:0;index"`
+	Remark             string `json:"-" gorm:"type:varchar(255);not null;default:''"`
+	UseResellerPayment *bool  `json:"-" gorm:"column:use_reseller_payment"`
+	Status             string `json:"status" gorm:"type:varchar(16);not null;index"`
+	CreatedAt          int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
+	UpdatedAt          int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
 }
 
 type ResellerInvitation struct {
@@ -218,6 +219,7 @@ type ResellerCustomerRecord struct {
 	Phone                 string  `json:"phone"`
 	ProfileSyncedAt       int64   `json:"profile_synced_at"`
 	OverseasModelAccess   bool    `json:"overseas_model_access"`
+	UseResellerPayment    bool    `json:"use_reseller_payment"`
 	Remark                *string `json:"remark,omitempty"`
 	BalanceQuota          int     `json:"-"`
 	GiftBalanceQuota      int     `json:"-"`
@@ -531,6 +533,16 @@ func UpdateResellerCustomerOverseasModelAccess(resellerId int, customerId int, a
 	return GetResellerCustomerRecord(resellerId, customerId, includeRemark)
 }
 
+func UpdateResellerCustomerPaymentPreference(resellerId int, customerId int, enabled bool, includeRemark bool) (*ResellerCustomerRecord, error) {
+	update := DB.Model(&ResellerCustomer{}).
+		Where("id = ? AND reseller_id = ?", customerId, resellerId).
+		Update("use_reseller_payment", enabled)
+	if update.Error != nil {
+		return nil, update.Error
+	}
+	return GetResellerCustomerRecord(resellerId, customerId, includeRemark)
+}
+
 func SyncResellerCustomerIdentity(subject string, matrixName string, phone string) (bool, error) {
 	matrixName = strings.TrimSpace(matrixName)
 	phone = strings.TrimSpace(phone)
@@ -717,13 +729,14 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 
 		response = &ResellerInvitationConsumeRecord{
 			Customer: ResellerCustomerRecord{
-				Id:              customer.Id,
-				Subject:         customer.Subject,
-				MatrixName:      customer.MatrixName,
-				Phone:           customer.Phone,
-				ProfileSyncedAt: customer.ProfileSyncedAt,
-				Status:          customer.Status,
-				JoinedAt:        customer.CreatedAt,
+				Id:                 customer.Id,
+				Subject:            customer.Subject,
+				MatrixName:         customer.MatrixName,
+				Phone:              customer.Phone,
+				ProfileSyncedAt:    customer.ProfileSyncedAt,
+				Status:             customer.Status,
+				JoinedAt:           customer.CreatedAt,
+				UseResellerPayment: true,
 			},
 			ResellerId:   invitation.ResellerId,
 			ResellerName: reseller.Name,
@@ -970,7 +983,7 @@ func ResolveResellerCustomerPaymentMethod(subject string) (*ResellerCustomerPaym
 	result := DB.Table("reseller_customers AS customer").
 		Select("reseller.name, reseller.bank_transfer_enabled, reseller.bank_account_name, reseller.bank_account_number, reseller.bank_name").
 		Joins("JOIN resellers AS reseller ON reseller.id = customer.reseller_id AND reseller.status = ?", ResellerStatusActive).
-		Where("customer.subject = ? AND customer.status = ?", subject, ResellerCustomerStatusActive).
+		Where("customer.subject = ? AND customer.status = ? AND COALESCE(customer.use_reseller_payment, ?) = ?", subject, ResellerCustomerStatusActive, true, true).
 		Limit(1).
 		Scan(&reseller)
 	if result.Error != nil {
@@ -1067,7 +1080,7 @@ func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {
 	if trueValue == "" {
 		trueValue, falseValue = "1", "0"
 	}
-	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
+	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, COALESCE(customers.use_reseller_payment, " + trueValue + ") AS use_reseller_payment, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
 	if includeRemark {
 		fields += ", customers.remark"
 	}
