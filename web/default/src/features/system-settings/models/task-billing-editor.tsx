@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Code, Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -40,9 +41,7 @@ import {
 
 type TaskBillingEditorProps = {
   draft: TaskBillingDraft
-  showJSON: boolean
   onChange: (draft: TaskBillingDraft) => void
-  onShowJSONChange: (show: boolean) => void
 }
 
 const selectClassName =
@@ -50,6 +49,7 @@ const selectClassName =
 
 export function TaskBillingEditor(props: TaskBillingEditorProps) {
   const { t } = useTranslation()
+  const [showJSON, setShowJSON] = useState(false)
   const validationError = validateTaskBillingDraft(props.draft)
 
   const updateDuration = (patch: Partial<TaskDimensionDraft>) => {
@@ -376,12 +376,12 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
         type='button'
         variant='outline'
         className='w-fit'
-        onClick={() => props.onShowJSONChange(!props.showJSON)}
+        onClick={() => setShowJSON((shown) => !shown)}
       >
         <Code data-icon='inline-start' />
-        {props.showJSON ? t('Hide JSON') : t('View JSON')}
+        {showJSON ? t('Hide JSON') : t('View JSON')}
       </Button>
-      {props.showJSON && (
+      {showJSON && (
         <pre className='bg-muted overflow-x-auto rounded-md border p-3 font-mono text-xs leading-5'>
           {JSON.stringify(buildTaskBillingConfig(props.draft), null, 2)}
         </pre>

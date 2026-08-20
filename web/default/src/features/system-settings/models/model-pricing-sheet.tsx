@@ -166,7 +166,6 @@ export const ModelPricingEditorPanel = forwardRef<
   const [taskBillingDraft, setTaskBillingDraft] = useState<TaskBillingDraft>(
     createTaskBillingDraft
   )
-  const [showTaskBillingJSON, setShowTaskBillingJSON] = useState(false)
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const isEditMode = !!editData
 
@@ -735,9 +734,7 @@ export const ModelPricingEditorPanel = forwardRef<
                       />
                       <TaskBillingEditor
                         draft={taskBillingDraft}
-                        showJSON={showTaskBillingJSON}
                         onChange={setTaskBillingDraft}
-                        onShowJSONChange={setShowTaskBillingJSON}
                       />
                     </FieldGroup>
                   </TabsContent>

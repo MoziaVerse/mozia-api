@@ -18,11 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { nanoid } from 'nanoid'
 
-export type TaskBillingMode = 'per_second' | 'parametric'
-export type TaskDimensionKind = 'number' | 'enum'
-export type TaskDimensionRound = 'none' | 'ceil' | 'floor' | 'nearest'
+type TaskBillingMode = 'per_second' | 'parametric'
+type TaskDimensionKind = 'number' | 'enum'
+type TaskDimensionRound = 'none' | 'ceil' | 'floor' | 'nearest'
 
-export type TaskEnumValueDraft = {
+type TaskEnumValueDraft = {
   id: string
   value: string
   multiplier: string
@@ -45,24 +45,7 @@ export type TaskBillingDraft = {
   dimensions: TaskDimensionDraft[]
 }
 
-type TaskBillingDimension = {
-  name: string
-  kind: TaskDimensionKind
-  paths: string[]
-  default?: number | string
-  unit?: number
-  round?: TaskDimensionRound
-  values?: Record<string, number>
-}
-
-export type TaskBillingConfig = {
-  version: 1
-  mode: TaskBillingMode
-  duration?: TaskBillingDimension
-  dimensions?: TaskBillingDimension[]
-}
-
-const createEnumValueDraft = (
+export const createEnumValueDraft = (
   value = '',
   multiplier = '1'
 ): TaskEnumValueDraft => ({
@@ -171,7 +154,7 @@ const parsePaths = (paths: string) =>
     .map((path) => path.trim())
     .filter(Boolean)
 
-const buildDimension = (draft: TaskDimensionDraft): TaskBillingDimension => {
+const buildDimension = (draft: TaskDimensionDraft) => {
   if (draft.kind === 'enum') {
     const values = Object.fromEntries(
       draft.values.map((option) => [
@@ -202,9 +185,7 @@ const buildDimension = (draft: TaskDimensionDraft): TaskBillingDimension => {
   }
 }
 
-export const buildTaskBillingConfig = (
-  draft: TaskBillingDraft
-): TaskBillingConfig => {
+export const buildTaskBillingConfig = (draft: TaskBillingDraft) => {
   if (draft.mode === 'per_second') {
     return {
       version: 1,
@@ -278,5 +259,3 @@ export const validateTaskBillingDraft = (
 
   return null
 }
-
-export { createEnumValueDraft }
