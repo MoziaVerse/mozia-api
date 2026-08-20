@@ -39,6 +39,34 @@ web/             — Frontend themes container
   web/default/src/i18n/ — Frontend internationalization (i18next, zh/en/fr/ru/ja/vi)
 ```
 
+## Mozia Five-Repository Collaboration Map
+
+`mozia-api` 是五仓体系中的业务与财务事实源。仓库间关系如下：
+
+| 仓库 | 主要职责 | 与 `mozia-api` 的契约 |
+| --- | --- | --- |
+| `mozia-sso` | 统一 OIDC 身份提供方 | 签发跨系统身份键 `sub`；SSO 登录不等于代理商成员资格或平台权限 |
+| `mozia-mega` | 内部运营控制台 | 通过 `MOZIA_MEGA_SERVICE_TOKEN` 调用 `/api/internal/v1/platform/resellers/*` 等平台接口，不得直写数据库 |
+| `Matrix` | 普通 C 端产品及代理商邀请认领入口 | 通过独立 registration credential 消费邀请、同步客户身份；普通钱包、API Key 和网关调用也以本仓库数据为权威 |
+| `matrix-reseller` | 多租户代理商管理台及 BFF | 通过独立 context/management credentials，携带可信 Host 与 OIDC `sub` 获取租户上下文并执行代理商操作 |
+| `mozia-api` | AI relay、账户计费、代理商与财务事实源 | 拥有代理商、域名、Logo、成员、客户归属、价格、用量、结算和账本 |
+
+固定调用方向：
+
+- `Browser -> mozia-mega BFF -> mozia-api`
+- `Browser -> matrix-reseller BFF -> mozia-api`
+- `Browser -> Matrix backend -> mozia-api`
+- `Mega / Matrix / matrix-reseller -> mozia-sso` 仅用于各自独立的 OIDC 登录；系统之间只用服务端验证后的 `sub` 关联身份。
+- `mozia-api` 不反向依赖上述应用仓库，不读取它们的数据库，也不接受浏览器提交的权威 `reseller_id`、价格或结算结果。
+
+### Reseller Domain Authority
+
+- `reseller_domains` 是代理商 Host 绑定的权威数据。只有规范化、`verified=true`、`status=active` 的 Host 才能解析 presentation/tenant context。
+- Mega 的代理商编辑会调用平台接口更新名称与 Host。当前 `UpdateResellerAdminRecord` 在事务内删除该代理商旧域名记录，并写入一个新的 active/verified Host，所以该操作当前是单 Host 替换，不是多域名生命周期管理。
+- 数据库中的 `verified=true` 表示平台已确认该 Host 可用，不代表本仓库已执行 DNS challenge、反向代理配置或 TLS 签发；这些基础设施动作不由 `mozia-api` 完成。
+- 域名切换还必须同步 reseller 部署入口和 `mozia-sso` OIDC redirect URI。不要把“Mega 保存成功”解释为外部域名已经完整上线。
+- Logo 存在 `resellers.logo`，属于代理商而非域名。Mega 和 `matrix-reseller` Owner 更新同一字段，更换 Host 不应复制或重置 Logo。
+
 ## Internationalization (i18n)
 
 ### Backend (`i18n/`)
