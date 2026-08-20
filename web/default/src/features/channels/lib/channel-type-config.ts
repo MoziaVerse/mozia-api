@@ -136,6 +136,25 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         '客户端统一调用 /v1/videos 或 /v1/video/generations；上游提交使用 /v2/model-center/tasks，查询使用 /v2/model-center/tasks/{id}；支持图片、视频、音频参考素材映射，模型价格按次填写',
     },
   },
+  206: {
+    id: 206,
+    name: CHANNEL_TYPES[206],
+    icon: 'openai',
+    defaultBaseUrl: 'https://ai.artsapi.com',
+    hints: {
+      baseUrl:
+        'Default: https://ai.artsapi.com（填写域名根路径，不要追加 /v1/video/generations）',
+      key: 'ArtsAPI API Key（sk- 前缀，使用 Authorization: Bearer）',
+      models:
+        '可从 /v1/models 获取账号可用模型；模型由渠道配置和模型映射决定，不限制为固定列表',
+      other:
+        '提交和查询使用 /v1/video/generations；支持 images/image_urls、videos、audios 及 ArtsAPI 扩展参数透传。duration 必须显式传正整数，模型价格按每秒填写；完成响应中的 usage token 会记录，但 ModelPrice 仍按 duration 预扣结算',
+    },
+    validation: {
+      keyFormat: /^sk-/,
+      keyMinLength: 20,
+    },
+  },
   // ===== NewAPI default =====
   1: {
     id: 1,

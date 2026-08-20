@@ -85,8 +85,12 @@ func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 	require.Equal(t, 2, userID)
 }
 
-func TestSeedanceCompatibleChannelsSkipChatCompletionTest(t *testing.T) {
-	for _, channelType := range []int{constant.ChannelTypeMoziaSeedanceGen, constant.ChannelTypeMoziaSeedanceVideos} {
+func TestCompatibleVideoChannelsSkipChatCompletionTest(t *testing.T) {
+	for _, channelType := range []int{
+		constant.ChannelTypeMoziaSeedanceGen,
+		constant.ChannelTypeMoziaSeedanceVideos,
+		constant.ChannelTypeMoziaArtsapi,
+	} {
 		result := testChannel(nil, &model.Channel{Type: channelType}, 0, "", "", false)
 
 		require.Error(t, result.localErr)

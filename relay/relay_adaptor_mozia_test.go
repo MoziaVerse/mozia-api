@@ -40,3 +40,14 @@ func TestSeedanceCompatibleChannelRegistration(t *testing.T) {
 	assert.Equal(t, "seedance-compatible-videos", videosAdaptor.GetChannelName())
 	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("204")))
 }
+
+func TestArtsapiChannelRegistration(t *testing.T) {
+	assert.Equal(t, "Artsapi", constant.ChannelTypeNames[constant.ChannelTypeMoziaArtsapi])
+	assert.Equal(t, "https://ai.artsapi.com", constant.ChannelBaseURLs[constant.ChannelTypeMoziaArtsapi])
+
+	adaptor := GetMoziaTaskAdaptor(constant.ChannelTypeMoziaArtsapi)
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "artsapi", adaptor.GetChannelName())
+	assert.Empty(t, adaptor.GetModelList())
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("206")))
+}
