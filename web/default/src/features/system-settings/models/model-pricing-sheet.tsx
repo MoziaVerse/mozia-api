@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { zodResolver } from '@hookform/resolvers/zod'
+import { AlertTriangle, Save } from 'lucide-react'
 import {
   forwardRef,
   useCallback,
@@ -25,10 +27,9 @@ import {
   useState,
 } from 'react'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { AlertTriangle, Code, Save } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
+
+import { sideDrawerContentClassName } from '@/components/drawer-layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -60,7 +61,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { sideDrawerContentClassName } from '@/components/drawer-layout'
+import { cn } from '@/lib/utils'
+
 import {
   EMPTY_LANE_ENABLED,
   EMPTY_LANE_PRICES,
@@ -79,6 +81,14 @@ import {
 } from './model-pricing-core'
 import { PriceInput, PriceLane } from './model-pricing-inputs'
 import { formatPricingNumber } from './pricing-format'
+import {
+  buildTaskBillingConfig,
+  createTaskBillingDraft,
+  parseTaskBillingDraft,
+  validateTaskBillingDraft,
+  type TaskBillingDraft,
+} from './task-billing-config'
+import { TaskBillingEditor } from './task-billing-editor'
 import { TieredPricingEditor } from './tiered-pricing-editor'
 
 export type { ModelRatioData } from './model-pricing-core'
@@ -153,11 +163,9 @@ export const ModelPricingEditorPanel = forwardRef<
   })
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
-  const [taskBilling, setTaskBilling] = useState('')
-  const [durationPaths, setDurationPaths] = useState('duration, seconds')
-  const [durationDefault, setDurationDefault] = useState('5')
-  const [durationUnit, setDurationUnit] = useState('1')
-  const [durationRound, setDurationRound] = useState('ceil')
+  const [taskBillingDraft, setTaskBillingDraft] = useState<TaskBillingDraft>(
+    createTaskBillingDraft
+  )
   const [showTaskBillingJSON, setShowTaskBillingJSON] = useState(false)
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const isEditMode = !!editData
@@ -192,28 +200,19 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
       })
-      setPricingMode(
+      let nextPricingMode: PricingMode = editData.price
+        ? 'per-request'
+        : 'per-token'
+      if (
         editData.billingMode === 'tiered_expr' ||
-          editData.billingMode === 'task-parameter'
-          ? editData.billingMode
-          : editData.price
-            ? 'per-request'
-            : 'per-token'
-      )
+        editData.billingMode === 'task-parameter'
+      ) {
+        nextPricingMode = editData.billingMode
+      }
+      setPricingMode(nextPricingMode)
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
-      setTaskBilling(editData.taskBilling || '')
-      try {
-        const rule = JSON.parse(editData.taskBilling || '{}')
-        if (rule.mode === 'per_second' && rule.duration) {
-          setDurationPaths((rule.duration.paths || []).join(', '))
-          setDurationDefault(String(rule.duration.default ?? ''))
-          setDurationUnit(String(rule.duration.unit ?? 1))
-          setDurationRound(rule.duration.round || 'none')
-        }
-      } catch {
-        // Keep the visual defaults; the original rule remains available in JSON mode.
-      }
+      setTaskBillingDraft(parseTaskBillingDraft(editData.taskBilling || ''))
     } else {
       form.reset({
         name: '',
@@ -229,11 +228,7 @@ export const ModelPricingEditorPanel = forwardRef<
       setPricingMode('per-token')
       setBillingExpr('')
       setRequestRuleExpr('')
-      setTaskBilling('')
-      setDurationPaths('duration, seconds')
-      setDurationDefault('5')
-      setDurationUnit('1')
-      setDurationRound('ceil')
+      setTaskBillingDraft(createTaskBillingDraft())
     }
 
     setPromptPrice(nextLaneState.promptPrice)
@@ -360,26 +355,6 @@ export const ModelPricingEditorPanel = forwardRef<
     if (nextMode === 'tiered_expr' && !billingExpr) {
       setBillingExpr('tier("base", p * 0 + c * 0)')
     }
-    if (nextMode === 'task-parameter' && !taskBilling) {
-      setTaskBilling(
-        JSON.stringify(
-          {
-            version: 1,
-            mode: 'per_second',
-            duration: {
-              name: 'duration',
-              kind: 'number',
-              paths: ['duration', 'seconds'],
-              default: 5,
-              round: 'ceil',
-              unit: 1,
-            },
-          },
-          null,
-          2
-        )
-      )
-    }
   }
 
   const watchedValues = form.watch()
@@ -458,16 +433,10 @@ export const ModelPricingEditorPanel = forwardRef<
         form.setError('price', { message: t('Fixed price is required') })
         return false
       }
-      if (
-        durationPaths
-          .split(',')
-          .map((path) => path.trim())
-          .filter(Boolean).length === 0 ||
-        toNumberOrNull(durationDefault) === null ||
-        toNumberOrNull(durationUnit) === null
-      ) {
+      const taskBillingError = validateTaskBillingDraft(taskBillingDraft)
+      if (taskBillingError) {
         form.setError('price', {
-          message: t('Duration settings are required.'),
+          message: t(taskBillingError),
         })
         return false
       }
@@ -498,14 +467,12 @@ export const ModelPricingEditorPanel = forwardRef<
 
     return true
   }, [
-    durationDefault,
-    durationPaths,
-    durationUnit,
     form,
     laneEnabled,
     lanePrices,
     pricingMode,
     promptPrice,
+    taskBillingDraft,
     t,
   ])
 
@@ -529,34 +496,14 @@ export const ModelPricingEditorPanel = forwardRef<
         data.requestRuleExpr = requestRuleExpr
       }
       if (pricingMode === 'task-parameter') {
-        data.taskBilling = JSON.stringify({
-          version: 1,
-          mode: 'per_second',
-          duration: {
-            name: 'duration',
-            kind: 'number',
-            paths: durationPaths
-              .split(',')
-              .map((path) => path.trim())
-              .filter(Boolean),
-            default: Number(durationDefault),
-            unit: Number(durationUnit),
-            round: durationRound,
-          },
-        })
+        data.taskBilling = JSON.stringify(
+          buildTaskBillingConfig(taskBillingDraft)
+        )
       }
 
       return data
     },
-    [
-      billingExpr,
-      durationDefault,
-      durationPaths,
-      durationRound,
-      durationUnit,
-      pricingMode,
-      requestRuleExpr,
-    ]
+    [billingExpr, pricingMode, requestRuleExpr, taskBillingDraft]
   )
 
   useImperativeHandle(
@@ -786,102 +733,12 @@ export const ModelPricingEditorPanel = forwardRef<
                           </FormItem>
                         )}
                       />
-                      <FieldGroup className='grid gap-4 sm:grid-cols-2'>
-                        <Field>
-                          <FieldLabel>{t('Duration paths')}</FieldLabel>
-                          <Input
-                            value={durationPaths}
-                            onChange={(event) =>
-                              setDurationPaths(event.target.value)
-                            }
-                          />
-                          <FieldDescription>
-                            {t(
-                              'Uses the first available request field, in the listed order.'
-                            )}
-                          </FieldDescription>
-                        </Field>
-                        <Field>
-                          <FieldLabel>{t('Default duration')}</FieldLabel>
-                          <Input
-                            inputMode='decimal'
-                            value={durationDefault}
-                            onChange={(event) =>
-                              setDurationDefault(event.target.value)
-                            }
-                          />
-                          <FieldDescription>
-                            {t(
-                              'Used when none of the duration paths is present in the request.'
-                            )}
-                          </FieldDescription>
-                        </Field>
-                        <Field>
-                          <FieldLabel>{t('Billing unit')}</FieldLabel>
-                          <Input
-                            inputMode='decimal'
-                            value={durationUnit}
-                            onChange={(event) => setDurationUnit(event.target.value)}
-                          />
-                          <FieldDescription>
-                            {t(
-                              'Defines how many seconds the base price covers.'
-                            )}
-                          </FieldDescription>
-                        </Field>
-                        <Field>
-                          <FieldLabel>{t('Rounding')}</FieldLabel>
-                          <select
-                            className='border-input bg-background h-9 w-full rounded-md border px-3 text-sm'
-                            value={durationRound}
-                            onChange={(event) =>
-                              setDurationRound(event.target.value)
-                            }
-                          >
-                            <option value='none'>{t('None')}</option>
-                            <option value='ceil'>{t('Round up')}</option>
-                            <option value='floor'>{t('Round down')}</option>
-                            <option value='nearest'>{t('Nearest')}</option>
-                          </select>
-                          <FieldDescription>
-                            {t(
-                              'Applied to the duration before calculating the billing units.'
-                            )}
-                          </FieldDescription>
-                        </Field>
-                      </FieldGroup>
-                      <Button
-                        type='button'
-                        variant='outline'
-                        className='w-fit'
-                        onClick={() => setShowTaskBillingJSON((shown) => !shown)}
-                      >
-                        <Code data-icon='inline-start' />
-                        {showTaskBillingJSON ? t('Hide JSON') : t('View JSON')}
-                      </Button>
-                      {showTaskBillingJSON && (
-                        <pre className='bg-muted overflow-x-auto rounded-md border p-3 font-mono text-xs leading-5'>
-                          {JSON.stringify(
-                            {
-                              version: 1,
-                              mode: 'per_second',
-                              duration: {
-                                name: 'duration',
-                                kind: 'number',
-                                paths: durationPaths
-                                  .split(',')
-                                  .map((path) => path.trim())
-                                  .filter(Boolean),
-                                default: Number(durationDefault),
-                                unit: Number(durationUnit),
-                                round: durationRound,
-                              },
-                            },
-                            null,
-                            2
-                          )}
-                        </pre>
-                      )}
+                      <TaskBillingEditor
+                        draft={taskBillingDraft}
+                        showJSON={showTaskBillingJSON}
+                        onChange={setTaskBillingDraft}
+                        onShowJSONChange={setShowTaskBillingJSON}
+                      />
                     </FieldGroup>
                   </TabsContent>
                 </Tabs>
