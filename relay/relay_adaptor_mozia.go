@@ -4,6 +4,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
+	"github.com/QuantumNous/new-api/relay/channel/artsapi"
 	"github.com/QuantumNous/new-api/relay/channel/cool"
 	"github.com/QuantumNous/new-api/relay/channel/globalaiopc"
 	"github.com/QuantumNous/new-api/relay/channel/mulerun"
@@ -39,6 +40,8 @@ func GetMoziaTaskAdaptor(channelType int) channel.TaskAdaptor {
 		return &seedance.TaskAdaptor{}
 	case constant.ChannelTypeMoziaSeedanceVideos:
 		return seedance.NewSeedanceVideosTaskAdaptor()
+	case constant.ChannelTypeMoziaArtsapi:
+		return &artsapi.TaskAdaptor{}
 	case constant.ChannelTypeMoziaMulerun:
 		// mulerun studio 多模态走 OpenAI Sora 标准 video task 接口
 		// （/v1/video/generations + GET /v1/video/generations/:task_id），

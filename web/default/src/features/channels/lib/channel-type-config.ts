@@ -122,6 +122,25 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
         '兼容 POST/GET /v1/videos；duration 必须显式传正整数。模型价格按每秒价格填写，实际费用 = 模型价格 × duration；失败或超时自动退款',
     },
   },
+  206: {
+    id: 206,
+    name: CHANNEL_TYPES[206],
+    icon: 'openai',
+    defaultBaseUrl: 'https://ai.artsapi.com',
+    hints: {
+      baseUrl:
+        'Default: https://ai.artsapi.com（填写域名根路径，不要追加 /v1/video/generations）',
+      key: 'ArtsAPI API Key（sk- 前缀，使用 Authorization: Bearer）',
+      models:
+        '可从 /v1/models 获取账号可用模型；模型由渠道配置和模型映射决定，不限制为固定列表',
+      other:
+        '提交和查询使用 /v1/video/generations；支持 images/image_urls、videos、audios 及 ArtsAPI 扩展参数透传。duration 必须显式传正整数，模型价格按每秒填写；完成响应中的 usage token 会记录，但 ModelPrice 仍按 duration 预扣结算',
+    },
+    validation: {
+      keyFormat: /^sk-/,
+      keyMinLength: 20,
+    },
+  },
   // ===== NewAPI default =====
   1: {
     id: 1,
