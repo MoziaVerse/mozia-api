@@ -148,7 +148,7 @@ export const CHANNEL_TYPE_CONFIGS: Record<number, ChannelTypeConfig> = {
       models:
         '可从 /v1/models 获取账号可用模型；模型由渠道配置和模型映射决定，不限制为固定列表',
       other:
-        '提交和查询使用 /v1/video/generations；支持 images/image_urls、videos、audios 及 ArtsAPI 扩展参数透传。duration 必须显式传正整数，模型价格按每秒填写；完成响应中的 usage token 会记录，但 ModelPrice 仍按 duration 预扣结算',
+        '提交和查询使用 /v1/video/generations；支持 images/image_urls、videos、audios 及 ArtsAPI 扩展参数透传。duration 必须显式传正整数；默认按次收取 ModelPrice，也可在模型任务计费中配置按秒或参数化计费',
     },
     validation: {
       keyFormat: /^sk-/,

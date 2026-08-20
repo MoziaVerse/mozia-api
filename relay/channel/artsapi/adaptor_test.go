@@ -70,6 +70,10 @@ func TestParseTaskResultCapturesArtsAPIUsage(t *testing.T) {
 	assert.Equal(t, 52772, result.TotalTokens)
 }
 
+func TestEstimateBillingUsesPerRequestDefault(t *testing.T) {
+	assert.Nil(t, (&TaskAdaptor{}).EstimateBilling(nil, nil))
+}
+
 func TestValidateRejectsAutomaticDuration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
