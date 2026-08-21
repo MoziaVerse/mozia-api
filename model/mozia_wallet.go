@@ -399,6 +399,76 @@ func GetMoziaWalletView(userId int) (*MoziaWalletView, error) {
 	return view, nil
 }
 
+// MoziaWalletConsumptionView 是按钱包来源拆分的累计净消费。
+//
+// 余额接口只给当前余额,给不出"这个用户一共消费了多少"。开票按客户实际消费金额
+// 计算,且赠送与付费要分开,所以需要这个视图。
+type MoziaWalletConsumptionView struct {
+	UserId int `json:"user_id"`
+	// 累计净消费(quota,正数)
+	Total int `json:"total"`
+	// 按来源拆分的累计净消费(quota,正数),恒含 gift / paid / legacy 三个键
+	Sources map[string]int `json:"sources"`
+	// 来源级账本最早一条记录的时间(秒)。账本晚于系统上线,这之前的消费无法按来源
+	// 归属;调用方据此判断统计的覆盖范围。0 表示账本还没有任何记录。
+	LedgerStartTime int64 `json:"ledger_start_time"`
+}
+
+// GetMoziaWalletConsumption 统计用户按来源拆分的累计净消费。
+//
+// 口径是 consume 与 refund 两类事件的净额。consume 记的是请求发起时的预扣额,
+// 实际用量少于预扣的部分退在 refund 里,只累加 consume 会系统性高估消费。
+//
+// startTime / endTime 传 0 表示不限。账本里消费是负 delta,返回值统一给正数。
+func GetMoziaWalletConsumption(userId int, startTime int64, endTime int64) (*MoziaWalletConsumptionView, error) {
+	if userId <= 0 {
+		return nil, errors.New("user id is empty")
+	}
+
+	var rows []struct {
+		Source string
+		Delta  int
+	}
+	query := DB.Model(&MoziaWalletTransaction{}).
+		Select("source, COALESCE(SUM(delta), 0) AS delta").
+		Where("user_id = ?", userId).
+		Where("event_type IN ?", []string{MoziaWalletEventConsume, MoziaWalletEventRefund})
+	if startTime > 0 {
+		query = query.Where("created_time >= ?", startTime)
+	}
+	if endTime > 0 {
+		query = query.Where("created_time <= ?", endTime)
+	}
+	if err := query.Group("source").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	view := &MoziaWalletConsumptionView{
+		UserId: userId,
+		Sources: map[string]int{
+			MoziaWalletSourceGift:   0,
+			MoziaWalletSourcePaid:   0,
+			MoziaWalletSourceLegacy: 0,
+		},
+	}
+	for _, row := range rows {
+		// 退还多于消费时净额为正,对外按 0 处理,不给出负的"消费额"
+		consumed := max(-row.Delta, 0)
+		view.Sources[row.Source] = consumed
+		view.Total += consumed
+	}
+
+	var ledgerStart int64
+	if err := DB.Model(&MoziaWalletTransaction{}).
+		Select("COALESCE(MIN(created_time), 0)").
+		Scan(&ledgerStart).Error; err != nil {
+		return nil, err
+	}
+	view.LedgerStartTime = ledgerStart
+
+	return view, nil
+}
+
 func AdjustMoziaWalletBalance(input MoziaWalletAdjustInput) (*MoziaWalletView, error) {
 	if input.UserId == 0 {
 		return nil, errors.New("user id is empty")

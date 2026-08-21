@@ -391,6 +391,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 	{
 		ssoRouter.GET("/user/self", controller.GetSelf)
 		ssoRouter.GET("/user/wallet", controller.GetSSOMoziaWallet)
+		ssoRouter.GET("/user/consumption", controller.GetSSOMoziaConsumption)
 		ssoRouter.POST("/user/topup", controller.SSOTopUp)
 		ssoRouter.POST("/user/redeem", middleware.SSOCriticalRateLimit(), controller.SSORedeem)
 		ssoRouter.GET("/pricing", controller.GetPricing)
@@ -451,6 +452,7 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 	walletRoute.Use(middleware.AdminAuth())
 	{
 		walletRoute.GET("/users/:id", middleware.RequirePermission(authz.UserQuotaRead), controller.GetMoziaUserWallet)
+		walletRoute.GET("/users/:id/consumption", middleware.RequirePermission(authz.UserQuotaRead), controller.GetMoziaUserConsumption)
 		walletRoute.POST("/users/:id/adjust", middleware.RequirePermission(authz.UserQuotaWrite), controller.AdjustMoziaUserWallet)
 	}
 
