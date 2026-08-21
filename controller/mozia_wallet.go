@@ -57,6 +57,50 @@ func GetSSOMoziaWallet(c *gin.Context) {
 	common.ApiSuccess(c, wallet)
 }
 
+// parseMoziaConsumptionRange 解析可选的时间范围(unix 秒)。缺省或非法时按不限处理。
+func parseMoziaConsumptionRange(c *gin.Context) (int64, int64) {
+	parse := func(key string) int64 {
+		value, err := strconv.ParseInt(strings.TrimSpace(c.Query(key)), 10, 64)
+		if err != nil || value < 0 {
+			return 0
+		}
+		return value
+	}
+	return parse("start_timestamp"), parse("end_timestamp")
+}
+
+// GetSSOMoziaConsumption 返回当前 SSO 用户按钱包来源拆分的累计净消费。
+func GetSSOMoziaConsumption(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId == 0 {
+		common.ApiErrorMsg(c, "SSO 用户未解析")
+		return
+	}
+	startTime, endTime := parseMoziaConsumptionRange(c)
+	consumption, err := model.GetMoziaWalletConsumption(userId, startTime, endTime)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, consumption)
+}
+
+// GetMoziaUserConsumption 是管理侧按用户查累计净消费的版本。
+func GetMoziaUserConsumption(c *gin.Context) {
+	userId, err := resolveMoziaWalletUserId(c.Param("id"))
+	if err != nil {
+		common.ApiErrorMsg(c, "用户不存在")
+		return
+	}
+	startTime, endTime := parseMoziaConsumptionRange(c)
+	consumption, err := model.GetMoziaWalletConsumption(userId, startTime, endTime)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, consumption)
+}
+
 func resolveMoziaWalletUserId(identifier string) (int, error) {
 	identifier = strings.TrimSpace(identifier)
 	userId, err := strconv.Atoi(identifier)
