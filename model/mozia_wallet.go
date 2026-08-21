@@ -443,20 +443,19 @@ func GetMoziaWalletConsumption(userId int, startTime int64, endTime int64) (*Moz
 		return nil, err
 	}
 
-	view := &MoziaWalletConsumptionView{UserId: userId, Sources: map[string]int{}}
+	view := &MoziaWalletConsumptionView{
+		UserId: userId,
+		Sources: map[string]int{
+			MoziaWalletSourceGift:   0,
+			MoziaWalletSourcePaid:   0,
+			MoziaWalletSourceLegacy: 0,
+		},
+	}
 	for _, row := range rows {
-		consumed := -row.Delta
 		// 退还多于消费时净额为正,对外按 0 处理,不给出负的"消费额"
-		if consumed < 0 {
-			consumed = 0
-		}
+		consumed := max(-row.Delta, 0)
 		view.Sources[row.Source] = consumed
 		view.Total += consumed
-	}
-	for _, source := range []string{MoziaWalletSourceGift, MoziaWalletSourcePaid, MoziaWalletSourceLegacy} {
-		if _, ok := view.Sources[source]; !ok {
-			view.Sources[source] = 0
-		}
 	}
 
 	var ledgerStart int64
