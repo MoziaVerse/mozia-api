@@ -37,7 +37,11 @@ export type ModelPricingFormValues = z.infer<
   ReturnType<typeof createModelPricingSchema>
 >
 
-export type PricingMode = 'per-token' | 'per-request' | 'tiered_expr'
+export type PricingMode =
+  | 'per-token'
+  | 'per-request'
+  | 'tiered_expr'
+  | 'task-parameter'
 
 export type LaneKey =
   | 'completion'
@@ -60,6 +64,7 @@ export type ModelRatioData = {
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
+  taskBilling?: string
 }
 
 export type PreviewRow = {
@@ -234,6 +239,21 @@ export function buildPreviewRows(
         key: 'price',
         label: 'ModelPrice',
         value: values.price || t('Empty'),
+      },
+    ]
+  }
+
+  if (mode === 'task-parameter') {
+    return [
+      {
+        key: 'price',
+        label: 'ModelPrice',
+        value: values.price || t('Empty'),
+      },
+      {
+        key: 'rule',
+        label: t('Task parameter billing'),
+        value: t('Configured'),
       },
     ]
   }

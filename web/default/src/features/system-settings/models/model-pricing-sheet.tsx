@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { zodResolver } from '@hookform/resolvers/zod'
+import { AlertTriangle, Save } from 'lucide-react'
 import {
   forwardRef,
   useCallback,
@@ -25,10 +27,9 @@ import {
   useState,
 } from 'react'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { AlertTriangle, Save } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { cn } from '@/lib/utils'
+
+import { sideDrawerContentClassName } from '@/components/drawer-layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -60,7 +61,8 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { sideDrawerContentClassName } from '@/components/drawer-layout'
+import { cn } from '@/lib/utils'
+
 import {
   EMPTY_LANE_ENABLED,
   EMPTY_LANE_PRICES,
@@ -79,6 +81,14 @@ import {
 } from './model-pricing-core'
 import { PriceInput, PriceLane } from './model-pricing-inputs'
 import { formatPricingNumber } from './pricing-format'
+import {
+  buildTaskBillingConfig,
+  createTaskBillingDraft,
+  parseTaskBillingDraft,
+  validateTaskBillingDraft,
+  type TaskBillingDraft,
+} from './task-billing-config'
+import { TaskBillingEditor } from './task-billing-editor'
 import { TieredPricingEditor } from './tiered-pricing-editor'
 
 export type { ModelRatioData } from './model-pricing-core'
@@ -153,6 +163,9 @@ export const ModelPricingEditorPanel = forwardRef<
   })
   const [billingExpr, setBillingExpr] = useState('')
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
+  const [taskBillingDraft, setTaskBillingDraft] = useState<TaskBillingDraft>(
+    createTaskBillingDraft
+  )
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const isEditMode = !!editData
 
@@ -186,15 +199,19 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
       })
-      setPricingMode(
-        editData.billingMode === 'tiered_expr'
-          ? 'tiered_expr'
-          : editData.price
-            ? 'per-request'
-            : 'per-token'
-      )
+      let nextPricingMode: PricingMode = editData.price
+        ? 'per-request'
+        : 'per-token'
+      if (
+        editData.billingMode === 'tiered_expr' ||
+        editData.billingMode === 'task-parameter'
+      ) {
+        nextPricingMode = editData.billingMode
+      }
+      setPricingMode(nextPricingMode)
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
+      setTaskBillingDraft(parseTaskBillingDraft(editData.taskBilling || ''))
     } else {
       form.reset({
         name: '',
@@ -210,6 +227,7 @@ export const ModelPricingEditorPanel = forwardRef<
       setPricingMode('per-token')
       setBillingExpr('')
       setRequestRuleExpr('')
+      setTaskBillingDraft(createTaskBillingDraft())
     }
 
     setPromptPrice(nextLaneState.promptPrice)
@@ -409,6 +427,19 @@ export const ModelPricingEditorPanel = forwardRef<
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const validatePricingValues = useCallback(() => {
+    if (pricingMode === 'task-parameter') {
+      if (toNumberOrNull(form.getValues('price')) === null) {
+        form.setError('price', { message: t('Fixed price is required') })
+        return false
+      }
+      const taskBillingError = validateTaskBillingDraft(taskBillingDraft)
+      if (taskBillingError) {
+        form.setError('price', {
+          message: t(taskBillingError),
+        })
+        return false
+      }
+    }
     if (
       pricingMode === 'per-token' &&
       toNumberOrNull(promptPrice) === null &&
@@ -434,7 +465,15 @@ export const ModelPricingEditorPanel = forwardRef<
     }
 
     return true
-  }, [form, laneEnabled, lanePrices, pricingMode, promptPrice, t])
+  }, [
+    form,
+    laneEnabled,
+    lanePrices,
+    pricingMode,
+    promptPrice,
+    taskBillingDraft,
+    t,
+  ])
 
   const buildSubmitData = useCallback(
     (values: ModelPricingFormValues) => {
@@ -455,10 +494,15 @@ export const ModelPricingEditorPanel = forwardRef<
         data.billingExpr = billingExpr
         data.requestRuleExpr = requestRuleExpr
       }
+      if (pricingMode === 'task-parameter') {
+        data.taskBilling = JSON.stringify(
+          buildTaskBillingConfig(taskBillingDraft)
+        )
+      }
 
       return data
     },
-    [billingExpr, pricingMode, requestRuleExpr]
+    [billingExpr, pricingMode, requestRuleExpr, taskBillingDraft]
   )
 
   useImperativeHandle(
@@ -542,7 +586,7 @@ export const ModelPricingEditorPanel = forwardRef<
                   onValueChange={handleModeChange}
                   className='gap-4'
                 >
-                  <TabsList className='grid w-full grid-cols-3'>
+                  <TabsList className='grid w-full grid-cols-4'>
                     <TabsTrigger value='per-token'>
                       {t('Per-token')}
                     </TabsTrigger>
@@ -551,6 +595,9 @@ export const ModelPricingEditorPanel = forwardRef<
                     </TabsTrigger>
                     <TabsTrigger value='tiered_expr'>
                       {t('Expression')}
+                    </TabsTrigger>
+                    <TabsTrigger value='task-parameter'>
+                      {t('Parameter')}
                     </TabsTrigger>
                   </TabsList>
 
@@ -646,6 +693,48 @@ export const ModelPricingEditorPanel = forwardRef<
                         requestRuleExpr={requestRuleExpr}
                         onBillingExprChange={setBillingExpr}
                         onRequestRuleExprChange={setRequestRuleExpr}
+                      />
+                    </FieldGroup>
+                  </TabsContent>
+
+                  <TabsContent value='task-parameter' className='pt-0'>
+                    <FieldGroup className='gap-5'>
+                      <FormField
+                        control={form.control}
+                        name='price'
+                        render={({ field }) => (
+                          <FormItem className='contents'>
+                            <Field>
+                              <FieldLabel>{t('Fixed price')}</FieldLabel>
+                              <FormControl>
+                                <InputGroup>
+                                  <InputGroupAddon>$</InputGroupAddon>
+                                  <InputGroupInput
+                                    inputMode='decimal'
+                                    placeholder='0.01'
+                                    {...field}
+                                    onChange={(event) => {
+                                      const value = event.target.value
+                                      if (numericDraftRegex.test(value)) {
+                                        field.onChange(value)
+                                      }
+                                    }}
+                                  />
+                                </InputGroup>
+                              </FormControl>
+                              <FieldDescription>
+                                {t(
+                                  'Base USD price before applying the configured task parameters.'
+                                )}
+                              </FieldDescription>
+                              <FormMessage />
+                            </Field>
+                          </FormItem>
+                        )}
+                      />
+                      <TaskBillingEditor
+                        draft={taskBillingDraft}
+                        onChange={setTaskBillingDraft}
                       />
                     </FieldGroup>
                   </TabsContent>

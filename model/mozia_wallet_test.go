@@ -138,3 +138,91 @@ func TestAdjustMoziaWalletBalance(t *testing.T) {
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrMoziaWalletInsufficient))
 }
+
+func TestGetMoziaWalletConsumptionNetsRefundAgainstConsume(t *testing.T) {
+	truncateTables(t)
+
+	seedMoziaWalletUser(t, 1010, 0)
+	require.NoError(t, RecordMoziaInitialGiftQuota(1010, 100, "test", "gift"))
+	require.NoError(t, GrantMoziaWalletQuota(MoziaWalletGrantInput{
+		UserId:        1010,
+		Source:        MoziaWalletSourcePaid,
+		Amount:        200,
+		EventType:     MoziaWalletEventTopUp,
+		ReferenceType: "test",
+		ReferenceId:   "paid",
+	}))
+
+	// 预扣 150:先扣完 100 赠送,再扣 50 付费(默认 gift_first)
+	require.NoError(t, ReserveMoziaWalletQuota("req-consume", 1010, "any-model", 150))
+	// 实际只用了 120,多预扣的 30 退回付费来源
+	require.NoError(t, SettleMoziaWalletReservation("req-consume", 1010, "any-model", 120))
+
+	view, err := GetMoziaWalletConsumption(1010, 0, 0)
+	require.NoError(t, err)
+	// 净消费必须是 120 而不是预扣的 150 —— 只累加 consume 会高估
+	assert.Equal(t, 120, view.Total)
+	assert.Equal(t, 100, view.Sources[MoziaWalletSourceGift])
+	assert.Equal(t, 20, view.Sources[MoziaWalletSourcePaid])
+	assert.Equal(t, 0, view.Sources[MoziaWalletSourceLegacy])
+	assert.Positive(t, view.LedgerStartTime)
+}
+
+func TestGetMoziaWalletConsumptionExcludesTopUpAndAdjust(t *testing.T) {
+	truncateTables(t)
+
+	seedMoziaWalletUser(t, 1011, 0)
+	require.NoError(t, GrantMoziaWalletQuota(MoziaWalletGrantInput{
+		UserId:        1011,
+		Source:        MoziaWalletSourcePaid,
+		Amount:        500,
+		EventType:     MoziaWalletEventTopUp,
+		ReferenceType: "test",
+		ReferenceId:   "paid",
+	}))
+	delta := 300
+	_, err := AdjustMoziaWalletBalance(MoziaWalletAdjustInput{
+		UserId: 1011,
+		Source: MoziaWalletSourcePaid,
+		Delta:  &delta,
+		Reason: "人工调账",
+	})
+	require.NoError(t, err)
+
+	view, err := GetMoziaWalletConsumption(1011, 0, 0)
+	require.NoError(t, err)
+	// 充值与人工调账都不是消费。这也是不能用「充值合计 - 当前余额」推导消费的原因:
+	// 调账会让推导值失真,而这里按事件类型统计不受影响。
+	assert.Equal(t, 0, view.Total)
+}
+
+func TestGetMoziaWalletConsumptionRespectsTimeRange(t *testing.T) {
+	truncateTables(t)
+
+	seedMoziaWalletUser(t, 1012, 0)
+	require.NoError(t, GrantMoziaWalletQuota(MoziaWalletGrantInput{
+		UserId:        1012,
+		Source:        MoziaWalletSourcePaid,
+		Amount:        500,
+		EventType:     MoziaWalletEventTopUp,
+		ReferenceType: "test",
+		ReferenceId:   "paid",
+	}))
+	require.NoError(t, ReserveMoziaWalletQuota("req-range", 1012, "any-model", 80))
+	require.NoError(t, SettleMoziaWalletReservation("req-range", 1012, "any-model", 80))
+
+	now := common.GetTimestamp()
+	view, err := GetMoziaWalletConsumption(1012, 0, now)
+	require.NoError(t, err)
+	assert.Equal(t, 80, view.Total)
+
+	// 窗口落在消费之后,统计为 0
+	view, err = GetMoziaWalletConsumption(1012, now+3600, 0)
+	require.NoError(t, err)
+	assert.Equal(t, 0, view.Total)
+}
+
+func TestGetMoziaWalletConsumptionRejectsEmptyUser(t *testing.T) {
+	_, err := GetMoziaWalletConsumption(0, 0, 0)
+	assert.Error(t, err)
+}

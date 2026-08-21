@@ -38,6 +38,13 @@ func (a *TaskAdaptor) GetChannelName() string {
 	return channelName
 }
 
+// EstimateBilling keeps the unconfigured model default at one ModelPrice per
+// task. Explicit task billing rules can still opt the model into per-second or
+// parametric billing.
+func (a *TaskAdaptor) EstimateBilling(_ *gin.Context, _ *relaycommon.RelayInfo) map[string]float64 {
+	return nil
+}
+
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
 	if strings.TrimSpace(info.ChannelBaseUrl) == "" {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("channel base URL is required"), "invalid_channel_base_url", http.StatusBadRequest)

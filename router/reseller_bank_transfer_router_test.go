@@ -58,6 +58,18 @@ func TestResellerBankTransferContract(t *testing.T) {
 	assert.True(t, configured.BankTransfer.Configured)
 	assert.Equal(t, "57192390001", configured.BankTransfer.AccountNumber)
 
+	recorder = request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/payment/bank-transfer", reseller.Id), `{"payment_config_enabled":false,"account_name":"杭州量棱文化有限公司","account_number":"57192390001","bank_name":"招商银行杭州支行"}`, "mozia-mega-test-token", "bank-self-config-disabled_123", nil)
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	recorder = request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/payment-method", `{"subject":"bank-customer"}`, "matrix-reseller-registration-test-token", "bank-mega-configured_123", nil)
+	response = decodeM2Envelope(t, recorder)
+	var megaConfigured model.ResellerCustomerPaymentMethod
+	require.NoError(t, common.Unmarshal(response.RawData, &megaConfigured))
+	assert.Equal(t, "bank_transfer", megaConfigured.Mode)
+	require.NotNil(t, megaConfigured.BankTransfer)
+	assert.False(t, megaConfigured.BankTransfer.Allowed)
+	assert.True(t, megaConfigured.BankTransfer.Configured)
+
 	defaultPreference := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d", customer.Id), "", "matrix-reseller-management-test-token", "bank-preference-default_123", headers("bank-admin"))
 	response = decodeM2Envelope(t, defaultPreference)
 	require.Equal(t, http.StatusOK, defaultPreference.Code)

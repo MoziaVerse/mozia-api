@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/taskbilling"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -35,6 +36,7 @@ type Pricing struct {
 	SupportedEndpointTypes []constant.EndpointType `json:"supported_endpoint_types"`
 	BillingMode            string                  `json:"billing_mode,omitempty"`
 	BillingExpr            string                  `json:"billing_expr,omitempty"`
+	TaskBilling            *taskbilling.Config     `json:"task_billing,omitempty"`
 	PricingVersion         string                  `json:"pricing_version,omitempty"`
 	Access                 *PricingAccess          `json:"access,omitempty"`
 }
@@ -344,6 +346,9 @@ func updatePricing() {
 				pricing.BillingMode = billingMode
 				pricing.BillingExpr = expr
 			}
+		}
+		if taskBilling, ok := billing_setting.GetTaskBilling(model); ok {
+			pricing.TaskBilling = &taskBilling
 		}
 		pricingMap = append(pricingMap, pricing)
 	}

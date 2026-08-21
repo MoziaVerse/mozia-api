@@ -196,17 +196,34 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		return nil, service.TaskErrorFromAPIError(apiErr)
 	}
 
-	// 5. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）
-	//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
-	//    ResolveOriginTask 可能已在 remix 路径中预设了 OtherRatios，此处合并。
-	if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
+	// 5. 计费估算：显式 task_billing 配置优先；未配置时保持每个
+	//    adaptor 的既有 EstimateBilling 语义。两者均使用已经过渠道参数
+	//    覆盖处理的请求体。
+	configuredRatios, taskBillingConfig, hasTaskBillingConfig, err := helper.TaskBillingRatios(c, modelName)
+	if err != nil {
+		return nil, service.TaskErrorWrapperLocal(err, "invalid_task_billing", http.StatusBadRequest)
+	}
+	if hasTaskBillingConfig {
+		if !info.PriceData.UsePrice {
+			return nil, service.TaskErrorWrapperLocal(
+				fmt.Errorf("task billing for model %s requires a ModelPrice", modelName),
+				"invalid_task_billing",
+				http.StatusBadRequest,
+			)
+		}
+		info.PriceData.TaskBillingMode = taskBillingConfig.Mode
+		info.PriceData.TaskBillingVersion = taskBillingConfig.Version
+		for k, v := range configuredRatios {
+			info.PriceData.AddOtherRatio(k, v)
+		}
+	} else if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
 		for k, v := range estimatedRatios {
 			info.PriceData.AddOtherRatio(k, v)
 		}
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度
-	if !common.StringsContains(constant.TaskPricePatches, modelName) {
+	if hasTaskBillingConfig || !common.StringsContains(constant.TaskPricePatches, modelName) {
 		for _, ra := range info.PriceData.OtherRatios {
 			if ra != 1.0 {
 				info.PriceData.Quota = int(float64(info.PriceData.Quota) * ra)
@@ -254,11 +271,13 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 11. 提交后计费调整：让适配器根据上游实际返回调整 OtherRatios
 	finalQuota := info.PriceData.Quota
-	if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
-		// 基于调整后的 ratios 重新计算 quota
-		finalQuota = recalcQuotaFromRatios(info, adjustedRatios)
-		info.PriceData.OtherRatios = adjustedRatios
-		info.PriceData.Quota = finalQuota
+	if !hasTaskBillingConfig {
+		if adjustedRatios := adaptor.AdjustBillingOnSubmit(info, taskData); len(adjustedRatios) > 0 {
+			// 基于调整后的 ratios 重新计算 quota
+			finalQuota = recalcQuotaFromRatios(info, adjustedRatios)
+			info.PriceData.OtherRatios = adjustedRatios
+			info.PriceData.Quota = finalQuota
+		}
 	}
 
 	return &TaskSubmitResult{
