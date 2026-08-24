@@ -87,6 +87,7 @@ type ResellerMember struct {
 	Id         int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	ResellerId int    `json:"reseller_id" gorm:"not null;uniqueIndex:uq_reseller_members_reseller_subject,priority:1"`
 	Subject    string `json:"subject" gorm:"type:varchar(255);not null;index;uniqueIndex:uq_reseller_members_reseller_subject,priority:2"`
+	Name       string `json:"name" gorm:"type:varchar(128);not null;default:''"`
 	Role       string `json:"role" gorm:"type:varchar(16);not null"`
 	Status     string `json:"status" gorm:"type:varchar(16);not null"`
 }
@@ -207,6 +208,7 @@ func NormalizeResellerLogo(raw string) (string, error) {
 type ResellerMemberRecord struct {
 	Id      int    `json:"id"`
 	Subject string `json:"subject"`
+	Name    string `json:"name"`
 	Role    string `json:"role"`
 	Status  string `json:"status"`
 }
@@ -417,7 +419,7 @@ func ListResellerAdminRecords() ([]ResellerAdminRecord, error) {
 func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 	var records []ResellerMemberRecord
 	err := DB.Table("reseller_members").
-		Select("id, subject, role, status").
+		Select("id, subject, name, role, status").
 		Where("reseller_id = ?", resellerId).
 		Order("id ASC").
 		Scan(&records).Error
@@ -427,18 +429,25 @@ func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 	return records, nil
 }
 
-func CreateResellerSubagentMember(resellerId int, subject string) (*ResellerMemberRecord, error) {
-	if !ValidResellerSubject(subject) {
-		return nil, ErrInvalidResellerSubject
+func CreateResellerSubagentMember(resellerId int, customerId int, name string) (*ResellerMemberRecord, error) {
+	if customerId <= 0 || name == "" || !validResellerCustomerText(name, 128) {
+		return nil, ErrInvalidResellerName
 	}
-	member := ResellerMember{ResellerId: resellerId, Subject: subject, Role: ResellerRoleSubagent, Status: ResellerMemberStatusActive}
+	var customer ResellerCustomer
+	if err := DB.Where("id = ? AND reseller_id = ? AND status = ?", customerId, resellerId, ResellerCustomerStatusActive).Take(&customer).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrResellerCustomerNotFound
+		}
+		return nil, err
+	}
+	member := ResellerMember{ResellerId: resellerId, Subject: customer.Subject, Name: name, Role: ResellerRoleSubagent, Status: ResellerMemberStatusActive}
 	if err := DB.Create(&member).Error; err != nil {
 		if isResellerUniqueConstraintError(err) {
 			return nil, ErrResellerConflict
 		}
 		return nil, err
 	}
-	return &ResellerMemberRecord{Id: member.Id, Subject: member.Subject, Role: member.Role, Status: member.Status}, nil
+	return &ResellerMemberRecord{Id: member.Id, Subject: member.Subject, Name: member.Name, Role: member.Role, Status: member.Status}, nil
 }
 
 func AssignResellerCustomerSubagent(resellerId int, customerId int, memberId *int) (*ResellerCustomerRecord, error) {

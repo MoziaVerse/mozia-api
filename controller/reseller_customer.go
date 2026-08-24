@@ -26,7 +26,8 @@ type resellerCustomerStatusRequest struct {
 }
 
 type resellerSubagentCreateRequest struct {
-	Subject    string          `json:"subject"`
+	Name       string          `json:"name"`
+	CustomerId int             `json:"customer_id"`
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
@@ -249,16 +250,18 @@ func CreateResellerManagementSubagent(c *gin.Context) {
 		return
 	}
 	var request resellerSubagentCreateRequest
-	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || !model.ValidResellerSubject(request.Subject) {
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || request.CustomerId <= 0 {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
-	record, err := model.CreateResellerSubagentMember(resellerContext.ResellerId, request.Subject)
+	record, err := model.CreateResellerSubagentMember(resellerContext.ResellerId, request.CustomerId, request.Name)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusCreated, record)
-	case errors.Is(err, model.ErrInvalidResellerSubject):
+	case errors.Is(err, model.ErrInvalidResellerName):
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	case errors.Is(err, model.ErrResellerCustomerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
 	case errors.Is(err, model.ErrResellerConflict):
 		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller member already exists")
 	default:
