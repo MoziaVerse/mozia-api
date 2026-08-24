@@ -37,8 +37,9 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 	common.OptionMapRWMutex.Lock()
 	original := common.OptionMap
 	common.OptionMap = map[string]string{
-		"ModelPrice": `{ "gpt-test": 1 }`,
-		"SMTPToken":  "must-not-leak",
+		"ModelPrice":                   `{ "gpt-test": 1 }`,
+		"billing_setting.task_billing": `{ "video-test": { "version": 1, "mode": "per_request" } }`,
+		"SMTPToken":                    "must-not-leak",
 	}
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {
@@ -59,8 +60,14 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.Success)
+	foundTaskBilling := false
 	for _, option := range response.Data {
 		assert.NotEqual(t, "SMTPToken", option.Key)
 		assert.NotEqual(t, "must-not-leak", option.Value)
+		if option.Key == "billing_setting.task_billing" {
+			foundTaskBilling = true
+			assert.JSONEq(t, `{ "video-test": { "version": 1, "mode": "per_request" } }`, option.Value)
+		}
 	}
+	assert.True(t, foundTaskBilling)
 }

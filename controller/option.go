@@ -29,6 +29,7 @@ var completionRatioMetaOptionKeys = []string{
 	"ImageRatio",
 	"AudioRatio",
 	"AudioCompletionRatio",
+	billing_setting.TaskBillingOptionKey,
 }
 
 const contextKeyModelPricingOptionOnly = "model_pricing_option_only"
