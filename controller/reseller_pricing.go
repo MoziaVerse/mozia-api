@@ -145,6 +145,10 @@ func GetResellerManagementPricing(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller pricing forbidden")
+		return
+	}
 	customerId, ok := optionalPositiveQueryID(c, "customer_id")
 	if !ok {
 		return
@@ -207,6 +211,10 @@ func CreateResellerManagementRetailPrice(c *gin.Context) {
 func PreviewResellerManagementPricing(c *gin.Context) {
 	resellerContext, ok := resellerManagementContext(c)
 	if !ok {
+		return
+	}
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller pricing forbidden")
 		return
 	}
 	request, baseQuota, ok := resellerPricingPreviewBody(c, true)

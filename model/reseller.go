@@ -26,9 +26,10 @@ const (
 	resellerCustomerDefaultGroup  = "default"
 	resellerCustomerExtGroup      = "ext"
 
-	ResellerRoleOwner  = "owner"
-	ResellerRoleAdmin  = "admin"
-	ResellerRoleViewer = "viewer"
+	ResellerRoleOwner    = "owner"
+	ResellerRoleAdmin    = "admin"
+	ResellerRoleViewer   = "viewer"
+	ResellerRoleSubagent = "subagent"
 
 	ResellerInvitationStatusPending  = "pending"
 	ResellerInvitationStatusExpired  = "expired"
@@ -99,6 +100,8 @@ type ResellerCustomer struct {
 	ProfileSyncedAt    int64  `json:"profile_synced_at" gorm:"not null;default:0;index"`
 	Remark             string `json:"-" gorm:"type:varchar(255);not null;default:''"`
 	UseResellerPayment *bool  `json:"-" gorm:"column:use_reseller_payment"`
+	SubagentMemberId   *int   `json:"subagent_member_id,omitempty" gorm:"index"`
+	SubagentAssignedAt int64  `json:"subagent_assigned_at" gorm:"not null;default:0;index"`
 	Status             string `json:"status" gorm:"type:varchar(16);not null;index"`
 	CreatedAt          int64  `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt          int64  `json:"updated_at" gorm:"autoUpdateTime;column:updated_at"`
@@ -117,6 +120,7 @@ type ResellerInvitation struct {
 }
 
 type ResellerContext struct {
+	MemberId     int    `json:"member_id"`
 	ResellerId   int    `json:"reseller_id"`
 	ResellerName string `json:"reseller_name"`
 	Subject      string `json:"subject"`
@@ -220,6 +224,8 @@ type ResellerCustomerRecord struct {
 	ProfileSyncedAt       int64   `json:"profile_synced_at"`
 	OverseasModelAccess   bool    `json:"overseas_model_access"`
 	UseResellerPayment    bool    `json:"use_reseller_payment"`
+	SubagentMemberId      *int    `json:"subagent_member_id,omitempty"`
+	SubagentAssignedAt    int64   `json:"subagent_assigned_at"`
 	Remark                *string `json:"remark,omitempty"`
 	BalanceQuota          int     `json:"-"`
 	GiftBalanceQuota      int     `json:"-"`
@@ -359,7 +365,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 	if host == configuredResellerSharedHost() {
 		var contexts []ResellerContext
 		err := query.
-			Select("r.id AS reseller_id, r.name AS reseller_name, rm.subject, rm.role").
+			Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rm.role").
 			Limit(2).
 			Scan(&contexts).Error
 		if err != nil {
@@ -374,7 +380,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 
 	var context ResellerContext
 	err := query.
-		Select("r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role").
+		Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role").
 		Joins("JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
 		Take(&context).Error
 	if err != nil {
@@ -421,6 +427,44 @@ func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 	return records, nil
 }
 
+func CreateResellerSubagentMember(resellerId int, subject string) (*ResellerMemberRecord, error) {
+	if !ValidResellerSubject(subject) {
+		return nil, ErrInvalidResellerSubject
+	}
+	member := ResellerMember{ResellerId: resellerId, Subject: subject, Role: ResellerRoleSubagent, Status: ResellerMemberStatusActive}
+	if err := DB.Create(&member).Error; err != nil {
+		if isResellerUniqueConstraintError(err) {
+			return nil, ErrResellerConflict
+		}
+		return nil, err
+	}
+	return &ResellerMemberRecord{Id: member.Id, Subject: member.Subject, Role: member.Role, Status: member.Status}, nil
+}
+
+func AssignResellerCustomerSubagent(resellerId int, customerId int, memberId *int) (*ResellerCustomerRecord, error) {
+	assignedAt := int64(0)
+	if memberId != nil {
+		var member ResellerMember
+		if err := DB.Where("id = ? AND reseller_id = ? AND role = ? AND status = ?", *memberId, resellerId, ResellerRoleSubagent, ResellerMemberStatusActive).Take(&member).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrResellerForbidden
+			}
+			return nil, err
+		}
+		assignedAt = common.GetTimestamp()
+	}
+	update := DB.Model(&ResellerCustomer{}).
+		Where("id = ? AND reseller_id = ?", customerId, resellerId).
+		Updates(map[string]any{"subagent_member_id": memberId, "subagent_assigned_at": assignedAt})
+	if update.Error != nil {
+		return nil, update.Error
+	}
+	if update.RowsAffected == 0 {
+		return nil, ErrResellerCustomerNotFound
+	}
+	return GetResellerCustomerRecord(resellerId, customerId, true)
+}
+
 func ListResellerCustomerRecords(resellerId int, includeRemark bool) ([]ResellerCustomerRecord, error) {
 	records := make([]ResellerCustomerRecord, 0)
 	err := resellerCustomerRecordsQuery(DB, includeRemark).
@@ -436,10 +480,41 @@ func ListResellerCustomerRecords(resellerId int, includeRemark bool) ([]Reseller
 	return records, nil
 }
 
+func ListResellerSubagentCustomerRecords(resellerId int, memberId int) ([]ResellerCustomerRecord, error) {
+	records := make([]ResellerCustomerRecord, 0)
+	err := resellerCustomerRecordsQuery(DB, false).
+		Where("customers.reseller_id = ? AND customers.subagent_member_id = ?", resellerId, memberId).
+		Order("customers.id ASC").
+		Scan(&records).Error
+	if err != nil {
+		return nil, err
+	}
+	for i := range records {
+		setResellerCustomerBalanceDisplay(&records[i])
+	}
+	return records, nil
+}
+
 func GetResellerCustomerRecord(resellerId int, customerId int, includeRemark bool) (*ResellerCustomerRecord, error) {
 	var record ResellerCustomerRecord
 	result := resellerCustomerRecordsQuery(DB, includeRemark).
 		Where("customers.id = ? AND customers.reseller_id = ?", customerId, resellerId).
+		Limit(1).
+		Scan(&record)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrResellerCustomerNotFound
+	}
+	setResellerCustomerBalanceDisplay(&record)
+	return &record, nil
+}
+
+func GetResellerSubagentCustomerRecord(resellerId int, memberId int, customerId int) (*ResellerCustomerRecord, error) {
+	var record ResellerCustomerRecord
+	result := resellerCustomerRecordsQuery(DB, false).
+		Where("customers.id = ? AND customers.reseller_id = ? AND customers.subagent_member_id = ?", customerId, resellerId, memberId).
 		Limit(1).
 		Scan(&record)
 	if result.Error != nil {
@@ -1084,7 +1159,7 @@ func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {
 	if trueValue == "" {
 		trueValue, falseValue = "1", "0"
 	}
-	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, COALESCE(customers.use_reseller_payment, " + trueValue + ") AS use_reseller_payment, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
+	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, customers.subagent_member_id, customers.subagent_assigned_at, COALESCE(customers.use_reseller_payment, " + trueValue + ") AS use_reseller_payment, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
 	if includeRemark {
 		fields += ", customers.remark"
 	}

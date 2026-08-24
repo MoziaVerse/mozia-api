@@ -25,6 +25,16 @@ type resellerCustomerStatusRequest struct {
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
+type resellerSubagentCreateRequest struct {
+	Subject    string          `json:"subject"`
+	ResellerId json.RawMessage `json:"reseller_id"`
+}
+
+type resellerCustomerSubagentRequest struct {
+	SubagentMemberId *int            `json:"subagent_member_id"`
+	ResellerId       json.RawMessage `json:"reseller_id"`
+}
+
 type resellerCustomerRemarkRequest struct {
 	Remark     *string         `json:"remark"`
 	ResellerId json.RawMessage `json:"reseller_id"`
@@ -212,6 +222,10 @@ func ListResellerManagementMembers(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller members forbidden")
+		return
+	}
 	records, err := model.ListResellerMemberRecords(resellerContext.ResellerId)
 	if err != nil {
 		logger.LogError(c.Request.Context(), "ListResellerMemberRecords database error: "+err.Error())
@@ -221,12 +235,50 @@ func ListResellerManagementMembers(c *gin.Context) {
 	writeResellerAdminSuccess(c, http.StatusOK, records)
 }
 
+func CreateResellerManagementSubagent(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if resellerContext.Role != model.ResellerRoleOwner {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller owner access required")
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerSubagentCreateRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || !model.ValidResellerSubject(request.Subject) {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	record, err := model.CreateResellerSubagentMember(resellerContext.ResellerId, request.Subject)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusCreated, record)
+	case errors.Is(err, model.ErrInvalidResellerSubject):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	case errors.Is(err, model.ErrResellerConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller member already exists")
+	default:
+		logger.LogError(c.Request.Context(), "CreateResellerSubagentMember database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
 func ListResellerManagementCustomers(c *gin.Context) {
 	resellerContext, ok := resellerManagementContext(c)
 	if !ok {
 		return
 	}
-	records, err := model.ListResellerCustomerRecords(resellerContext.ResellerId, resellerContext.Role == model.ResellerRoleOwner)
+	var records []model.ResellerCustomerRecord
+	var err error
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		records, err = model.ListResellerSubagentCustomerRecords(resellerContext.ResellerId, resellerContext.MemberId)
+	} else {
+		records, err = model.ListResellerCustomerRecords(resellerContext.ResellerId, resellerContext.Role == model.ResellerRoleOwner)
+	}
 	if err != nil {
 		logger.LogError(c.Request.Context(), "ListResellerCustomerRecords database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
@@ -244,7 +296,13 @@ func GetResellerManagementCustomer(c *gin.Context) {
 	if !valid {
 		return
 	}
-	record, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, resellerContext.Role == model.ResellerRoleOwner)
+	var record *model.ResellerCustomerRecord
+	var err error
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		record, err = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, resellerContext.MemberId, customerId)
+	} else {
+		record, err = model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, resellerContext.Role == model.ResellerRoleOwner)
+	}
 	if errors.Is(err, model.ErrResellerCustomerNotFound) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
 		return
@@ -255,6 +313,46 @@ func GetResellerManagementCustomer(c *gin.Context) {
 		return
 	}
 	writeResellerAdminSuccess(c, http.StatusOK, record)
+}
+
+func UpdateResellerManagementCustomerSubagent(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if resellerContext.Role != model.ResellerRoleOwner {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller owner access required")
+		return
+	}
+	customerId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerCustomerSubagentRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || request.SubagentMemberId == nil || *request.SubagentMemberId < 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	var memberId *int
+	if *request.SubagentMemberId > 0 {
+		memberId = request.SubagentMemberId
+	}
+	record, err := model.AssignResellerCustomerSubagent(resellerContext.ResellerId, customerId, memberId)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrResellerForbidden):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller subagent not found")
+	case errors.Is(err, model.ErrResellerCustomerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+	default:
+		logger.LogError(c.Request.Context(), "AssignResellerCustomerSubagent database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
 }
 
 func UpdateResellerManagementCustomerStatus(c *gin.Context) {
@@ -404,6 +502,10 @@ func UpdateResellerManagementCustomerPaymentPreference(c *gin.Context) {
 func ListResellerManagementInvitations(c *gin.Context) {
 	resellerContext, ok := resellerManagementContext(c)
 	if !ok {
+		return
+	}
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller invitations forbidden")
 		return
 	}
 	records, err := model.ListResellerInvitationRecords(resellerContext.ResellerId)

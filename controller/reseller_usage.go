@@ -71,8 +71,18 @@ func GetResellerManagementUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var subagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		subagentMemberId = &resellerContext.MemberId
+	}
 	if customerId != nil {
-		if _, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, *customerId, false); err != nil {
+		var err error
+		if subagentMemberId == nil {
+			_, err = model.GetResellerCustomerRecord(resellerContext.ResellerId, *customerId, false)
+		} else {
+			_, err = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, resellerContext.MemberId, *customerId)
+		}
+		if err != nil {
 			handleResellerUsageError(c, err)
 			return
 		}
@@ -81,7 +91,7 @@ func GetResellerManagementUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := model.ListResellerUsage(resellerContext.ResellerId, customerId, startTimestamp, endTimestamp, modelName)
+	result, err := model.ListResellerUsage(resellerContext.ResellerId, customerId, startTimestamp, endTimestamp, modelName, subagentMemberId)
 	if err != nil {
 		handleResellerUsageError(c, err)
 		return
@@ -127,10 +137,23 @@ func GetResellerManagementTasks(c *gin.Context) {
 		result *model.ResellerTaskPage
 		err    error
 	)
+	var subagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		subagentMemberId = &resellerContext.MemberId
+	}
 	if customerId == nil {
-		result, err = model.ListResellerTasks(resellerContext.ResellerId, page, pageSize, startTimestamp, endTimestamp, taskID)
+		result, err = model.ListResellerTasks(resellerContext.ResellerId, page, pageSize, startTimestamp, endTimestamp, taskID, subagentMemberId)
 	} else {
-		customer, customerErr := model.GetResellerCustomerRecord(resellerContext.ResellerId, *customerId, false)
+		var customer *model.ResellerCustomerRecord
+		var customerErr error
+		if subagentMemberId == nil {
+			customer, customerErr = model.GetResellerCustomerRecord(resellerContext.ResellerId, *customerId, false)
+		} else {
+			customer, customerErr = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, resellerContext.MemberId, *customerId)
+			if customer != nil && customer.SubagentAssignedAt > customer.JoinedAt {
+				customer.JoinedAt = customer.SubagentAssignedAt
+			}
+		}
 		if customerErr != nil {
 			handleResellerUsageError(c, customerErr)
 			return

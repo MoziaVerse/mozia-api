@@ -84,22 +84,25 @@ type resellerTaskRow struct {
 	Properties Properties
 }
 
-func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, endTimestamp *int64, modelName *string) (*ResellerUsageResult, error) {
+func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, endTimestamp *int64, modelName *string, subagentMemberId *int) (*ResellerUsageResult, error) {
 	// ponytail: parse usage JSON in Go for SQLite/MySQL parity; add normalized token columns if full-history scans become costly.
 	rows := make([]resellerUsageSettlementRow, 0)
 	query := DB.Model(&ResellerRequestSettlement{}).
-		Select("customer_id, model_name, actual_customer_quota, usage_json").
-		Where("reseller_id = ? AND status = ?", resellerId, ResellerSettlementStatusSettled)
+		Select("reseller_request_settlements.customer_id, reseller_request_settlements.model_name, reseller_request_settlements.actual_customer_quota, reseller_request_settlements.usage_json").
+		Where("reseller_request_settlements.reseller_id = ? AND reseller_request_settlements.status = ?", resellerId, ResellerSettlementStatusSettled)
+	if subagentMemberId != nil {
+		query = query.Joins("JOIN reseller_customers AS scoped_customer ON scoped_customer.id = reseller_request_settlements.customer_id AND scoped_customer.reseller_id = reseller_request_settlements.reseller_id AND scoped_customer.subagent_member_id = ? AND reseller_request_settlements.created_at >= scoped_customer.subagent_assigned_at", *subagentMemberId)
+	}
 	if customerId != nil {
-		query = query.Where("customer_id = ?", *customerId)
+		query = query.Where("reseller_request_settlements.customer_id = ?", *customerId)
 	}
 	if startTimestamp != nil && endTimestamp != nil {
-		query = query.Where("created_at >= ? AND created_at <= ?", *startTimestamp, *endTimestamp)
+		query = query.Where("reseller_request_settlements.created_at >= ? AND reseller_request_settlements.created_at <= ?", *startTimestamp, *endTimestamp)
 	}
 	if modelName != nil {
-		query = query.Where("model_name = ?", *modelName)
+		query = query.Where("reseller_request_settlements.model_name = ?", *modelName)
 	}
-	if err := query.Order("customer_id ASC").Order("model_name ASC").Order("id ASC").Find(&rows).Error; err != nil {
+	if err := query.Order("reseller_request_settlements.customer_id ASC").Order("reseller_request_settlements.model_name ASC").Order("reseller_request_settlements.id ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
@@ -208,14 +211,25 @@ func ListResellerCustomerTasks(customer *ResellerCustomerRecord, page int, pageS
 	return taskPage, nil
 }
 
-func ListResellerTasks(resellerId int, page int, pageSize int, startTimestamp *int64, endTimestamp *int64, taskID *string) (*ResellerTaskPage, error) {
+func ListResellerTasks(resellerId int, page int, pageSize int, startTimestamp *int64, endTimestamp *int64, taskID *string, subagentMemberId *int) (*ResellerTaskPage, error) {
 	taskPage := &ResellerTaskPage{
 		Page:     page,
 		PageSize: pageSize,
 		Items:    make([]ResellerTaskItem, 0),
 	}
 
-	customers, err := ListResellerCustomerRecords(resellerId, false)
+	var customers []ResellerCustomerRecord
+	var err error
+	if subagentMemberId == nil {
+		customers, err = ListResellerCustomerRecords(resellerId, false)
+	} else {
+		customers, err = ListResellerSubagentCustomerRecords(resellerId, *subagentMemberId)
+		for i := range customers {
+			if customers[i].SubagentAssignedAt > customers[i].JoinedAt {
+				customers[i].JoinedAt = customers[i].SubagentAssignedAt
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

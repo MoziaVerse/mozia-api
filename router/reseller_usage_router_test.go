@@ -363,6 +363,21 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		"X-Reseller-Subject": "usage-owner-a",
 		"X-Reseller-Host":    "usage-a.example.com",
 	}
+	createSubagent := request(http.MethodPost, "/api/internal/v1/reseller/management/members/subagents", `{"subject":"usage-subagent-a"}`, "matrix-reseller-management-test-token", "subagent-create_123", ownerHeaders)
+	require.Equal(t, http.StatusCreated, createSubagent.Code)
+	createSubagentEnvelope := decodeM2Envelope(t, createSubagent)
+	var subagent model.ResellerMemberRecord
+	require.NoError(t, common.Unmarshal(createSubagentEnvelope.RawData, &subagent))
+	assignSubagent := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/subagent", customerA.Id), fmt.Sprintf(`{"subagent_member_id":%d}`, subagent.Id), "matrix-reseller-management-test-token", "subagent-assign_123", ownerHeaders)
+	require.Equal(t, http.StatusOK, assignSubagent.Code)
+	require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("id = ?", customerA.Id).Updates(map[string]any{
+		"subagent_member_id":   subagent.Id,
+		"subagent_assigned_at": int64(115),
+	}).Error)
+	subagentHeaders := map[string]string{
+		"X-Reseller-Subject": subagent.Subject,
+		"X-Reseller-Host":    "usage-a.example.com",
+	}
 
 	t.Run("usage requires management token and tenant headers", func(t *testing.T) {
 		unauthorized := request(http.MethodGet, "/api/internal/v1/reseller/management/usage", "", "matrix-reseller-test-token", "usage-auth_123", viewerHeaders)
@@ -374,6 +389,41 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		missingHeadersEnvelope := decodeM2Envelope(t, missingHeaders)
 		require.Equal(t, http.StatusBadRequest, missingHeaders.Code)
 		assert.Equal(t, middleware.ResellerErrorInvalidRequest, missingHeadersEnvelope.Error.Code)
+	})
+
+	t.Run("subagent sees only assigned customers and post-assignment usage", func(t *testing.T) {
+		customers := request(http.MethodGet, "/api/internal/v1/reseller/management/customers", "", "matrix-reseller-management-test-token", "subagent-customers_123", subagentHeaders)
+		require.Equal(t, http.StatusOK, customers.Code)
+		customersEnvelope := decodeM2Envelope(t, customers)
+		var scopedCustomers []resellerM2Customer
+		require.NoError(t, common.Unmarshal(customersEnvelope.RawData, &scopedCustomers))
+		require.Len(t, scopedCustomers, 1)
+		assert.Equal(t, customerA.Id, scopedCustomers[0].Id)
+
+		usage := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d&start_timestamp=100&end_timestamp=140", customerA.Id), "", "matrix-reseller-management-test-token", "subagent-usage_123", subagentHeaders)
+		require.Equal(t, http.StatusOK, usage.Code)
+		usageEnvelope := decodeM2Envelope(t, usage)
+		var data resellerUsageEnvelopeData
+		require.NoError(t, common.Unmarshal(usageEnvelope.RawData, &data))
+		assert.Equal(t, "2", data.Summary.RequestCount)
+		assert.Equal(t, "100", data.Summary.CustomerQuota)
+
+		for _, path := range []string{
+			fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d", customerC.Id),
+			"/api/internal/v1/reseller/management/pricing",
+			"/api/internal/v1/reseller/management/members",
+			"/api/internal/v1/reseller/management/invitations",
+		} {
+			recorder := request(http.MethodGet, path, "", "matrix-reseller-management-test-token", "subagent-forbidden_123", subagentHeaders)
+			assert.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, recorder.Code)
+		}
+
+		cleared := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/subagent", customerA.Id), `{"subagent_member_id":0}`, "matrix-reseller-management-test-token", "subagent-clear_123", ownerHeaders)
+		require.Equal(t, http.StatusOK, cleared.Code)
+		customers = request(http.MethodGet, "/api/internal/v1/reseller/management/customers", "", "matrix-reseller-management-test-token", "subagent-customers-empty_123", subagentHeaders)
+		customersEnvelope = decodeM2Envelope(t, customers)
+		require.NoError(t, common.Unmarshal(customersEnvelope.RawData, &scopedCustomers))
+		assert.Empty(t, scopedCustomers)
 	})
 
 	t.Run("usage aggregates settled rows only with string counters and no sensitive leakage", func(t *testing.T) {
