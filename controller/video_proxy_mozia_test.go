@@ -33,6 +33,14 @@ func TestResolveMoziaVideoContentURL(t *testing.T) {
 			wantAuth:    true,
 		},
 		{
+			name:        "MoziaH3 content fallback uses videos endpoint",
+			channelType: constant.ChannelTypeMoziaH3,
+			baseURL:     "https://h3.example/v1",
+			resultURL:   "https://gateway.example/v1/videos/task_public/content",
+			wantURL:     "https://h3.example/v1/videos/upstream-task/content",
+			wantAuth:    true,
+		},
+		{
 			name:        "seedance public alias does not recurse",
 			channelType: constant.ChannelTypeMoziaSeedanceGen,
 			baseURL:     "https://provider.example/v1",

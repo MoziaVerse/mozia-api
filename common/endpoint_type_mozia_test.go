@@ -8,7 +8,11 @@ import (
 )
 
 func TestSeedanceCompatibleChannelsAdvertiseVideoEndpoint(t *testing.T) {
-	for _, channelType := range []int{constant.ChannelTypeMoziaSeedanceGen, constant.ChannelTypeMoziaSeedanceVideos} {
+	for _, channelType := range []int{
+		constant.ChannelTypeMoziaSeedanceGen,
+		constant.ChannelTypeMoziaSeedanceVideos,
+		constant.ChannelTypeMoziaH3,
+	} {
 		assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIVideo}, GetEndpointTypesByChannelType(channelType, "video-model"))
 	}
 }

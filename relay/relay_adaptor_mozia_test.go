@@ -51,3 +51,14 @@ func TestArtsapiChannelRegistration(t *testing.T) {
 	assert.Empty(t, adaptor.GetModelList())
 	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("206")))
 }
+
+func TestMoziaH3ChannelRegistration(t *testing.T) {
+	assert.Equal(t, "MoziaH3", constant.ChannelTypeNames[constant.ChannelTypeMoziaH3])
+	assert.Empty(t, constant.ChannelBaseURLs[constant.ChannelTypeMoziaH3])
+
+	adaptor := GetMoziaTaskAdaptor(constant.ChannelTypeMoziaH3)
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "moziah3", adaptor.GetChannelName())
+	assert.Equal(t, []string{"minimax/minimax-h3-fl2va", "minimax/minimax-h3-ref2va"}, adaptor.GetModelList())
+	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("207")))
+}

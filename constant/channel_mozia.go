@@ -17,6 +17,7 @@ const (
 	ChannelTypeMoziaSeedanceVideos         = 204 // Seedance 兼容异步视频渠道（/v1/videos）
 	ChannelTypeMoziaGlobalaiopcModelCenter = 205 // Globalaiopc Model Center V2 异步视频
 	ChannelTypeMoziaArtsapi                = 206 // ArtsAPI OpenAI 兼容异步视频
+	ChannelTypeMoziaH3                     = 207 // MiniMax H3 SGLang Diffusion 异步视频
 )
 
 // moziaChannelTypeNames 与 upstream ChannelTypeNames 同语义；通过 init() 合并。
@@ -28,6 +29,7 @@ var moziaChannelTypeNames = map[int]string{
 	ChannelTypeMoziaSeedanceVideos:         "SeedanceCompatible-Videos",
 	ChannelTypeMoziaGlobalaiopcModelCenter: "Globalaiopc-ModelCenter",
 	ChannelTypeMoziaArtsapi:                "Artsapi",
+	ChannelTypeMoziaH3:                     "MoziaH3",
 }
 
 // moziaChannelBaseURLs 与 upstream ChannelBaseURLs slice 同语义；通过 init()
@@ -40,6 +42,7 @@ var moziaChannelBaseURLs = map[int]string{
 	ChannelTypeMoziaSeedanceVideos:         "",
 	ChannelTypeMoziaGlobalaiopcModelCenter: "https://zcbservice.aizfw.cn/kyyReactApiServer",
 	ChannelTypeMoziaArtsapi:                "https://ai.artsapi.com",
+	ChannelTypeMoziaH3:                     "",
 }
 
 func init() {

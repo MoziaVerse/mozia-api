@@ -54,6 +54,11 @@ export const CHANNEL_OPTIONS = [
     color: 'green',
     label: 'Artsapi（异步视频）',
   },
+  {
+    value: 207,
+    color: 'purple',
+    label: 'MoziaH3（SGLang 异步视频）',
+  },
   { value: 1, color: 'green', label: 'OpenAI' },
   {
     value: 2,
