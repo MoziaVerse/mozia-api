@@ -253,14 +253,14 @@ func applyUserThinkingDisabledRedirect(c *gin.Context, request *ModelRequest) {
 		relayconstant.Path2RelayMode(c.Request.URL.Path) != relayconstant.RelayModeChatCompletions {
 		return
 	}
-	rule, ok := mozia_setting.GetUserThinkingDisabledRedirect(c.GetInt("id"), request.Model)
-	if !ok {
+	if request.Model != mozia_setting.ThinkingDisabledSourceModel ||
+		!mozia_setting.IsUserThinkingDisabledRedirectEnabled(c.GetInt("id")) {
 		return
 	}
 	common.SetContextKey(c, constant.ContextKeyRequestedModel, request.Model)
 	common.SetContextKey(c, constant.ContextKeyModelRedirectReason, "thinking_disabled")
 	common.SetContextKey(c, constant.ContextKeyModelRedirectApplied, true)
-	request.Model = rule.TargetModel
+	request.Model = mozia_setting.ThinkingDisabledTargetModel
 }
 
 func getJSONStringValue(result gjson.Result, field string) (string, error) {
@@ -372,7 +372,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		if err != nil {
 			return nil, false, err
 		}
-		modelRequest.Model = req.Model
+		modelRequest = *req
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01

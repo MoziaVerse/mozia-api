@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,19 +13,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGetModelRequestPreservesThinkingType(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{
+		"model":"moonshotai/kimi-k3",
+		"thinking":{"type":"disabled"}
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	request, _, err := getModelRequest(c)
+	require.NoError(t, err)
+	assert.Equal(t, "moonshotai/kimi-k3", request.Model)
+	assert.Equal(t, "disabled", request.ThinkingType)
+}
+
 func TestApplyUserThinkingDisabledRedirect(t *testing.T) {
 	original := mozia_setting.UserThinkingDisabledRedirects2JSONString()
 	t.Cleanup(func() {
 		require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(original))
 	})
-	require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(`{
-		"6218:moonshotai/kimi-k3": {
-			"user_id": 6218,
-			"source_model": "moonshotai/kimi-k3",
-			"target_model": "moonshotai/kimi-k2.6",
-			"enabled": true
-		}
-	}`))
+	require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(`{"6218":true}`))
 
 	tests := []struct {
 		name         string

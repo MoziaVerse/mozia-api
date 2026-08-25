@@ -110,7 +110,6 @@ export async function deleteMoziaUserModelRedirect(
   const response = await api.delete<ApiEnvelope<null>>(
     `${USER_MODEL_REDIRECT_ENDPOINT}/${rule.user_id}`,
     {
-      params: { source_model: rule.source_model },
       skipBusinessError: true,
       skipErrorHandler: true,
     }

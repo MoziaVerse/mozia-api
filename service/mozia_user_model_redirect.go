@@ -9,11 +9,11 @@ import (
 
 var moziaUserThinkingRedirectMutationMutex sync.Mutex
 
-func UpsertMoziaUserThinkingDisabledRedirect(rule mozia_setting.UserThinkingDisabledRedirect) error {
+func UpsertMoziaUserThinkingDisabledRedirect(userId int) error {
 	moziaUserThinkingRedirectMutationMutex.Lock()
 	defer moziaUserThinkingRedirectMutationMutex.Unlock()
 
-	value, err := mozia_setting.BuildUserThinkingDisabledRedirectUpsertJSON(rule)
+	value, err := mozia_setting.BuildUserThinkingDisabledRedirectUpsertJSON(userId)
 	if err != nil {
 		return err
 	}
@@ -22,11 +22,11 @@ func UpsertMoziaUserThinkingDisabledRedirect(rule mozia_setting.UserThinkingDisa
 	})
 }
 
-func DeleteMoziaUserThinkingDisabledRedirect(userId int, sourceModel string) error {
+func DeleteMoziaUserThinkingDisabledRedirect(userId int) error {
 	moziaUserThinkingRedirectMutationMutex.Lock()
 	defer moziaUserThinkingRedirectMutationMutex.Unlock()
 
-	value, err := mozia_setting.BuildUserThinkingDisabledRedirectDeleteJSON(userId, sourceModel)
+	value, err := mozia_setting.BuildUserThinkingDisabledRedirectDeleteJSON(userId)
 	if err != nil {
 		return err
 	}
