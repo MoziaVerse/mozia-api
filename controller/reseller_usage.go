@@ -23,6 +23,15 @@ type resellerUsageResponse struct {
 	Items         []resellerUsageItemResponse     `json:"items"`
 	CustomerSpend []resellerCustomerSpendResponse `json:"customer_spend"`
 	ModelSpend    []resellerModelSpendResponse    `json:"model_spend"`
+	SubagentSpend []resellerSubagentSpendResponse `json:"subagent_spend"`
+}
+
+type resellerSubagentSpendResponse struct {
+	SubagentMemberId     int    `json:"subagent_member_id"`
+	RequestCount         string `json:"request_count"`
+	TotalTokens          string `json:"total_tokens"`
+	CustomerQuota        string `json:"customer_quota"`
+	CustomerQuotaDisplay string `json:"customer_quota_display"`
 }
 
 type resellerCustomerSpendResponse struct {
@@ -71,16 +80,16 @@ func GetResellerManagementUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var subagentMemberId *int
-	if resellerContext.Role == model.ResellerRoleSubagent {
-		subagentMemberId = &resellerContext.MemberId
+	subagentMemberId, ok := resellerUsageSubagentMemberID(c, resellerContext)
+	if !ok {
+		return
 	}
 	if customerId != nil {
 		var err error
 		if subagentMemberId == nil {
 			_, err = model.GetResellerCustomerRecord(resellerContext.ResellerId, *customerId, false)
 		} else {
-			_, err = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, resellerContext.MemberId, *customerId)
+			_, err = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, *subagentMemberId, *customerId)
 		}
 		if err != nil {
 			handleResellerUsageError(c, err)
@@ -109,6 +118,7 @@ func GetResellerManagementUsage(c *gin.Context) {
 		Items:         resellerUsageItemsResponse(result.Items),
 		CustomerSpend: resellerCustomerSpendResponseFromItems(result.Items),
 		ModelSpend:    resellerModelSpendResponseFromItems(result.Items),
+		SubagentSpend: resellerSubagentSpendResponses(result.SubagentSpend),
 	})
 }
 
@@ -137,9 +147,9 @@ func GetResellerManagementTasks(c *gin.Context) {
 		result *model.ResellerTaskPage
 		err    error
 	)
-	var subagentMemberId *int
-	if resellerContext.Role == model.ResellerRoleSubagent {
-		subagentMemberId = &resellerContext.MemberId
+	subagentMemberId, ok := resellerUsageSubagentMemberID(c, resellerContext)
+	if !ok {
+		return
 	}
 	if customerId == nil {
 		result, err = model.ListResellerTasks(resellerContext.ResellerId, page, pageSize, startTimestamp, endTimestamp, taskID, subagentMemberId)
@@ -149,7 +159,7 @@ func GetResellerManagementTasks(c *gin.Context) {
 		if subagentMemberId == nil {
 			customer, customerErr = model.GetResellerCustomerRecord(resellerContext.ResellerId, *customerId, false)
 		} else {
-			customer, customerErr = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, resellerContext.MemberId, *customerId)
+			customer, customerErr = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, *subagentMemberId, *customerId)
 			if customer != nil && customer.SubagentAssignedAt > customer.JoinedAt {
 				customer.JoinedAt = customer.SubagentAssignedAt
 			}
@@ -165,6 +175,38 @@ func GetResellerManagementTasks(c *gin.Context) {
 		return
 	}
 	writeResellerAdminSuccess(c, http.StatusOK, result)
+}
+
+func resellerUsageSubagentMemberID(c *gin.Context, resellerContext *model.ResellerContext) (*int, bool) {
+	requested, ok := optionalPositiveQueryID(c, "subagent_member_id")
+	if !ok {
+		return nil, false
+	}
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		return &resellerContext.MemberId, true
+	}
+	if requested == nil {
+		return nil, true
+	}
+	if _, err := model.GetResellerSubagentMemberRecord(resellerContext.ResellerId, *requested); err != nil {
+		handleResellerUsageError(c, err)
+		return nil, false
+	}
+	return requested, true
+}
+
+func resellerSubagentSpendResponses(items []model.ResellerSubagentUsageSpend) []resellerSubagentSpendResponse {
+	response := make([]resellerSubagentSpendResponse, 0, len(items))
+	for _, item := range items {
+		response = append(response, resellerSubagentSpendResponse{
+			SubagentMemberId:     item.SubagentMemberId,
+			RequestCount:         strconv.FormatInt(item.RequestCount, 10),
+			TotalTokens:          strconv.FormatInt(item.TotalTokens, 10),
+			CustomerQuota:        strconv.FormatInt(item.CustomerQuota, 10),
+			CustomerQuotaDisplay: formatResellerUsageQuota(item.CustomerQuota),
+		})
+	}
+	return response
 }
 
 func resellerUsageItemsResponse(items []model.ResellerUsageItem) []resellerUsageItemResponse {
@@ -305,6 +347,8 @@ func handleResellerUsageError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, model.ErrResellerCustomerNotFound):
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+	case errors.Is(err, model.ErrResellerForbidden):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller subagent not found")
 	default:
 		logger.LogError(c.Request.Context(), "reseller usage database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")

@@ -429,6 +429,18 @@ func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 	return records, nil
 }
 
+func GetResellerSubagentMemberRecord(resellerId int, memberId int) (*ResellerMemberRecord, error) {
+	var record ResellerMemberRecord
+	err := DB.Table("reseller_members").
+		Select("id, subject, name, role, status").
+		Where("id = ? AND reseller_id = ? AND role = ?", memberId, resellerId, ResellerRoleSubagent).
+		Take(&record).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrResellerForbidden
+	}
+	return &record, err
+}
+
 func CreateResellerSubagentMember(resellerId int, customerId int, name string) (*ResellerMemberRecord, error) {
 	if customerId <= 0 || name == "" || !validResellerCustomerText(name, 128) {
 		return nil, ErrInvalidResellerName

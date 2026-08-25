@@ -30,8 +30,18 @@ type ResellerUsageSummary struct {
 }
 
 type ResellerUsageResult struct {
-	Summary ResellerUsageSummary `json:"summary"`
-	Items   []ResellerUsageItem  `json:"items"`
+	Summary       ResellerUsageSummary         `json:"summary"`
+	Items         []ResellerUsageItem          `json:"items"`
+	SubagentSpend []ResellerSubagentUsageSpend `json:"subagent_spend"`
+}
+
+type ResellerSubagentUsageSpend struct {
+	SubagentMemberId int   `json:"subagent_member_id"`
+	RequestCount     int64 `json:"request_count"`
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+	CustomerQuota    int64 `json:"customer_quota"`
 }
 
 type ResellerTaskItem struct {
@@ -56,6 +66,7 @@ type ResellerTaskPage struct {
 
 type resellerUsageSettlementRow struct {
 	CustomerId          int
+	SubagentMemberId    int
 	ModelName           string
 	ActualCustomerQuota int64
 	UsageJSON           string
@@ -88,10 +99,11 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 	// ponytail: parse usage JSON in Go for SQLite/MySQL parity; add normalized token columns if full-history scans become costly.
 	rows := make([]resellerUsageSettlementRow, 0)
 	query := DB.Model(&ResellerRequestSettlement{}).
-		Select("reseller_request_settlements.customer_id, reseller_request_settlements.model_name, reseller_request_settlements.actual_customer_quota, reseller_request_settlements.usage_json").
+		Select("reseller_request_settlements.customer_id, CASE WHEN usage_customer.subagent_member_id IS NOT NULL AND reseller_request_settlements.created_at >= usage_customer.subagent_assigned_at THEN usage_customer.subagent_member_id ELSE 0 END AS subagent_member_id, reseller_request_settlements.model_name, reseller_request_settlements.actual_customer_quota, reseller_request_settlements.usage_json").
+		Joins("LEFT JOIN reseller_customers AS usage_customer ON usage_customer.id = reseller_request_settlements.customer_id AND usage_customer.reseller_id = reseller_request_settlements.reseller_id").
 		Where("reseller_request_settlements.reseller_id = ? AND reseller_request_settlements.status = ?", resellerId, ResellerSettlementStatusSettled)
 	if subagentMemberId != nil {
-		query = query.Joins("JOIN reseller_customers AS scoped_customer ON scoped_customer.id = reseller_request_settlements.customer_id AND scoped_customer.reseller_id = reseller_request_settlements.reseller_id AND scoped_customer.subagent_member_id = ? AND reseller_request_settlements.created_at >= scoped_customer.subagent_assigned_at", *subagentMemberId)
+		query = query.Where("usage_customer.subagent_member_id = ? AND reseller_request_settlements.created_at >= usage_customer.subagent_assigned_at", *subagentMemberId)
 	}
 	if customerId != nil {
 		query = query.Where("reseller_request_settlements.customer_id = ?", *customerId)
@@ -107,13 +119,15 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 	}
 
 	result := &ResellerUsageResult{
-		Items: make([]ResellerUsageItem, 0),
+		Items:         make([]ResellerUsageItem, 0),
+		SubagentSpend: make([]ResellerSubagentUsageSpend, 0),
 	}
 	if len(rows) == 0 {
 		return result, nil
 	}
 
 	aggregated := make(map[string]*ResellerUsageItem, len(rows))
+	subagentSpend := make(map[int]*ResellerSubagentUsageSpend)
 	for _, row := range rows {
 		modelName := strings.TrimSpace(row.ModelName)
 		key := strconv.Itoa(row.CustomerId) + "\x00" + modelName
@@ -126,6 +140,18 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 			aggregated[key] = item
 		}
 		promptTokens, completionTokens, totalTokens := parseResellerUsageTokens(row.UsageJSON)
+		if row.SubagentMemberId > 0 {
+			spend := subagentSpend[row.SubagentMemberId]
+			if spend == nil {
+				spend = &ResellerSubagentUsageSpend{SubagentMemberId: row.SubagentMemberId}
+				subagentSpend[row.SubagentMemberId] = spend
+			}
+			spend.RequestCount++
+			spend.PromptTokens += promptTokens
+			spend.CompletionTokens += completionTokens
+			spend.TotalTokens += totalTokens
+			spend.CustomerQuota += row.ActualCustomerQuota
+		}
 		item.RequestCount++
 		item.PromptTokens += promptTokens
 		item.CompletionTokens += completionTokens
@@ -151,6 +177,15 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 		return result.Items[i].Model < result.Items[j].Model
 	})
 	result.Summary.ModelCount = len(models)
+	for _, spend := range subagentSpend {
+		result.SubagentSpend = append(result.SubagentSpend, *spend)
+	}
+	sort.Slice(result.SubagentSpend, func(i, j int) bool {
+		if result.SubagentSpend[i].CustomerQuota != result.SubagentSpend[j].CustomerQuota {
+			return result.SubagentSpend[i].CustomerQuota > result.SubagentSpend[j].CustomerQuota
+		}
+		return result.SubagentSpend[i].SubagentMemberId < result.SubagentSpend[j].SubagentMemberId
+	})
 	return result, nil
 }
 

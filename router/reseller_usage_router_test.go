@@ -45,6 +45,13 @@ type resellerUsageEnvelopeData struct {
 		CustomerQuota        string `json:"customer_quota"`
 		CustomerQuotaDisplay string `json:"customer_quota_display"`
 	} `json:"model_spend"`
+	SubagentSpend []struct {
+		SubagentMemberId     int    `json:"subagent_member_id"`
+		RequestCount         string `json:"request_count"`
+		TotalTokens          string `json:"total_tokens"`
+		CustomerQuota        string `json:"customer_quota"`
+		CustomerQuotaDisplay string `json:"customer_quota_display"`
+	} `json:"subagent_spend"`
 }
 
 type resellerTasksEnvelopeData struct {
@@ -411,6 +418,27 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		require.NoError(t, common.Unmarshal(usageEnvelope.RawData, &data))
 		assert.Equal(t, "2", data.Summary.RequestCount)
 		assert.Equal(t, "100", data.Summary.CustomerQuota)
+
+		ownerUsage := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/usage?subagent_member_id=%d&start_timestamp=100&end_timestamp=140", subagent.Id), "", "matrix-reseller-management-test-token", "owner-subagent-usage_123", ownerHeaders)
+		require.Equal(t, http.StatusOK, ownerUsage.Code)
+		ownerUsageEnvelope := decodeM2Envelope(t, ownerUsage)
+		var ownerUsageData resellerUsageEnvelopeData
+		require.NoError(t, common.Unmarshal(ownerUsageEnvelope.RawData, &ownerUsageData))
+		assert.Equal(t, "2", ownerUsageData.Summary.RequestCount)
+		assert.Equal(t, "100", ownerUsageData.Summary.CustomerQuota)
+		require.Len(t, ownerUsageData.SubagentSpend, 1)
+		assert.Equal(t, subagent.Id, ownerUsageData.SubagentSpend[0].SubagentMemberId)
+		assert.Equal(t, "2", ownerUsageData.SubagentSpend[0].RequestCount)
+
+		ownerTasks := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/tasks?subagent_member_id=%d&start_timestamp=100&end_timestamp=140", subagent.Id), "", "matrix-reseller-management-test-token", "owner-subagent-tasks_123", ownerHeaders)
+		require.Equal(t, http.StatusOK, ownerTasks.Code)
+		ownerTasksEnvelope := decodeM2Envelope(t, ownerTasks)
+		var ownerTasksData resellerTasksEnvelopeData
+		require.NoError(t, common.Unmarshal(ownerTasksEnvelope.RawData, &ownerTasksData))
+		assert.Equal(t, int64(3), ownerTasksData.Total)
+
+		missingSubagent := request(http.MethodGet, "/api/internal/v1/reseller/management/usage?subagent_member_id=999999", "", "matrix-reseller-management-test-token", "owner-missing-subagent_123", ownerHeaders)
+		require.Equal(t, http.StatusNotFound, missingSubagent.Code)
 
 		for _, path := range []string{
 			fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d", customerC.Id),
