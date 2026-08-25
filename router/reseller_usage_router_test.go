@@ -372,13 +372,21 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 	}
 	crossTenantSubagent := request(http.MethodPost, "/api/internal/v1/reseller/management/members/subagents", fmt.Sprintf(`{"name":"越权客户组","customer_id":%d}`, customerB.Id), "matrix-reseller-management-test-token", "subagent-cross-tenant_123", ownerHeaders)
 	require.Equal(t, http.StatusNotFound, crossTenantSubagent.Code)
-	createSubagent := request(http.MethodPost, "/api/internal/v1/reseller/management/members/subagents", fmt.Sprintf(`{"name":"华东客户组","customer_id":%d}`, customerA.Id), "matrix-reseller-management-test-token", "subagent-create_123", ownerHeaders)
+	createSubagent := request(http.MethodPost, "/api/internal/v1/reseller/management/members/subagents", fmt.Sprintf(`{"name":"华东客户组","customer_id":%d}`, customerD.Id), "matrix-reseller-management-test-token", "subagent-create_123", ownerHeaders)
 	require.Equal(t, http.StatusCreated, createSubagent.Code)
 	createSubagentEnvelope := decodeM2Envelope(t, createSubagent)
 	var subagent model.ResellerMemberRecord
 	require.NoError(t, common.Unmarshal(createSubagentEnvelope.RawData, &subagent))
 	assert.Equal(t, "华东客户组", subagent.Name)
-	assert.Equal(t, customerA.Subject, subagent.Subject)
+	assert.Equal(t, customerD.Subject, subagent.Subject)
+	selfAssign := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/subagent", customerD.Id), fmt.Sprintf(`{"subagent_member_id":%d}`, subagent.Id), "matrix-reseller-management-test-token", "subagent-self-assign_123", ownerHeaders)
+	require.Equal(t, http.StatusConflict, selfAssign.Code)
+	assignAdministratorCandidate := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/subagent", customerNoUser.Id), fmt.Sprintf(`{"subagent_member_id":%d}`, subagent.Id), "matrix-reseller-management-test-token", "subagent-assign-candidate_123", ownerHeaders)
+	require.Equal(t, http.StatusOK, assignAdministratorCandidate.Code)
+	createFromAssignedCustomer := request(http.MethodPost, "/api/internal/v1/reseller/management/members/subagents", fmt.Sprintf(`{"name":"冲突客户组","customer_id":%d}`, customerNoUser.Id), "matrix-reseller-management-test-token", "subagent-create-assigned_123", ownerHeaders)
+	require.Equal(t, http.StatusConflict, createFromAssignedCustomer.Code)
+	clearAdministratorCandidate := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/subagent", customerNoUser.Id), `{"subagent_member_id":0}`, "matrix-reseller-management-test-token", "subagent-clear-candidate_123", ownerHeaders)
+	require.Equal(t, http.StatusOK, clearAdministratorCandidate.Code)
 	assignSubagent := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/subagent", customerA.Id), fmt.Sprintf(`{"subagent_member_id":%d}`, subagent.Id), "matrix-reseller-management-test-token", "subagent-assign_123", ownerHeaders)
 	require.Equal(t, http.StatusOK, assignSubagent.Code)
 	require.NoError(t, db.Model(&model.ResellerCustomer{}).Where("id = ?", customerA.Id).Updates(map[string]any{

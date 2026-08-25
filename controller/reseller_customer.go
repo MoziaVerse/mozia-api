@@ -264,6 +264,8 @@ func CreateResellerManagementSubagent(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
 	case errors.Is(err, model.ErrResellerConflict):
 		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "reseller member already exists")
+	case errors.Is(err, model.ErrResellerCustomerConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "customer is already assigned to a subagent")
 	default:
 		logger.LogError(c.Request.Context(), "CreateResellerSubagentMember database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
@@ -352,6 +354,8 @@ func UpdateResellerManagementCustomerSubagent(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller subagent not found")
 	case errors.Is(err, model.ErrResellerCustomerNotFound):
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
+	case errors.Is(err, model.ErrResellerCustomerConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "subagent administrator cannot be assigned as a customer")
 	default:
 		logger.LogError(c.Request.Context(), "AssignResellerCustomerSubagent database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")

@@ -452,6 +452,9 @@ func CreateResellerSubagentMember(resellerId int, customerId int, name string) (
 		}
 		return nil, err
 	}
+	if customer.SubagentMemberId != nil {
+		return nil, ErrResellerCustomerConflict
+	}
 	member := ResellerMember{ResellerId: resellerId, Subject: customer.Subject, Name: name, Role: ResellerRoleSubagent, Status: ResellerMemberStatusActive}
 	if err := DB.Create(&member).Error; err != nil {
 		if isResellerUniqueConstraintError(err) {
@@ -471,6 +474,22 @@ func AssignResellerCustomerSubagent(resellerId int, customerId int, memberId *in
 				return nil, ErrResellerForbidden
 			}
 			return nil, err
+		}
+		var customer ResellerCustomer
+		if err := DB.Select("id", "subject").Where("id = ? AND reseller_id = ?", customerId, resellerId).Take(&customer).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrResellerCustomerNotFound
+			}
+			return nil, err
+		}
+		var administratorCount int64
+		if err := DB.Model(&ResellerMember{}).
+			Where("reseller_id = ? AND role = ? AND subject = ?", resellerId, ResellerRoleSubagent, customer.Subject).
+			Count(&administratorCount).Error; err != nil {
+			return nil, err
+		}
+		if administratorCount > 0 {
+			return nil, ErrResellerCustomerConflict
 		}
 		assignedAt = common.GetTimestamp()
 	}
