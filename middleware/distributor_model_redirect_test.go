@@ -28,11 +28,15 @@ func TestGetModelRequestPreservesThinkingType(t *testing.T) {
 }
 
 func TestApplyUserThinkingDisabledRedirect(t *testing.T) {
-	original := mozia_setting.UserThinkingDisabledRedirects2JSONString()
+	originallyEnabled := mozia_setting.IsUserThinkingDisabledRedirectEnabled(6218)
 	t.Cleanup(func() {
-		require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(original))
+		value, err := mozia_setting.BuildUserThinkingDisabledRedirectJSON(6218, originallyEnabled)
+		require.NoError(t, err)
+		require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(value))
 	})
-	require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(`{"6218":true}`))
+	value, err := mozia_setting.BuildUserThinkingDisabledRedirectJSON(6218, true)
+	require.NoError(t, err)
+	require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(value))
 
 	tests := []struct {
 		name         string
@@ -63,7 +67,6 @@ func TestApplyUserThinkingDisabledRedirect(t *testing.T) {
 			assert.Equal(t, tt.wantApplied, common.GetContextKeyBool(c, constant.ContextKeyModelRedirectApplied))
 			if tt.wantApplied {
 				assert.Equal(t, tt.model, common.GetContextKeyString(c, constant.ContextKeyRequestedModel))
-				assert.Equal(t, "thinking_disabled", common.GetContextKeyString(c, constant.ContextKeyModelRedirectReason))
 			}
 		})
 	}

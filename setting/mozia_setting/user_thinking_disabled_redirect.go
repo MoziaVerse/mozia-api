@@ -63,29 +63,19 @@ func GetUserThinkingDisabledRedirectUserIds() []int {
 	return userIds
 }
 
-func UserThinkingDisabledRedirects2JSONString() string {
-	return userThinkingDisabledRedirectMap.MarshalJSONString()
-}
-
-func BuildUserThinkingDisabledRedirectUpsertJSON(userId int) (string, error) {
+func BuildUserThinkingDisabledRedirectJSON(userId int, enabled bool) (string, error) {
 	if userId <= 0 {
 		return "", errors.New("user_id must be greater than 0")
 	}
 	all := userThinkingDisabledRedirectMap.ReadAll()
-	all[userId] = true
-	data, err := common.Marshal(all)
-	if err != nil {
-		return "", err
+	if enabled {
+		all[userId] = true
+	} else {
+		if _, ok := all[userId]; !ok {
+			return "", errors.New("user thinking redirect not found")
+		}
+		delete(all, userId)
 	}
-	return string(data), nil
-}
-
-func BuildUserThinkingDisabledRedirectDeleteJSON(userId int) (string, error) {
-	all := userThinkingDisabledRedirectMap.ReadAll()
-	if _, ok := all[userId]; !ok {
-		return "", errors.New("user thinking redirect not found")
-	}
-	delete(all, userId)
 	data, err := common.Marshal(all)
 	if err != nil {
 		return "", err

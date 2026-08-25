@@ -8,32 +8,32 @@ import (
 )
 
 func TestUserThinkingDisabledRedirectUsers(t *testing.T) {
-	original := UserThinkingDisabledRedirects2JSONString()
+	original := userThinkingDisabledRedirectMap.MarshalJSONString()
 	t.Cleanup(func() {
 		require.NoError(t, UpdateUserThinkingDisabledRedirectsByJSONString(original))
 	})
 	require.NoError(t, UpdateUserThinkingDisabledRedirectsByJSONString(`{}`))
 
-	_, err := BuildUserThinkingDisabledRedirectUpsertJSON(0)
+	_, err := BuildUserThinkingDisabledRedirectJSON(0, true)
 	assert.ErrorContains(t, err, "user_id")
 
-	value, err := BuildUserThinkingDisabledRedirectUpsertJSON(6218)
+	value, err := BuildUserThinkingDisabledRedirectJSON(6218, true)
 	require.NoError(t, err)
 	require.NoError(t, UpdateUserThinkingDisabledRedirectsByJSONString(value))
 	assert.True(t, IsUserThinkingDisabledRedirectEnabled(6218))
 	assert.False(t, IsUserThinkingDisabledRedirectEnabled(6219))
 	assert.Equal(t, []int{6218}, GetUserThinkingDisabledRedirectUserIds())
 
-	value, err = BuildUserThinkingDisabledRedirectDeleteJSON(6218)
+	value, err = BuildUserThinkingDisabledRedirectJSON(6218, false)
 	require.NoError(t, err)
 	require.NoError(t, UpdateUserThinkingDisabledRedirectsByJSONString(value))
 	assert.False(t, IsUserThinkingDisabledRedirectEnabled(6218))
-	_, err = BuildUserThinkingDisabledRedirectDeleteJSON(6218)
+	_, err = BuildUserThinkingDisabledRedirectJSON(6218, false)
 	assert.ErrorContains(t, err, "not found")
 }
 
 func TestUserThinkingDisabledRedirectLoadsLegacyRules(t *testing.T) {
-	original := UserThinkingDisabledRedirects2JSONString()
+	original := userThinkingDisabledRedirectMap.MarshalJSONString()
 	t.Cleanup(func() {
 		require.NoError(t, UpdateUserThinkingDisabledRedirectsByJSONString(original))
 	})

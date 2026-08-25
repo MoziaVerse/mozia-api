@@ -258,7 +258,6 @@ func applyUserThinkingDisabledRedirect(c *gin.Context, request *ModelRequest) {
 		return
 	}
 	common.SetContextKey(c, constant.ContextKeyRequestedModel, request.Model)
-	common.SetContextKey(c, constant.ContextKeyModelRedirectReason, "thinking_disabled")
 	common.SetContextKey(c, constant.ContextKeyModelRedirectApplied, true)
 	request.Model = mozia_setting.ThinkingDisabledTargetModel
 }

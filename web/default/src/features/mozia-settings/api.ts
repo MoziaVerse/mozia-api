@@ -26,7 +26,6 @@ import type {
   ApiEnvelope,
   ManagedAdminPage,
   MoziaUserModelRedirect,
-  MoziaUserModelRedirectPayload,
   MoziaUserModelRatio,
   MoziaUserModelRatioPayload,
 } from './types'
@@ -93,12 +92,10 @@ export async function getMoziaUserModelRedirects() {
   return unwrapResponse(response.data)
 }
 
-export async function saveMoziaUserModelRedirect(
-  payload: MoziaUserModelRedirectPayload
-) {
+export async function saveMoziaUserModelRedirect(ssoSub: string) {
   const response = await api.post<ApiEnvelope<MoziaUserModelRedirect>>(
     `${USER_MODEL_REDIRECT_ENDPOINT}/`,
-    payload,
+    { sso_sub: ssoSub },
     { skipBusinessError: true, skipErrorHandler: true }
   )
   return unwrapResponse(response.data)

@@ -48,7 +48,7 @@ func UpsertMoziaUserThinkingDisabledRedirect(c *gin.Context) {
 		common.ApiErrorMsg(c, "SSO user not found")
 		return
 	}
-	if err := service.UpsertMoziaUserThinkingDisabledRedirect(userSSO.UserId); err != nil {
+	if err := service.SetMoziaUserThinkingDisabledRedirect(userSSO.UserId, true); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -65,7 +65,7 @@ func DeleteMoziaUserThinkingDisabledRedirect(c *gin.Context) {
 		common.ApiErrorMsg(c, "无效的用户 ID")
 		return
 	}
-	if err := service.DeleteMoziaUserThinkingDisabledRedirect(userId); err != nil {
+	if err := service.SetMoziaUserThinkingDisabledRedirect(userId, false); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}

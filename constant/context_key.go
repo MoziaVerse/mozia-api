@@ -9,7 +9,6 @@ const (
 
 	ContextKeyOriginalModel        ContextKey = "original_model"
 	ContextKeyRequestedModel       ContextKey = "requested_model"
-	ContextKeyModelRedirectReason  ContextKey = "model_redirect_reason"
 	ContextKeyModelRedirectApplied ContextKey = "model_redirect_applied"
 	ContextKeyRequestStartTime     ContextKey = "request_start_time"
 

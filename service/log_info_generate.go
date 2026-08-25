@@ -59,7 +59,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	if requestedModel != "" {
 		other["requested_model"] = requestedModel
 		other["effective_model"] = relayInfo.OriginModelName
-		other["model_redirect_reason"] = common.GetContextKeyString(ctx, constant.ContextKeyModelRedirectReason)
+		other["model_redirect_reason"] = "thinking_disabled"
 	}
 
 	isSystemPromptOverwritten := common.GetContextKeyBool(ctx, constant.ContextKeySystemPromptOverride)

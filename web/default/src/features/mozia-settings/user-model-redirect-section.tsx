@@ -102,7 +102,7 @@ export function MoziaUserModelRedirectSection() {
       new FormData(event.currentTarget).get('sso_sub') ?? ''
     ).trim()
     if (!ssoSub) return
-    saveMutation.mutate({ sso_sub: ssoSub })
+    saveMutation.mutate(ssoSub)
   }
 
   const rules = rulesQuery.data ?? []

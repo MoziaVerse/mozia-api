@@ -45,10 +45,6 @@ export type MoziaUserModelRedirect = {
   username?: string
 }
 
-export type MoziaUserModelRedirectPayload = {
-  sso_sub: string
-}
-
 export type ApiEnvelope<T> = {
   success: boolean
   message?: string
