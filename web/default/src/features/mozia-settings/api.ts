@@ -25,11 +25,14 @@ import { api } from '@/lib/api'
 import type {
   ApiEnvelope,
   ManagedAdminPage,
+  MoziaUserModelRedirect,
+  MoziaUserModelRedirectPayload,
   MoziaUserModelRatio,
   MoziaUserModelRatioPayload,
 } from './types'
 
 const USER_MODEL_RATIO_ENDPOINT = '/api/mozia/user-model-ratio'
+const USER_MODEL_REDIRECT_ENDPOINT = '/api/mozia/user-model-redirect'
 
 function unwrapResponse<T>(response: ApiEnvelope<T>): T {
   if (!response.success) {
@@ -75,6 +78,39 @@ export async function deleteMoziaUserModelRatio(rule: MoziaUserModelRatio) {
         scope: rule.scope,
         ...targetParams,
       },
+      skipBusinessError: true,
+      skipErrorHandler: true,
+    }
+  )
+  return unwrapResponse(response.data)
+}
+
+export async function getMoziaUserModelRedirects() {
+  const response = await api.get<ApiEnvelope<MoziaUserModelRedirect[]>>(
+    `${USER_MODEL_REDIRECT_ENDPOINT}/`,
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  return unwrapResponse(response.data)
+}
+
+export async function saveMoziaUserModelRedirect(
+  payload: MoziaUserModelRedirectPayload
+) {
+  const response = await api.post<ApiEnvelope<MoziaUserModelRedirect>>(
+    `${USER_MODEL_REDIRECT_ENDPOINT}/`,
+    payload,
+    { skipBusinessError: true, skipErrorHandler: true }
+  )
+  return unwrapResponse(response.data)
+}
+
+export async function deleteMoziaUserModelRedirect(
+  rule: MoziaUserModelRedirect
+) {
+  const response = await api.delete<ApiEnvelope<null>>(
+    `${USER_MODEL_REDIRECT_ENDPOINT}/${rule.user_id}`,
+    {
+      params: { source_model: rule.source_model },
       skipBusinessError: true,
       skipErrorHandler: true,
     }

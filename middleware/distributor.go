@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/mozia_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -25,8 +26,9 @@ import (
 )
 
 type ModelRequest struct {
-	Model string `json:"model"`
-	Group string `json:"group,omitempty"`
+	Model        string `json:"model"`
+	Group        string `json:"group,omitempty"`
+	ThinkingType string `json:"-"`
 }
 
 func Distribute() func(c *gin.Context) {
@@ -75,6 +77,8 @@ func Distribute() func(c *gin.Context) {
 					return
 				}
 			}
+
+			applyUserThinkingDisabledRedirect(c, modelRequest)
 
 			if shouldSelectChannel {
 				if modelRequest.Model == "" {
@@ -218,7 +222,7 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 		return nil, errors.New("invalid JSON request body")
 	}
 
-	values := gjson.GetManyBytes(requestBody, "model", "group")
+	values := gjson.GetManyBytes(requestBody, "model", "group", "thinking.type")
 	model, err := getJSONStringValue(values[0], "model")
 	if err != nil {
 		return nil, err
@@ -227,6 +231,10 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	if err != nil {
 		return nil, err
 	}
+	thinkingType := ""
+	if values[2].Exists() && values[2].Type == gjson.String {
+		thinkingType = values[2].String()
+	}
 
 	if _, seekErr := storage.Seek(0, io.SeekStart); seekErr != nil {
 		return nil, seekErr
@@ -234,9 +242,25 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	c.Request.Body = io.NopCloser(storage)
 
 	return &ModelRequest{
-		Model: model,
-		Group: group,
+		Model:        model,
+		Group:        group,
+		ThinkingType: thinkingType,
 	}, nil
+}
+
+func applyUserThinkingDisabledRedirect(c *gin.Context, request *ModelRequest) {
+	if request == nil || request.ThinkingType != "disabled" ||
+		relayconstant.Path2RelayMode(c.Request.URL.Path) != relayconstant.RelayModeChatCompletions {
+		return
+	}
+	rule, ok := mozia_setting.GetUserThinkingDisabledRedirect(c.GetInt("id"), request.Model)
+	if !ok {
+		return
+	}
+	common.SetContextKey(c, constant.ContextKeyRequestedModel, request.Model)
+	common.SetContextKey(c, constant.ContextKeyModelRedirectReason, "thinking_disabled")
+	common.SetContextKey(c, constant.ContextKeyModelRedirectApplied, true)
+	request.Model = rule.TargetModel
 }
 
 func getJSONStringValue(result gjson.Result, field string) (string, error) {

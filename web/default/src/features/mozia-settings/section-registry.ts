@@ -30,6 +30,7 @@ import type { AuthUser } from '@/stores/auth-store'
 import { MoziaQuotaPolicySection } from './model-quota-policy-section'
 import { MoziaOperationsPermissionsSection } from './operations-permissions-section'
 import { MoziaUserModelRatioSection } from './user-model-ratio-section'
+import { MoziaUserModelRedirectSection } from './user-model-redirect-section'
 import { MoziaWalletBalancesSection } from './wallet-balances-section'
 
 type MoziaSettingsState = Record<string, never>
@@ -54,6 +55,11 @@ const MOZIA_SETTINGS_SECTIONS = [
     id: 'user-model-ratios',
     titleKey: 'User Billing Ratios',
     build: () => createElement(MoziaUserModelRatioSection),
+  },
+  {
+    id: 'user-model-redirects',
+    titleKey: 'User Model Redirects',
+    build: () => createElement(MoziaUserModelRedirectSection),
   },
 ] as const
 

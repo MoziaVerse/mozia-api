@@ -116,6 +116,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		return
 	}
+	stripThinkingForModelRedirect(c, request)
 
 	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
@@ -248,6 +249,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
+	}
+}
+
+func stripThinkingForModelRedirect(c *gin.Context, request dto.Request) {
+	if !common.GetContextKeyBool(c, constant.ContextKeyModelRedirectApplied) {
+		return
+	}
+	if openAIRequest, ok := request.(*dto.GeneralOpenAIRequest); ok {
+		openAIRequest.THINKING = nil
 	}
 }
 

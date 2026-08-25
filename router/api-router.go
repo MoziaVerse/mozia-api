@@ -473,6 +473,14 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 		userModelRatioRoute.DELETE("/:user_id", middleware.RequirePermission(authz.UserRatioWrite), controller.DeleteMoziaUserModelRatio)
 	}
 
+	userModelRedirectRoute := moziaRouter.Group("/user-model-redirect")
+	userModelRedirectRoute.Use(middleware.RootOnlyAuth())
+	{
+		userModelRedirectRoute.GET("/", controller.GetMoziaUserThinkingDisabledRedirects)
+		userModelRedirectRoute.POST("/", controller.UpsertMoziaUserThinkingDisabledRedirect)
+		userModelRedirectRoute.DELETE("/:user_id", controller.DeleteMoziaUserThinkingDisabledRedirect)
+	}
+
 	modelPricingRoute := moziaRouter.Group("/model-pricing")
 	modelPricingRoute.Use(middleware.AdminAuth())
 	{

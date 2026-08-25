@@ -5219,6 +5219,23 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Complete all required fields": "Complete all required fields",
+    "Delete redirect rule?": "Delete redirect rule?",
+    "Edit redirect rule": "Edit redirect rule",
+    "Failed to delete user model redirect": "Failed to delete user model redirect",
+    "Failed to save user model redirect": "Failed to save user model redirect",
+    "For selected users, requests with thinking.type set to disabled use the configured target model.": "For selected users, requests with thinking.type set to disabled use the configured target model.",
+    "Loading user model redirects...": "Loading user model redirects...",
+    "No user model redirects": "No user model redirects",
+    "SSO subject": "SSO subject",
+    "Source model": "Source model",
+    "Target model": "Target model",
+    "The SSO subject is resolved to an internal user ID and is not stored in settings.": "The SSO subject is resolved to an internal user ID and is not stored in settings.",
+    "Thinking-disabled model redirects": "Thinking-disabled model redirects",
+    "This user will stop using the configured thinking-disabled model redirect.": "This user will stop using the configured thinking-disabled model redirect.",
+    "User Model Redirects": "User Model Redirects",
+    "User model redirect deleted": "User model redirect deleted",
+    "User model redirect saved": "User model redirect saved"
   }
 }
