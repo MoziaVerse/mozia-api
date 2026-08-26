@@ -422,6 +422,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		require.NoError(t, common.Unmarshal(customersEnvelope.RawData, &scopedCustomers))
 		require.Len(t, scopedCustomers, 1)
 		assert.Equal(t, customerA.Id, scopedCustomers[0].Id)
+		assert.Equal(t, "华东客户组", scopedCustomers[0].SubagentName)
 
 		usage := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d&start_timestamp=100&end_timestamp=140", customerA.Id), "", "matrix-reseller-management-test-token", "subagent-usage_123", subagentHeaders)
 		require.Equal(t, http.StatusOK, usage.Code)
@@ -455,29 +456,15 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		remark := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/remark", customerA.Id), `{"remark":"子代理重点客户"}`, "matrix-reseller-management-test-token", "subagent-remark_123", subagentHeaders)
 		require.Equal(t, http.StatusOK, remark.Code)
 		payment := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customerA.Id), `{"enabled":false}`, "matrix-reseller-management-test-token", "subagent-payment_123", subagentHeaders)
-		require.Equal(t, http.StatusOK, payment.Code)
+		require.Equal(t, http.StatusForbidden, payment.Code)
 		overseas := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/overseas-model-access", customerA.Id), `{"allowed":true}`, "matrix-reseller-management-test-token", "subagent-overseas_123", subagentHeaders)
-		require.Equal(t, http.StatusOK, overseas.Code)
+		require.Equal(t, http.StatusForbidden, overseas.Code)
 		var updatedCustomer model.ResellerCustomer
 		require.NoError(t, db.First(&updatedCustomer, customerA.Id).Error)
 		assert.Equal(t, "子代理重点客户", updatedCustomer.Remark)
-		require.NotNil(t, updatedCustomer.UseResellerPayment)
-		assert.False(t, *updatedCustomer.UseResellerPayment)
-		var updatedUser model.User
-		require.NoError(t, db.First(&updatedUser, userA.Id).Error)
-		assert.Equal(t, "ext", updatedUser.Group)
 
-		for _, operation := range []struct {
-			path string
-			body string
-		}{
-			{path: "remark", body: `{"remark":"越权"}`},
-			{path: "reseller-payment", body: `{"enabled":false}`},
-			{path: "overseas-model-access", body: `{"allowed":true}`},
-		} {
-			forged := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/%s", customerD.Id, operation.path), operation.body, "matrix-reseller-management-test-token", "subagent-customer-forged_123", subagentHeaders)
-			require.Equal(t, http.StatusNotFound, forged.Code)
-		}
+		forgedRemark := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/remark", customerD.Id), `{"remark":"越权"}`, "matrix-reseller-management-test-token", "subagent-customer-forged_123", subagentHeaders)
+		require.Equal(t, http.StatusNotFound, forgedRemark.Code)
 
 		for _, path := range []string{
 			fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d", customerC.Id),
@@ -489,7 +476,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 			assert.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, recorder.Code)
 		}
 
-		enableCapabilities := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/members/subagents/%d/capabilities", subagent.Id), `{"can_manage_pricing":true,"can_create_invitations":true}`, "matrix-reseller-management-test-token", "subagent-capabilities_123", ownerHeaders)
+		enableCapabilities := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/members/subagents/%d/capabilities", subagent.Id), `{"can_manage_pricing":true,"can_create_invitations":true,"can_manage_customer_access":true,"can_manage_customer_payment":true}`, "matrix-reseller-management-test-token", "subagent-capabilities_123", ownerHeaders)
 		require.Equal(t, http.StatusOK, enableCapabilities.Code)
 
 		context := request(http.MethodPost, "/api/internal/v1/reseller/context", fmt.Sprintf(`{"subject":%q,"host":"usage-a.example.com"}`, subagent.Subject), "matrix-reseller-test-token", "subagent-context_123", nil)
@@ -498,6 +485,29 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		require.NoError(t, common.Unmarshal(contextEnvelope.RawData, &contextData))
 		assert.Contains(t, contextData.Permissions, "reseller:pricing:write")
 		assert.Contains(t, contextData.Permissions, "reseller:invitations:write")
+		assert.Contains(t, contextData.Permissions, "reseller:customer_access:write")
+		assert.Contains(t, contextData.Permissions, "reseller:customer_payment:write")
+
+		payment = request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customerA.Id), `{"enabled":false}`, "matrix-reseller-management-test-token", "subagent-payment-enabled_123", subagentHeaders)
+		require.Equal(t, http.StatusOK, payment.Code)
+		overseas = request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/overseas-model-access", customerA.Id), `{"allowed":true}`, "matrix-reseller-management-test-token", "subagent-overseas-enabled_123", subagentHeaders)
+		require.Equal(t, http.StatusOK, overseas.Code)
+		require.NoError(t, db.First(&updatedCustomer, customerA.Id).Error)
+		require.NotNil(t, updatedCustomer.UseResellerPayment)
+		assert.False(t, *updatedCustomer.UseResellerPayment)
+		var updatedUser model.User
+		require.NoError(t, db.First(&updatedUser, userA.Id).Error)
+		assert.Equal(t, "ext", updatedUser.Group)
+		for _, operation := range []struct {
+			path string
+			body string
+		}{
+			{path: "reseller-payment", body: `{"enabled":false}`},
+			{path: "overseas-model-access", body: `{"allowed":true}`},
+		} {
+			forged := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/%s", customerD.Id, operation.path), operation.body, "matrix-reseller-management-test-token", "subagent-customer-forged-enabled_123", subagentHeaders)
+			require.Equal(t, http.StatusNotFound, forged.Code)
+		}
 
 		_, err := model.CreateResellerPriceRule(model.CreateResellerPriceRuleParams{
 			ResellerId: resellerA.Id, Kind: model.ResellerPriceRuleKindWholesale, ModelName: "subagent-model",
@@ -543,7 +553,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		var pendingInvitationData resellerM2InvitationCreate
 		require.NoError(t, common.Unmarshal(pendingInvitationEnvelope.RawData, &pendingInvitationData))
 		require.Equal(t, http.StatusCreated, pendingInvitation.Code)
-		disableInvitations := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/members/subagents/%d/capabilities", subagent.Id), `{"can_manage_pricing":true,"can_create_invitations":false}`, "matrix-reseller-management-test-token", "subagent-disable-invites_123", ownerHeaders)
+		disableInvitations := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/members/subagents/%d/capabilities", subagent.Id), `{"can_manage_pricing":true,"can_create_invitations":false,"can_manage_customer_access":true,"can_manage_customer_payment":true}`, "matrix-reseller-management-test-token", "subagent-disable-invites_123", ownerHeaders)
 		require.Equal(t, http.StatusOK, disableInvitations.Code)
 		forbiddenInvitation := request(http.MethodPost, "/api/internal/v1/reseller/management/invitations", `{"expires_in_hours":24}`, "matrix-reseller-management-test-token", "subagent-invite-forbidden_123", subagentHeaders)
 		require.Equal(t, http.StatusForbidden, forbiddenInvitation.Code)

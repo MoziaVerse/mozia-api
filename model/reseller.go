@@ -85,14 +85,16 @@ type ResellerDomain struct {
 }
 
 type ResellerMember struct {
-	Id                   int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ResellerId           int    `json:"reseller_id" gorm:"not null;uniqueIndex:uq_reseller_members_reseller_subject,priority:1"`
-	Subject              string `json:"subject" gorm:"type:varchar(255);not null;index;uniqueIndex:uq_reseller_members_reseller_subject,priority:2"`
-	Name                 string `json:"name" gorm:"type:varchar(128);not null;default:''"`
-	Role                 string `json:"role" gorm:"type:varchar(16);not null"`
-	Status               string `json:"status" gorm:"type:varchar(16);not null"`
-	CanManagePricing     bool   `json:"can_manage_pricing" gorm:"not null;default:false"`
-	CanCreateInvitations bool   `json:"can_create_invitations" gorm:"not null;default:false"`
+	Id                       int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	ResellerId               int    `json:"reseller_id" gorm:"not null;uniqueIndex:uq_reseller_members_reseller_subject,priority:1"`
+	Subject                  string `json:"subject" gorm:"type:varchar(255);not null;index;uniqueIndex:uq_reseller_members_reseller_subject,priority:2"`
+	Name                     string `json:"name" gorm:"type:varchar(128);not null;default:''"`
+	Role                     string `json:"role" gorm:"type:varchar(16);not null"`
+	Status                   string `json:"status" gorm:"type:varchar(16);not null"`
+	CanManagePricing         bool   `json:"can_manage_pricing" gorm:"not null;default:false"`
+	CanCreateInvitations     bool   `json:"can_create_invitations" gorm:"not null;default:false"`
+	CanManageCustomerAccess  bool   `json:"can_manage_customer_access" gorm:"not null;default:false"`
+	CanManageCustomerPayment bool   `json:"can_manage_customer_payment" gorm:"not null;default:false"`
 }
 
 type ResellerCustomer struct {
@@ -125,14 +127,16 @@ type ResellerInvitation struct {
 }
 
 type ResellerContext struct {
-	MemberId             int    `json:"member_id"`
-	ResellerId           int    `json:"reseller_id"`
-	ResellerName         string `json:"reseller_name"`
-	Subject              string `json:"subject"`
-	Host                 string `json:"host"`
-	Role                 string `json:"role"`
-	CanManagePricing     bool   `json:"can_manage_pricing"`
-	CanCreateInvitations bool   `json:"can_create_invitations"`
+	MemberId                 int    `json:"member_id"`
+	ResellerId               int    `json:"reseller_id"`
+	ResellerName             string `json:"reseller_name"`
+	Subject                  string `json:"subject"`
+	Host                     string `json:"host"`
+	Role                     string `json:"role"`
+	CanManagePricing         bool   `json:"can_manage_pricing"`
+	CanCreateInvitations     bool   `json:"can_create_invitations"`
+	CanManageCustomerAccess  bool   `json:"can_manage_customer_access"`
+	CanManageCustomerPayment bool   `json:"can_manage_customer_payment"`
 }
 
 type ResellerAdminRecord struct {
@@ -213,13 +217,15 @@ func NormalizeResellerLogo(raw string) (string, error) {
 }
 
 type ResellerMemberRecord struct {
-	Id                   int    `json:"id"`
-	Subject              string `json:"subject"`
-	Name                 string `json:"name"`
-	Role                 string `json:"role"`
-	Status               string `json:"status"`
-	CanManagePricing     bool   `json:"can_manage_pricing"`
-	CanCreateInvitations bool   `json:"can_create_invitations"`
+	Id                       int    `json:"id"`
+	Subject                  string `json:"subject"`
+	Name                     string `json:"name"`
+	Role                     string `json:"role"`
+	Status                   string `json:"status"`
+	CanManagePricing         bool   `json:"can_manage_pricing"`
+	CanCreateInvitations     bool   `json:"can_create_invitations"`
+	CanManageCustomerAccess  bool   `json:"can_manage_customer_access"`
+	CanManageCustomerPayment bool   `json:"can_manage_customer_payment"`
 }
 
 type ResellerCustomerRecord struct {
@@ -236,6 +242,7 @@ type ResellerCustomerRecord struct {
 	OverseasModelAccess   bool    `json:"overseas_model_access"`
 	UseResellerPayment    bool    `json:"use_reseller_payment"`
 	SubagentMemberId      *int    `json:"subagent_member_id,omitempty"`
+	SubagentName          string  `json:"subagent_name"`
 	SubagentAssignedAt    int64   `json:"subagent_assigned_at"`
 	Remark                *string `json:"remark,omitempty"`
 	BalanceQuota          int     `json:"-"`
@@ -377,7 +384,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 	if host == configuredResellerSharedHost() {
 		var contexts []ResellerContext
 		err := query.
-			Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rm.role, rm.can_manage_pricing, rm.can_create_invitations").
+			Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rm.role, rm.can_manage_pricing, rm.can_create_invitations, rm.can_manage_customer_access, rm.can_manage_customer_payment").
 			Limit(2).
 			Scan(&contexts).Error
 		if err != nil {
@@ -392,7 +399,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 
 	var context ResellerContext
 	err := query.
-		Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role, rm.can_manage_pricing, rm.can_create_invitations").
+		Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role, rm.can_manage_pricing, rm.can_create_invitations, rm.can_manage_customer_access, rm.can_manage_customer_payment").
 		Joins("JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
 		Take(&context).Error
 	if err != nil {
@@ -441,7 +448,7 @@ func ListResellerAdminRecords() ([]ResellerAdminRecord, error) {
 func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 	var records []ResellerMemberRecord
 	err := DB.Table("reseller_members AS rm").
-		Select("rm.id, rm.subject, rm.name, rm.role, rm.status, rm.can_manage_pricing, rm.can_create_invitations").
+		Select("rm.id, rm.subject, rm.name, rm.role, rm.status, rm.can_manage_pricing, rm.can_create_invitations, rm.can_manage_customer_access, rm.can_manage_customer_payment").
 		Where("rm.reseller_id = ?", resellerId).
 		Order("rm.id ASC").
 		Scan(&records).Error
@@ -454,7 +461,7 @@ func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 func GetResellerSubagentMemberRecord(resellerId int, memberId int) (*ResellerMemberRecord, error) {
 	var record ResellerMemberRecord
 	err := DB.Table("reseller_members AS rm").
-		Select("rm.id, rm.subject, rm.name, rm.role, rm.status, rm.can_manage_pricing, rm.can_create_invitations").
+		Select("rm.id, rm.subject, rm.name, rm.role, rm.status, rm.can_manage_pricing, rm.can_create_invitations, rm.can_manage_customer_access, rm.can_manage_customer_payment").
 		Where("rm.id = ? AND rm.reseller_id = ? AND rm.role = ?", memberId, resellerId, ResellerRoleSubagent).
 		Take(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -463,10 +470,15 @@ func GetResellerSubagentMemberRecord(resellerId int, memberId int) (*ResellerMem
 	return &record, err
 }
 
-func UpdateResellerSubagentCapabilities(resellerId int, memberId int, canManagePricing bool, canCreateInvitations bool) (*ResellerMemberRecord, error) {
+func UpdateResellerSubagentCapabilities(resellerId int, memberId int, canManagePricing bool, canCreateInvitations bool, canManageCustomerAccess bool, canManageCustomerPayment bool) (*ResellerMemberRecord, error) {
 	result := DB.Model(&ResellerMember{}).
 		Where("id = ? AND reseller_id = ? AND role = ?", memberId, resellerId, ResellerRoleSubagent).
-		Updates(map[string]any{"can_manage_pricing": canManagePricing, "can_create_invitations": canCreateInvitations})
+		Updates(map[string]any{
+			"can_manage_pricing":          canManagePricing,
+			"can_create_invitations":      canCreateInvitations,
+			"can_manage_customer_access":  canManageCustomerAccess,
+			"can_manage_customer_payment": canManageCustomerPayment,
+		})
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -1285,7 +1297,7 @@ func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {
 	if trueValue == "" {
 		trueValue, falseValue = "1", "0"
 	}
-	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, customers.subagent_member_id, customers.subagent_assigned_at, COALESCE(customers.use_reseller_payment, " + trueValue + ") AS use_reseller_payment, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
+	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, customers.subagent_member_id, COALESCE(subagent.name, '') AS subagent_name, customers.subagent_assigned_at, COALESCE(customers.use_reseller_payment, " + trueValue + ") AS use_reseller_payment, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
 	if includeRemark {
 		fields += ", customers.remark"
 	}
@@ -1294,6 +1306,7 @@ func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {
 
 func resellerCustomerLinkedUserQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("reseller_customers AS customers").
+		Joins("LEFT JOIN reseller_members AS subagent ON subagent.id = customers.subagent_member_id AND subagent.reseller_id = customers.reseller_id").
 		Joins("LEFT JOIN user_ssos AS customer_sso ON customer_sso.sso_sub = customers.subject").
 		Joins("LEFT JOIN users AS customer_sso_user ON customer_sso_user.id = customer_sso.user_id AND customer_sso_user.deleted_at IS NULL").
 		Joins("LEFT JOIN users AS customer_oidc_user ON customer_oidc_user.id = (SELECT MIN(customer_candidate.id) FROM users AS customer_candidate WHERE customer_candidate.oidc_id = customers.subject AND customer_candidate.deleted_at IS NULL)")

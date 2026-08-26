@@ -35,6 +35,12 @@ func resellerPermissions(resellerContext *model.ResellerContext) ([]string, bool
 	if resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanCreateInvitations {
 		permissions = append(permissions, "reseller:invitations:read", "reseller:invitations:write")
 	}
+	if resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerAccess {
+		permissions = append(permissions, "reseller:customer_access:write")
+	}
+	if resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerPayment {
+		permissions = append(permissions, "reseller:customer_payment:write")
+	}
 	return permissions, true
 }
 

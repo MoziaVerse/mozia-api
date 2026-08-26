@@ -32,9 +32,11 @@ type resellerSubagentCreateRequest struct {
 }
 
 type resellerSubagentCapabilitiesRequest struct {
-	CanManagePricing     *bool           `json:"can_manage_pricing"`
-	CanCreateInvitations *bool           `json:"can_create_invitations"`
-	ResellerId           json.RawMessage `json:"reseller_id"`
+	CanManagePricing         *bool           `json:"can_manage_pricing"`
+	CanCreateInvitations     *bool           `json:"can_create_invitations"`
+	CanManageCustomerAccess  *bool           `json:"can_manage_customer_access"`
+	CanManageCustomerPayment *bool           `json:"can_manage_customer_payment"`
+	ResellerId               json.RawMessage `json:"reseller_id"`
 }
 
 type resellerCustomerSubagentRequest struct {
@@ -296,7 +298,7 @@ func UpdateResellerManagementSubagentCapabilities(c *gin.Context) {
 		return
 	}
 	var request resellerSubagentCapabilitiesRequest
-	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || request.CanManagePricing == nil || request.CanCreateInvitations == nil {
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || request.CanManagePricing == nil || request.CanCreateInvitations == nil || request.CanManageCustomerAccess == nil || request.CanManageCustomerPayment == nil {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
@@ -305,6 +307,8 @@ func UpdateResellerManagementSubagentCapabilities(c *gin.Context) {
 		memberId,
 		*request.CanManagePricing,
 		*request.CanCreateInvitations,
+		*request.CanManageCustomerAccess,
+		*request.CanManageCustomerPayment,
 	)
 	switch {
 	case err == nil:
@@ -488,7 +492,7 @@ func UpdateResellerManagementCustomerOverseasModelAccess(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !resellerManagementWriteAllowed(resellerContext.Role) && resellerContext.Role != model.ResellerRoleSubagent {
+	if !resellerManagementWriteAllowed(resellerContext.Role) && !(resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerAccess) {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
 		return
 	}
@@ -529,7 +533,7 @@ func UpdateResellerManagementCustomerPaymentPreference(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !resellerManagementWriteAllowed(resellerContext.Role) && resellerContext.Role != model.ResellerRoleSubagent {
+	if !resellerManagementWriteAllowed(resellerContext.Role) && !(resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerPayment) {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
 		return
 	}

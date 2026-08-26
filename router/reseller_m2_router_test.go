@@ -77,6 +77,7 @@ type resellerM2Customer struct {
 	OverseasModelAccess   bool    `json:"overseas_model_access"`
 	UseResellerPayment    bool    `json:"use_reseller_payment"`
 	SubagentMemberId      *int    `json:"subagent_member_id,omitempty"`
+	SubagentName          string  `json:"subagent_name"`
 	SubagentAssignedAt    int64   `json:"subagent_assigned_at"`
 	Remark                *string `json:"remark,omitempty"`
 	Balance               float64 `json:"balance"`
