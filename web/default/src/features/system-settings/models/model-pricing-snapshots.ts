@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { splitBillingExprAndRequestRules } from '@/features/pricing/lib/billing-expr'
+
 import { safeJsonParse } from '../utils/json-parser'
 import { formatPricingNumber } from './pricing-format'
 
@@ -61,6 +62,23 @@ export type ModelRow = ModelPricingSnapshot & {
 
 export const hasPricingValue = (value?: string) =>
   value !== undefined && value !== ''
+
+type TaskBillingRuleSummary = {
+  mode?: string
+  surcharge?: {
+    free_count?: number
+    unit_price?: number
+  }
+}
+
+const getTaskBillingRuleSummary = (
+  taskBilling?: string
+): TaskBillingRuleSummary =>
+  safeJsonParse<TaskBillingRuleSummary>(taskBilling || '', {
+    fallback: {},
+    context: 'task parameter billing summary',
+    silent: true,
+  })
 
 const toNumberOrNull = (value?: string) => {
   if (!hasPricingValue(value)) return null
@@ -113,9 +131,11 @@ export const getPriceSummary = (
     return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
   }
   if (row.billingMode === 'task-parameter') {
-    return row.price
-      ? `$${row.price} / ${t('parameter')}`
-      : t('Unset price')
+    if (!row.price) return t('Unset price')
+    const rule = getTaskBillingRuleSummary(row.taskBilling)
+    return rule.mode === 'per_second'
+      ? `$${row.price} / ${t('second')}`
+      : `$${row.price} / ${t('parameter')}`
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -148,6 +168,13 @@ export const getPriceDetail = (
     return t('Fixed request price')
   }
   if (row.billingMode === 'task-parameter') {
+    const surcharge = getTaskBillingRuleSummary(row.taskBilling).surcharge
+    if (
+      typeof surcharge?.free_count === 'number' &&
+      typeof surcharge.unit_price === 'number'
+    ) {
+      return `${surcharge.free_count} ${t('free items')} · $${surcharge.unit_price} / ${t('additional item')}`
+    }
     return t('Task parameter billing')
   }
 
@@ -240,7 +267,7 @@ export const buildModelSnapshots = ({
     ...Object.keys(taskBillingMap),
   ])
 
-  return Array.from(modelNames).map((name) => {
+  return [...modelNames].map((name) => {
     const price = priceMap[name]?.toString() || ''
     const ratio = ratioMap[name]?.toString() || ''
     const cache = cacheMap[name]?.toString() || ''

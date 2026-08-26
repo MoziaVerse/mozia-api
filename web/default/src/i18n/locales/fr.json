@@ -5219,6 +5219,25 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Per-item surcharge": "Supplément par élément",
+    "Adds a fixed price for each counted item after the free allowance.": "Ajoute un prix fixe pour chaque élément compté au-delà du quota gratuit.",
+    "Enable per-item surcharge": "Activer le supplément par élément",
+    "Surcharge name": "Nom du supplément",
+    "Identifies this surcharge in billing logs.": "Identifie ce supplément dans les journaux de facturation.",
+    "Item types": "Types d'éléments",
+    "Optional comma-separated object types; strings are always counted.": "Types d'objets facultatifs séparés par des virgules ; les chaînes sont toujours comptées.",
+    "Item count paths": "Chemins de comptage des éléments",
+    "Uses the first non-empty request field, in the listed order.": "Utilise le premier champ de requête non vide dans l'ordre indiqué.",
+    "Free item count": "Nombre d'éléments gratuits",
+    "Items at or below this count do not add a surcharge.": "Aucun supplément n'est ajouté jusqu'à ce nombre d'éléments inclus.",
+    "Price per additional item": "Prix par élément supplémentaire",
+    "Added to the base task price for every item above the free count.": "Ajouté au prix de base de la tâche pour chaque élément au-delà du quota gratuit.",
+    "The item surcharge requires a name.": "Le supplément par élément nécessite un nom.",
+    "The item surcharge requires at least one parameter path.": "Le supplément par élément nécessite au moins un chemin de paramètre.",
+    "The free item count must be a non-negative integer.": "Le nombre d'éléments gratuits doit être un entier positif ou nul.",
+    "The surcharge unit price must be greater than zero.": "Le prix unitaire du supplément doit être supérieur à zéro.",
+    "free items": "éléments gratuits",
+    "additional item": "élément supplémentaire"
   }
 }

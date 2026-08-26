@@ -5219,6 +5219,25 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Per-item surcharge": "Phụ phí theo mục",
+    "Adds a fixed price for each counted item after the free allowance.": "Thêm giá cố định cho mỗi mục được tính vượt quá số lượng miễn phí.",
+    "Enable per-item surcharge": "Bật phụ phí theo mục",
+    "Surcharge name": "Tên phụ phí",
+    "Identifies this surcharge in billing logs.": "Xác định phụ phí này trong nhật ký thanh toán.",
+    "Item types": "Loại mục",
+    "Optional comma-separated object types; strings are always counted.": "Các loại đối tượng tùy chọn, phân tách bằng dấu phẩy; chuỗi luôn được tính.",
+    "Item count paths": "Đường dẫn đếm mục",
+    "Uses the first non-empty request field, in the listed order.": "Sử dụng trường yêu cầu không trống đầu tiên theo thứ tự đã liệt kê.",
+    "Free item count": "Số mục miễn phí",
+    "Items at or below this count do not add a surcharge.": "Không tính phụ phí khi số mục nhỏ hơn hoặc bằng giá trị này.",
+    "Price per additional item": "Giá mỗi mục vượt quá",
+    "Added to the base task price for every item above the free count.": "Được cộng vào giá cơ bản của tác vụ cho mỗi mục vượt quá số lượng miễn phí.",
+    "The item surcharge requires a name.": "Phụ phí theo mục cần có tên.",
+    "The item surcharge requires at least one parameter path.": "Phụ phí theo mục cần ít nhất một đường dẫn tham số.",
+    "The free item count must be a non-negative integer.": "Số mục miễn phí phải là số nguyên không âm.",
+    "The surcharge unit price must be greater than zero.": "Đơn giá phụ phí phải lớn hơn không.",
+    "free items": "mục miễn phí",
+    "additional item": "mục vượt quá"
   }
 }

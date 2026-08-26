@@ -5219,6 +5219,25 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Per-item surcharge": "Доплата за элемент",
+    "Adds a fixed price for each counted item after the free allowance.": "Добавляет фиксированную цену за каждый учтённый элемент сверх бесплатного лимита.",
+    "Enable per-item surcharge": "Включить доплату за элемент",
+    "Surcharge name": "Название доплаты",
+    "Identifies this surcharge in billing logs.": "Идентифицирует эту доплату в журналах биллинга.",
+    "Item types": "Типы элементов",
+    "Optional comma-separated object types; strings are always counted.": "Необязательные типы объектов через запятую; строки учитываются всегда.",
+    "Item count paths": "Пути подсчёта элементов",
+    "Uses the first non-empty request field, in the listed order.": "Используется первое непустое поле запроса в указанном порядке.",
+    "Free item count": "Количество бесплатных элементов",
+    "Items at or below this count do not add a surcharge.": "При этом количестве элементов или меньше доплата не начисляется.",
+    "Price per additional item": "Цена за дополнительный элемент",
+    "Added to the base task price for every item above the free count.": "Добавляется к базовой цене задачи за каждый элемент сверх бесплатного лимита.",
+    "The item surcharge requires a name.": "Для доплаты за элемент требуется название.",
+    "The item surcharge requires at least one parameter path.": "Для доплаты за элемент требуется хотя бы один путь параметра.",
+    "The free item count must be a non-negative integer.": "Количество бесплатных элементов должно быть неотрицательным целым числом.",
+    "The surcharge unit price must be greater than zero.": "Цена единицы доплаты должна быть больше нуля.",
+    "free items": "бесплатных элементов",
+    "additional item": "дополнительный элемент"
   }
 }

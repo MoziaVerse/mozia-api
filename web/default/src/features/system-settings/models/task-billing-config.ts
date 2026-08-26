@@ -39,10 +39,20 @@ export type TaskDimensionDraft = {
   values: TaskEnumValueDraft[]
 }
 
+export type TaskSurchargeDraft = {
+  enabled: boolean
+  name: string
+  paths: string
+  itemTypes: string
+  freeCount: string
+  unitPrice: string
+}
+
 export type TaskBillingDraft = {
   mode: TaskBillingMode
   duration: TaskDimensionDraft
   dimensions: TaskDimensionDraft[]
+  surcharge: TaskSurchargeDraft
 }
 
 export const createEnumValueDraft = (
@@ -68,10 +78,24 @@ export const createTaskDimensionDraft = (
   ...overrides,
 })
 
+export const createTaskSurchargeDraft = (
+  overrides: Partial<TaskSurchargeDraft> = {}
+): TaskSurchargeDraft => ({
+  enabled: false,
+  name: 'input_images',
+  paths:
+    'conditions, metadata.conditions, content, images, image, input_reference',
+  itemTypes: 'image, image_url',
+  freeCount: '0',
+  unitPrice: '',
+  ...overrides,
+})
+
 export const createTaskBillingDraft = (): TaskBillingDraft => ({
   mode: 'per_second',
   duration: createTaskDimensionDraft(),
   dimensions: [createTaskDimensionDraft()],
+  surcharge: createTaskSurchargeDraft(),
 })
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -109,6 +133,33 @@ const parseDimension = (value: unknown): TaskDimensionDraft | null => {
   })
 }
 
+const parseSurcharge = (value: unknown): TaskSurchargeDraft => {
+  if (!isRecord(value) || value.kind !== 'item_count') {
+    return createTaskSurchargeDraft()
+  }
+
+  return createTaskSurchargeDraft({
+    enabled: true,
+    name: typeof value.name === 'string' ? value.name : '',
+    paths: Array.isArray(value.paths)
+      ? value.paths
+          .filter((path): path is string => typeof path === 'string')
+          .join(', ')
+      : '',
+    itemTypes: Array.isArray(value.item_types)
+      ? value.item_types
+          .filter(
+            (itemType): itemType is string => typeof itemType === 'string'
+          )
+          .join(', ')
+      : '',
+    freeCount:
+      typeof value.free_count === 'number' ? String(value.free_count) : '0',
+    unitPrice:
+      typeof value.unit_price === 'number' ? String(value.unit_price) : '',
+  })
+}
+
 export const parseTaskBillingDraft = (raw: string): TaskBillingDraft => {
   const fallback = createTaskBillingDraft()
   if (!raw) return fallback
@@ -116,6 +167,7 @@ export const parseTaskBillingDraft = (raw: string): TaskBillingDraft => {
   try {
     const config: unknown = JSON.parse(raw)
     if (!isRecord(config)) return fallback
+    const surcharge = parseSurcharge(config.surcharge)
 
     if (config.mode === 'per_second') {
       const duration = parseDimension(config.duration)
@@ -127,6 +179,7 @@ export const parseTaskBillingDraft = (raw: string): TaskBillingDraft => {
               name: duration.name || 'duration',
               kind: 'number',
             },
+            surcharge,
           }
         : fallback
     }
@@ -139,6 +192,7 @@ export const parseTaskBillingDraft = (raw: string): TaskBillingDraft => {
         ...fallback,
         mode: 'parametric',
         dimensions: dimensions.length > 0 ? dimensions : fallback.dimensions,
+        surcharge,
       }
     }
   } catch {
@@ -185,12 +239,29 @@ const buildDimension = (draft: TaskDimensionDraft) => {
   }
 }
 
+const buildSurcharge = (draft: TaskSurchargeDraft) => {
+  if (!draft.enabled) return {}
+
+  const itemTypes = parsePaths(draft.itemTypes)
+  return {
+    surcharge: {
+      name: draft.name.trim(),
+      kind: 'item_count',
+      paths: parsePaths(draft.paths),
+      ...(itemTypes.length > 0 ? { item_types: itemTypes } : {}),
+      free_count: Number(draft.freeCount),
+      unit_price: Number(draft.unitPrice),
+    },
+  }
+}
+
 export const buildTaskBillingConfig = (draft: TaskBillingDraft) => {
   if (draft.mode === 'per_second') {
     return {
       version: 1,
       mode: 'per_second',
       duration: buildDimension(draft.duration),
+      ...buildSurcharge(draft.surcharge),
     }
   }
 
@@ -198,6 +269,7 @@ export const buildTaskBillingConfig = (draft: TaskBillingDraft) => {
     version: 1,
     mode: 'parametric',
     dimensions: draft.dimensions.map(buildDimension),
+    ...buildSurcharge(draft.surcharge),
   }
 }
 
@@ -254,6 +326,22 @@ export const validateTaskBillingDraft = (
       !options.has(dimension.defaultValue.trim().toLowerCase())
     ) {
       return 'The enumeration default must match a configured option.'
+    }
+  }
+
+  if (draft.surcharge.enabled) {
+    if (!draft.surcharge.name.trim()) {
+      return 'The item surcharge requires a name.'
+    }
+    if (parsePaths(draft.surcharge.paths).length === 0) {
+      return 'The item surcharge requires at least one parameter path.'
+    }
+    const freeCount = Number(draft.surcharge.freeCount)
+    if (!Number.isInteger(freeCount) || freeCount < 0) {
+      return 'The free item count must be a non-negative integer.'
+    }
+    if (!isPositiveNumber(draft.surcharge.unitPrice)) {
+      return 'The surcharge unit price must be greater than zero.'
     }
   }
 

@@ -5233,6 +5233,25 @@
     "This user will stop using the configured thinking-disabled model redirect.": "该用户将不再使用已配置的关闭思考模型降级规则。",
     "User Model Redirects": "用户模型降级",
     "User model redirect deleted": "用户模型降级规则已删除",
-    "User model redirect saved": "用户模型降级规则已保存"
+    "User model redirect saved": "用户模型降级规则已保存",
+    "Per-item surcharge": "按条目附加费",
+    "Adds a fixed price for each counted item after the free allowance.": "超过免费数量后，为每个计数条目增加固定费用。",
+    "Enable per-item surcharge": "启用按条目附加费",
+    "Surcharge name": "附加费名称",
+    "Identifies this surcharge in billing logs.": "用于在计费日志中标识该附加费。",
+    "Item types": "条目类型",
+    "Optional comma-separated object types; strings are always counted.": "可选，使用逗号分隔对象类型；字符串始终计数。",
+    "Item count paths": "条目计数路径",
+    "Uses the first non-empty request field, in the listed order.": "按列出顺序使用第一个非空请求字段。",
+    "Free item count": "免费条目数",
+    "Items at or below this count do not add a surcharge.": "条目数不超过该值时不收取附加费。",
+    "Price per additional item": "每个超出条目的价格",
+    "Added to the base task price for every item above the free count.": "每个超过免费数量的条目都会在任务基础价格上增加该费用。",
+    "The item surcharge requires a name.": "按条目附加费必须填写名称。",
+    "The item surcharge requires at least one parameter path.": "按条目附加费至少需要一个参数路径。",
+    "The free item count must be a non-negative integer.": "免费条目数必须是非负整数。",
+    "The surcharge unit price must be greater than zero.": "附加费单价必须大于零。",
+    "free items": "个免费条目",
+    "additional item": "个超出条目"
   }
 }

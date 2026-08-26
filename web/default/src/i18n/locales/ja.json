@@ -5219,6 +5219,25 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Per-item surcharge": "項目ごとの追加料金",
+    "Adds a fixed price for each counted item after the free allowance.": "無料枠を超えた各項目に固定料金を追加します。",
+    "Enable per-item surcharge": "項目ごとの追加料金を有効化",
+    "Surcharge name": "追加料金名",
+    "Identifies this surcharge in billing logs.": "請求ログでこの追加料金を識別します。",
+    "Item types": "項目タイプ",
+    "Optional comma-separated object types; strings are always counted.": "任意のオブジェクトタイプをカンマ区切りで指定します。文字列は常にカウントされます。",
+    "Item count paths": "項目数のパス",
+    "Uses the first non-empty request field, in the listed order.": "指定順で最初の空でないリクエストフィールドを使用します。",
+    "Free item count": "無料項目数",
+    "Items at or below this count do not add a surcharge.": "この数以下の項目には追加料金がかかりません。",
+    "Price per additional item": "超過項目ごとの料金",
+    "Added to the base task price for every item above the free count.": "無料枠を超えた各項目についてタスクの基本料金に加算されます。",
+    "The item surcharge requires a name.": "項目ごとの追加料金には名前が必要です。",
+    "The item surcharge requires at least one parameter path.": "項目ごとの追加料金には少なくとも1つのパラメータパスが必要です。",
+    "The free item count must be a non-negative integer.": "無料項目数は0以上の整数である必要があります。",
+    "The surcharge unit price must be greater than zero.": "追加料金の単価は0より大きい必要があります。",
+    "free items": "無料項目",
+    "additional item": "超過項目"
   }
 }

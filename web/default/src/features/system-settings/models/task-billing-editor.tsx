@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Code, Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -28,6 +28,7 @@ import {
   FieldLabel,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import {
@@ -37,6 +38,7 @@ import {
   validateTaskBillingDraft,
   type TaskBillingDraft,
   type TaskDimensionDraft,
+  type TaskSurchargeDraft,
 } from './task-billing-config'
 
 type TaskBillingEditorProps = {
@@ -49,6 +51,7 @@ const selectClassName =
 
 export function TaskBillingEditor(props: TaskBillingEditorProps) {
   const { t } = useTranslation()
+  const surchargeSwitchId = useId()
   const [showJSON, setShowJSON] = useState(false)
   const validationError = validateTaskBillingDraft(props.draft)
 
@@ -65,6 +68,13 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
       dimensions: props.draft.dimensions.map((dimension) =>
         dimension.id === id ? { ...dimension, ...patch } : dimension
       ),
+    })
+  }
+
+  const updateSurcharge = (patch: Partial<TaskSurchargeDraft>) => {
+    props.onChange({
+      ...props.draft,
+      surcharge: { ...props.draft.surcharge, ...patch },
     })
   }
 
@@ -371,6 +381,108 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
           ))}
         </FieldGroup>
       )}
+
+      <section className='rounded-md border p-4'>
+        <div className='flex items-start justify-between gap-4'>
+          <div className='grid gap-1'>
+            <FieldLabel htmlFor={surchargeSwitchId}>
+              {t('Per-item surcharge')}
+            </FieldLabel>
+            <FieldDescription>
+              {t(
+                'Adds a fixed price for each counted item after the free allowance.'
+              )}
+            </FieldDescription>
+          </div>
+          <Switch
+            id={surchargeSwitchId}
+            checked={props.draft.surcharge.enabled}
+            onCheckedChange={(enabled) => updateSurcharge({ enabled })}
+            aria-label={t('Enable per-item surcharge')}
+          />
+        </div>
+
+        {props.draft.surcharge.enabled && (
+          <FieldGroup className='mt-5 gap-4'>
+            <div className='grid gap-4 sm:grid-cols-2'>
+              <Field>
+                <FieldLabel>{t('Surcharge name')}</FieldLabel>
+                <Input
+                  placeholder='input_images'
+                  value={props.draft.surcharge.name}
+                  onChange={(event) =>
+                    updateSurcharge({ name: event.target.value })
+                  }
+                />
+                <FieldDescription>
+                  {t('Identifies this surcharge in billing logs.')}
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel>{t('Item types')}</FieldLabel>
+                <Input
+                  placeholder='image, image_url'
+                  value={props.draft.surcharge.itemTypes}
+                  onChange={(event) =>
+                    updateSurcharge({ itemTypes: event.target.value })
+                  }
+                />
+                <FieldDescription>
+                  {t(
+                    'Optional comma-separated object types; strings are always counted.'
+                  )}
+                </FieldDescription>
+              </Field>
+            </div>
+            <Field>
+              <FieldLabel>{t('Item count paths')}</FieldLabel>
+              <Input
+                placeholder='conditions, content, images'
+                value={props.draft.surcharge.paths}
+                onChange={(event) =>
+                  updateSurcharge({ paths: event.target.value })
+                }
+              />
+              <FieldDescription>
+                {t(
+                  'Uses the first non-empty request field, in the listed order.'
+                )}
+              </FieldDescription>
+            </Field>
+            <div className='grid gap-4 sm:grid-cols-2'>
+              <Field>
+                <FieldLabel>{t('Free item count')}</FieldLabel>
+                <Input
+                  inputMode='numeric'
+                  value={props.draft.surcharge.freeCount}
+                  onChange={(event) =>
+                    updateSurcharge({ freeCount: event.target.value })
+                  }
+                />
+                <FieldDescription>
+                  {t('Items at or below this count do not add a surcharge.')}
+                </FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel>{t('Price per additional item')}</FieldLabel>
+                <Input
+                  inputMode='decimal'
+                  placeholder='0.2'
+                  value={props.draft.surcharge.unitPrice}
+                  onChange={(event) =>
+                    updateSurcharge({ unitPrice: event.target.value })
+                  }
+                />
+                <FieldDescription>
+                  {t(
+                    'Added to the base task price for every item above the free count.'
+                  )}
+                </FieldDescription>
+              </Field>
+            </div>
+          </FieldGroup>
+        )}
+      </section>
 
       <Button
         type='button'

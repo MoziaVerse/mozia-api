@@ -5233,6 +5233,25 @@
     "This user will stop using the configured thinking-disabled model redirect.": "This user will stop using the configured thinking-disabled model redirect.",
     "User Model Redirects": "User Model Redirects",
     "User model redirect deleted": "User model redirect deleted",
-    "User model redirect saved": "User model redirect saved"
+    "User model redirect saved": "User model redirect saved",
+    "Per-item surcharge": "Per-item surcharge",
+    "Adds a fixed price for each counted item after the free allowance.": "Adds a fixed price for each counted item after the free allowance.",
+    "Enable per-item surcharge": "Enable per-item surcharge",
+    "Surcharge name": "Surcharge name",
+    "Identifies this surcharge in billing logs.": "Identifies this surcharge in billing logs.",
+    "Item types": "Item types",
+    "Optional comma-separated object types; strings are always counted.": "Optional comma-separated object types; strings are always counted.",
+    "Item count paths": "Item count paths",
+    "Uses the first non-empty request field, in the listed order.": "Uses the first non-empty request field, in the listed order.",
+    "Free item count": "Free item count",
+    "Items at or below this count do not add a surcharge.": "Items at or below this count do not add a surcharge.",
+    "Price per additional item": "Price per additional item",
+    "Added to the base task price for every item above the free count.": "Added to the base task price for every item above the free count.",
+    "The item surcharge requires a name.": "The item surcharge requires a name.",
+    "The item surcharge requires at least one parameter path.": "The item surcharge requires at least one parameter path.",
+    "The free item count must be a non-negative integer.": "The free item count must be a non-negative integer.",
+    "The surcharge unit price must be greater than zero.": "The surcharge unit price must be greater than zero.",
+    "free items": "free items",
+    "additional item": "additional item"
   }
 }
