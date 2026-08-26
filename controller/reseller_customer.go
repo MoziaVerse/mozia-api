@@ -31,6 +31,12 @@ type resellerSubagentCreateRequest struct {
 	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
+type resellerSubagentCapabilitiesRequest struct {
+	CanManagePricing     *bool           `json:"can_manage_pricing"`
+	CanCreateInvitations *bool           `json:"can_create_invitations"`
+	ResellerId           json.RawMessage `json:"reseller_id"`
+}
+
 type resellerCustomerSubagentRequest struct {
 	SubagentMemberId *int            `json:"subagent_member_id"`
 	ResellerId       json.RawMessage `json:"reseller_id"`
@@ -100,7 +106,7 @@ func GetResellerManagementProfile(c *gin.Context) {
 	if !ok {
 		return
 	}
-	permissions, knownRole := resellerRolePermissions[resellerContext.Role]
+	permissions, knownRole := resellerPermissions(resellerContext)
 	if !knownRole {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorContextNotFound, "reseller context not found")
 		return
@@ -272,6 +278,45 @@ func CreateResellerManagementSubagent(c *gin.Context) {
 	}
 }
 
+func UpdateResellerManagementSubagentCapabilities(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if resellerContext.Role != model.ResellerRoleOwner {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller owner access required")
+		return
+	}
+	memberId, valid := positivePathID(c)
+	if !valid {
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerSubagentCapabilitiesRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || request.CanManagePricing == nil || request.CanCreateInvitations == nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	record, err := model.UpdateResellerSubagentCapabilities(
+		resellerContext.ResellerId,
+		memberId,
+		*request.CanManagePricing,
+		*request.CanCreateInvitations,
+	)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrResellerForbidden):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller subagent not found")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerSubagentCapabilities database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
 func ListResellerManagementCustomers(c *gin.Context) {
 	resellerContext, ok := resellerManagementContext(c)
 	if !ok {
@@ -282,7 +327,7 @@ func ListResellerManagementCustomers(c *gin.Context) {
 	if resellerContext.Role == model.ResellerRoleSubagent {
 		records, err = model.ListResellerSubagentCustomerRecords(resellerContext.ResellerId, resellerContext.MemberId)
 	} else {
-		records, err = model.ListResellerCustomerRecords(resellerContext.ResellerId, resellerContext.Role == model.ResellerRoleOwner)
+		records, err = model.ListResellerCustomerRecords(resellerContext.ResellerId, true)
 	}
 	if err != nil {
 		logger.LogError(c.Request.Context(), "ListResellerCustomerRecords database error: "+err.Error())
@@ -306,7 +351,7 @@ func GetResellerManagementCustomer(c *gin.Context) {
 	if resellerContext.Role == model.ResellerRoleSubagent {
 		record, err = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, resellerContext.MemberId, customerId)
 	} else {
-		record, err = model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, resellerContext.Role == model.ResellerRoleOwner)
+		record, err = model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, true)
 	}
 	if errors.Is(err, model.ErrResellerCustomerNotFound) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
@@ -511,11 +556,15 @@ func ListResellerManagementInvitations(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if resellerContext.Role == model.ResellerRoleSubagent {
+	if resellerContext.Role == model.ResellerRoleSubagent && !resellerContext.CanCreateInvitations {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller invitations forbidden")
 		return
 	}
-	records, err := model.ListResellerInvitationRecords(resellerContext.ResellerId)
+	var subagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		subagentMemberId = &resellerContext.MemberId
+	}
+	records, err := model.ListResellerInvitationRecords(resellerContext.ResellerId, subagentMemberId)
 	if err != nil {
 		logger.LogError(c.Request.Context(), "ListResellerInvitationRecords database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
@@ -529,7 +578,7 @@ func CreateResellerManagementInvitation(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !resellerManagementWriteAllowed(resellerContext.Role) {
+	if !resellerManagementWriteAllowed(resellerContext.Role) && !(resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanCreateInvitations) {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
 		return
 	}
@@ -546,7 +595,11 @@ func CreateResellerManagementInvitation(c *gin.Context) {
 	if request.ExpiresInHours != nil {
 		expiresInHours = *request.ExpiresInHours
 	}
-	record, err := model.CreateResellerInvitationRecord(resellerContext.ResellerId, resellerContext.Subject, expiresInHours)
+	var subagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		subagentMemberId = &resellerContext.MemberId
+	}
+	record, err := model.CreateResellerInvitationRecord(resellerContext.ResellerId, resellerContext.Subject, subagentMemberId, expiresInHours)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusCreated, record)
@@ -565,7 +618,7 @@ func RevokeResellerManagementInvitation(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !resellerManagementWriteAllowed(resellerContext.Role) {
+	if !resellerManagementWriteAllowed(resellerContext.Role) && !(resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanCreateInvitations) {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
 		return
 	}
@@ -573,7 +626,11 @@ func RevokeResellerManagementInvitation(c *gin.Context) {
 	if !valid {
 		return
 	}
-	record, err := model.RevokeResellerInvitationRecord(resellerContext.ResellerId, invitationId)
+	var subagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		subagentMemberId = &resellerContext.MemberId
+	}
+	record, err := model.RevokeResellerInvitationRecord(resellerContext.ResellerId, invitationId, subagentMemberId)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, record)
@@ -773,7 +830,7 @@ func resellerManagementContext(c *gin.Context) (*model.ResellerContext, bool) {
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 		return nil, false
 	}
-	if _, knownRole := resellerRolePermissions[resellerContext.Role]; !knownRole {
+	if _, knownRole := resellerPermissions(resellerContext); !knownRole {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorContextNotFound, "reseller context not found")
 		return nil, false
 	}

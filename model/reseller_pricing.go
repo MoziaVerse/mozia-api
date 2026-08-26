@@ -65,15 +65,16 @@ type ResellerPriceRuleRecord struct {
 }
 
 type CreateResellerPriceRuleParams struct {
-	ResellerId      int
-	Kind            string
-	ModelName       string
-	CustomerId      int
-	MultiplierPPM   int64
-	ExpectedVersion *int
-	Enabled         bool
-	EffectiveAt     int64
-	CreatedBy       string
+	ResellerId               int
+	Kind                     string
+	ModelName                string
+	CustomerId               int
+	MultiplierPPM            int64
+	ExpectedVersion          *int
+	Enabled                  bool
+	EffectiveAt              int64
+	CreatedBy                string
+	RequiredSubagentMemberId *int
 }
 
 type ResellerEffectivePrice struct {
@@ -220,6 +221,9 @@ func CreateResellerPriceRule(params CreateResellerPriceRuleParams) (*ResellerPri
 	if params.ExpectedVersion != nil && *params.ExpectedVersion < 0 {
 		return nil, ErrInvalidResellerPriceRule
 	}
+	if params.RequiredSubagentMemberId != nil && (params.Kind != ResellerPriceRuleKindRetail || params.CustomerId < 1 || *params.RequiredSubagentMemberId < 1) {
+		return nil, ErrInvalidResellerPriceRule
+	}
 	if params.EffectiveAt <= 0 {
 		params.EffectiveAt = common.GetTimestamp()
 	}
@@ -238,8 +242,12 @@ func CreateResellerPriceRule(params CreateResellerPriceRuleParams) (*ResellerPri
 		}
 		if params.CustomerId > 0 {
 			var count int64
-			if err := tx.Model(&ResellerCustomer{}).
-				Where("id = ? AND reseller_id = ?", params.CustomerId, params.ResellerId).
+			customerQuery := tx.Model(&ResellerCustomer{}).
+				Where("id = ? AND reseller_id = ?", params.CustomerId, params.ResellerId)
+			if params.RequiredSubagentMemberId != nil {
+				customerQuery = customerQuery.Where("subagent_member_id = ?", *params.RequiredSubagentMemberId)
+			}
+			if err := customerQuery.
 				Count(&count).Error; err != nil {
 				return err
 			}
@@ -315,6 +323,37 @@ func ListResellerPriceRules(resellerId int, customerId *int) ([]ResellerPriceRul
 		return nil, err
 	}
 
+	return latestResellerPriceRuleRecords(rules), nil
+}
+
+func ListResellerSubagentPriceRules(resellerId int, memberId int, customerId *int) ([]ResellerPriceRuleRecord, error) {
+	if resellerId < 1 || memberId < 1 || customerId != nil && *customerId < 1 {
+		return nil, ErrInvalidResellerPriceRule
+	}
+	assignedCustomerIds := make([]int, 0)
+	query := DB.Model(&ResellerCustomer{}).
+		Where("reseller_id = ? AND subagent_member_id = ?", resellerId, memberId)
+	if customerId != nil {
+		query = query.Where("id = ?", *customerId)
+	}
+	if err := query.Pluck("id", &assignedCustomerIds).Error; err != nil {
+		return nil, err
+	}
+	if customerId != nil && len(assignedCustomerIds) == 0 {
+		return nil, ErrResellerCustomerNotFound
+	}
+	retailCustomerIds := append([]int{0}, assignedCustomerIds...)
+	var rules []ResellerPriceRule
+	if err := DB.Where("reseller_id = ? AND (kind = ? OR (kind = ? AND customer_id IN ?))",
+		resellerId, ResellerPriceRuleKindWholesale, ResellerPriceRuleKindRetail, retailCustomerIds).
+		Order("kind ASC").Order("model_name ASC").Order("customer_id ASC").
+		Order("version DESC").Order("id DESC").Find(&rules).Error; err != nil {
+		return nil, err
+	}
+	return latestResellerPriceRuleRecords(rules), nil
+}
+
+func latestResellerPriceRuleRecords(rules []ResellerPriceRule) []ResellerPriceRuleRecord {
 	records := make([]ResellerPriceRuleRecord, 0, len(rules))
 	seen := make(map[string]struct{}, len(rules))
 	for _, rule := range rules {
@@ -325,7 +364,7 @@ func ListResellerPriceRules(resellerId int, customerId *int) ([]ResellerPriceRul
 		seen[key] = struct{}{}
 		records = append(records, rule.Record())
 	}
-	return records, nil
+	return records
 }
 
 func ResolveResellerBillingCustomer(userId int) (*ResellerBillingCustomer, error) {

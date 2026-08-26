@@ -78,7 +78,7 @@ type resellerTasksEnvelopeData struct {
 
 func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 	_, db, request := setupResellerM2Test(t)
-	require.NoError(t, db.AutoMigrate(&model.Task{}))
+	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.Ability{}))
 
 	resellerA := seedResellerM2(t, db, "Usage Agency A", "usage-a.example.com", model.ResellerRoleOwner, "usage-owner-a", "usage-admin-a", "usage-viewer-a")
 	resellerB := seedResellerM2(t, db, "Usage Agency B", "usage-b.example.com", model.ResellerRoleOwner, "usage-owner-b", "usage-admin-b", "usage-viewer-b")
@@ -462,8 +462,71 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 			assert.Contains(t, []int{http.StatusForbidden, http.StatusNotFound}, recorder.Code)
 		}
 
+		enableCapabilities := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/members/subagents/%d/capabilities", subagent.Id), `{"can_manage_pricing":true,"can_create_invitations":true}`, "matrix-reseller-management-test-token", "subagent-capabilities_123", ownerHeaders)
+		require.Equal(t, http.StatusOK, enableCapabilities.Code)
+
+		context := request(http.MethodPost, "/api/internal/v1/reseller/context", fmt.Sprintf(`{"subject":%q,"host":"usage-a.example.com"}`, subagent.Subject), "matrix-reseller-test-token", "subagent-context_123", nil)
+		contextEnvelope := decodeM2Envelope(t, context)
+		var contextData resellerM2Profile
+		require.NoError(t, common.Unmarshal(contextEnvelope.RawData, &contextData))
+		assert.Contains(t, contextData.Permissions, "reseller:pricing:write")
+		assert.Contains(t, contextData.Permissions, "reseller:invitations:write")
+
+		_, err := model.CreateResellerPriceRule(model.CreateResellerPriceRuleParams{
+			ResellerId: resellerA.Id, Kind: model.ResellerPriceRuleKindWholesale, ModelName: "subagent-model",
+			MultiplierPPM: 800000, Enabled: true, EffectiveAt: common.GetTimestamp(), CreatedBy: "platform",
+		})
+		require.NoError(t, err)
+		pricing := request(http.MethodGet, "/api/internal/v1/reseller/management/pricing", "", "matrix-reseller-management-test-token", "subagent-pricing_123", subagentHeaders)
+		require.Equal(t, http.StatusOK, pricing.Code)
+		pricingEnvelope := decodeM2Envelope(t, pricing)
+		var pricingData struct {
+			Rules []model.ResellerPriceRuleRecord `json:"rules"`
+		}
+		require.NoError(t, common.Unmarshal(pricingEnvelope.RawData, &pricingData))
+		require.NotEmpty(t, pricingData.Rules)
+		assert.Equal(t, model.ResellerPriceRuleKindWholesale, pricingData.Rules[0].Kind)
+		assert.Equal(t, "subagent-model", pricingData.Rules[0].Model)
+		assert.Equal(t, "0.8", pricingData.Rules[0].Multiplier)
+
+		retail := request(http.MethodPost, "/api/internal/v1/reseller/management/pricing/retail", fmt.Sprintf(`{"model":"subagent-model","multiplier":"1.2","customer_id":%d}`, customerA.Id), "matrix-reseller-management-test-token", "subagent-retail_123", subagentHeaders)
+		require.Equal(t, http.StatusCreated, retail.Code)
+		forgedRetail := request(http.MethodPost, "/api/internal/v1/reseller/management/pricing/retail", fmt.Sprintf(`{"model":"subagent-model","multiplier":"1.2","customer_id":%d}`, customerD.Id), "matrix-reseller-management-test-token", "subagent-retail-forged_123", subagentHeaders)
+		require.Equal(t, http.StatusNotFound, forgedRetail.Code)
+
+		createdInvitationRecorder := request(http.MethodPost, "/api/internal/v1/reseller/management/invitations", `{"expires_in_hours":24}`, "matrix-reseller-management-test-token", "subagent-invite_123", subagentHeaders)
+		createdInvitationEnvelope := decodeM2Envelope(t, createdInvitationRecorder)
+		var createdInvitation resellerM2InvitationCreate
+		require.NoError(t, common.Unmarshal(createdInvitationEnvelope.RawData, &createdInvitation))
+		require.Equal(t, http.StatusCreated, createdInvitationRecorder.Code)
+		require.NotNil(t, createdInvitation.Invitation.SubagentMemberId)
+		assert.Equal(t, subagent.Id, *createdInvitation.Invitation.SubagentMemberId)
+
+		consumeInvitation := request(http.MethodPost, "/api/internal/v1/reseller/registration/invitations/consume", fmt.Sprintf(`{"token":%q,"subject":"subagent-invited-customer","matrix_name":"随机客户","phone":"13700137000"}`, createdInvitation.Token), "matrix-reseller-registration-test-token", "subagent-invite-consume_123", nil)
+		consumeInvitationEnvelope := decodeM2Envelope(t, consumeInvitation)
+		var consumed resellerM2Consume
+		require.NoError(t, common.Unmarshal(consumeInvitationEnvelope.RawData, &consumed))
+		require.Equal(t, http.StatusCreated, consumeInvitation.Code)
+		require.NotNil(t, consumed.Customer.SubagentMemberId)
+		assert.Equal(t, subagent.Id, *consumed.Customer.SubagentMemberId)
+		assert.Positive(t, consumed.Customer.SubagentAssignedAt)
+
+		pendingInvitation := request(http.MethodPost, "/api/internal/v1/reseller/management/invitations", `{"expires_in_hours":24}`, "matrix-reseller-management-test-token", "subagent-invite-pending_123", subagentHeaders)
+		pendingInvitationEnvelope := decodeM2Envelope(t, pendingInvitation)
+		var pendingInvitationData resellerM2InvitationCreate
+		require.NoError(t, common.Unmarshal(pendingInvitationEnvelope.RawData, &pendingInvitationData))
+		require.Equal(t, http.StatusCreated, pendingInvitation.Code)
+		disableInvitations := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/members/subagents/%d/capabilities", subagent.Id), `{"can_manage_pricing":true,"can_create_invitations":false}`, "matrix-reseller-management-test-token", "subagent-disable-invites_123", ownerHeaders)
+		require.Equal(t, http.StatusOK, disableInvitations.Code)
+		forbiddenInvitation := request(http.MethodPost, "/api/internal/v1/reseller/management/invitations", `{"expires_in_hours":24}`, "matrix-reseller-management-test-token", "subagent-invite-forbidden_123", subagentHeaders)
+		require.Equal(t, http.StatusForbidden, forbiddenInvitation.Code)
+		blockedConsume := request(http.MethodPost, "/api/internal/v1/reseller/registration/invitations/consume", fmt.Sprintf(`{"token":%q,"subject":"blocked-subagent-customer"}`, pendingInvitationData.Token), "matrix-reseller-registration-test-token", "subagent-invite-blocked-consume_123", nil)
+		require.Equal(t, http.StatusConflict, blockedConsume.Code)
+
 		cleared := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/subagent", customerA.Id), `{"subagent_member_id":0}`, "matrix-reseller-management-test-token", "subagent-clear_123", ownerHeaders)
 		require.Equal(t, http.StatusOK, cleared.Code)
+		clearedInvited := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/subagent", consumed.Customer.Id), `{"subagent_member_id":0}`, "matrix-reseller-management-test-token", "subagent-clear-invited_123", ownerHeaders)
+		require.Equal(t, http.StatusOK, clearedInvited.Code)
 		customers = request(http.MethodGet, "/api/internal/v1/reseller/management/customers", "", "matrix-reseller-management-test-token", "subagent-customers-empty_123", subagentHeaders)
 		customersEnvelope = decodeM2Envelope(t, customers)
 		require.NoError(t, common.Unmarshal(customersEnvelope.RawData, &scopedCustomers))

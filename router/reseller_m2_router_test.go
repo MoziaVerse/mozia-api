@@ -76,6 +76,8 @@ type resellerM2Customer struct {
 	ProfileSyncedAt       int64   `json:"profile_synced_at"`
 	OverseasModelAccess   bool    `json:"overseas_model_access"`
 	UseResellerPayment    bool    `json:"use_reseller_payment"`
+	SubagentMemberId      *int    `json:"subagent_member_id,omitempty"`
+	SubagentAssignedAt    int64   `json:"subagent_assigned_at"`
 	Remark                *string `json:"remark,omitempty"`
 	Balance               float64 `json:"balance"`
 	GiftBalance           float64 `json:"gift_balance"`
@@ -94,6 +96,7 @@ type resellerM2Invitation struct {
 	ConsumedBySubject *string `json:"consumed_by_subject"`
 	CreatedAt         int64   `json:"created_at"`
 	Status            string  `json:"status"`
+	SubagentMemberId  *int    `json:"subagent_member_id,omitempty"`
 }
 
 type resellerM2InvitationCreate struct {
@@ -348,8 +351,7 @@ func TestResellerM2Contract(t *testing.T) {
 				found = true
 				assert.Equal(t, "备注客户", item["matrix_name"])
 				assert.Equal(t, "13700137000", item["phone"])
-				_, hasRemark := item["remark"]
-				assert.False(t, hasRemark)
+				assert.Equal(t, "老板认识的客户", item["remark"])
 			}
 		}
 		assert.True(t, found)

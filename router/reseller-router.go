@@ -19,6 +19,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerManagementRoute.PUT("/payment/bank-transfer", controller.UpdateResellerManagementBankTransfer)
 	resellerManagementRoute.GET("/members", controller.ListResellerManagementMembers)
 	resellerManagementRoute.POST("/members/subagents", controller.CreateResellerManagementSubagent)
+	resellerManagementRoute.PATCH("/members/subagents/:id/capabilities", controller.UpdateResellerManagementSubagentCapabilities)
 	resellerManagementRoute.GET("/customers", controller.ListResellerManagementCustomers)
 	resellerManagementRoute.GET("/customers/:id", controller.GetResellerManagementCustomer)
 	resellerManagementRoute.PATCH("/customers/:id/status", controller.UpdateResellerManagementCustomerStatus)

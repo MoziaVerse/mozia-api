@@ -85,12 +85,14 @@ type ResellerDomain struct {
 }
 
 type ResellerMember struct {
-	Id         int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	ResellerId int    `json:"reseller_id" gorm:"not null;uniqueIndex:uq_reseller_members_reseller_subject,priority:1"`
-	Subject    string `json:"subject" gorm:"type:varchar(255);not null;index;uniqueIndex:uq_reseller_members_reseller_subject,priority:2"`
-	Name       string `json:"name" gorm:"type:varchar(128);not null;default:''"`
-	Role       string `json:"role" gorm:"type:varchar(16);not null"`
-	Status     string `json:"status" gorm:"type:varchar(16);not null"`
+	Id                   int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	ResellerId           int    `json:"reseller_id" gorm:"not null;uniqueIndex:uq_reseller_members_reseller_subject,priority:1"`
+	Subject              string `json:"subject" gorm:"type:varchar(255);not null;index;uniqueIndex:uq_reseller_members_reseller_subject,priority:2"`
+	Name                 string `json:"name" gorm:"type:varchar(128);not null;default:''"`
+	Role                 string `json:"role" gorm:"type:varchar(16);not null"`
+	Status               string `json:"status" gorm:"type:varchar(16);not null"`
+	CanManagePricing     bool   `json:"can_manage_pricing" gorm:"not null;default:false"`
+	CanCreateInvitations bool   `json:"can_create_invitations" gorm:"not null;default:false"`
 }
 
 type ResellerCustomer struct {
@@ -114,6 +116,7 @@ type ResellerInvitation struct {
 	ResellerId        int     `json:"reseller_id" gorm:"not null;index"`
 	TokenHash         string  `json:"token_hash" gorm:"type:varchar(64);not null;uniqueIndex"`
 	CreatedBySubject  string  `json:"created_by_subject" gorm:"type:varchar(255);not null"`
+	SubagentMemberId  *int    `json:"subagent_member_id,omitempty" gorm:"index"`
 	ExpiresAt         int64   `json:"expires_at" gorm:"not null;index"`
 	RevokedAt         *int64  `json:"revoked_at" gorm:"default:null"`
 	ConsumedAt        *int64  `json:"consumed_at" gorm:"default:null"`
@@ -122,12 +125,14 @@ type ResellerInvitation struct {
 }
 
 type ResellerContext struct {
-	MemberId     int    `json:"member_id"`
-	ResellerId   int    `json:"reseller_id"`
-	ResellerName string `json:"reseller_name"`
-	Subject      string `json:"subject"`
-	Host         string `json:"host"`
-	Role         string `json:"role"`
+	MemberId             int    `json:"member_id"`
+	ResellerId           int    `json:"reseller_id"`
+	ResellerName         string `json:"reseller_name"`
+	Subject              string `json:"subject"`
+	Host                 string `json:"host"`
+	Role                 string `json:"role"`
+	CanManagePricing     bool   `json:"can_manage_pricing"`
+	CanCreateInvitations bool   `json:"can_create_invitations"`
 }
 
 type ResellerAdminRecord struct {
@@ -208,11 +213,13 @@ func NormalizeResellerLogo(raw string) (string, error) {
 }
 
 type ResellerMemberRecord struct {
-	Id      int    `json:"id"`
-	Subject string `json:"subject"`
-	Name    string `json:"name"`
-	Role    string `json:"role"`
-	Status  string `json:"status"`
+	Id                   int    `json:"id"`
+	Subject              string `json:"subject"`
+	Name                 string `json:"name"`
+	Role                 string `json:"role"`
+	Status               string `json:"status"`
+	CanManagePricing     bool   `json:"can_manage_pricing"`
+	CanCreateInvitations bool   `json:"can_create_invitations"`
 }
 
 type ResellerCustomerRecord struct {
@@ -255,6 +262,7 @@ type ResellerCustomerProfileBackfillPage struct {
 type ResellerInvitationRecord struct {
 	Id                int     `json:"id"`
 	CreatedBySubject  string  `json:"created_by_subject"`
+	SubagentMemberId  *int    `json:"subagent_member_id,omitempty"`
 	ExpiresAt         int64   `json:"expires_at"`
 	RevokedAt         *int64  `json:"revoked_at"`
 	ConsumedAt        *int64  `json:"consumed_at"`
@@ -369,7 +377,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 	if host == configuredResellerSharedHost() {
 		var contexts []ResellerContext
 		err := query.
-			Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rm.role").
+			Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rm.role, rm.can_manage_pricing, rm.can_create_invitations").
 			Limit(2).
 			Scan(&contexts).Error
 		if err != nil {
@@ -384,7 +392,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 
 	var context ResellerContext
 	err := query.
-		Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role").
+		Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role, rm.can_manage_pricing, rm.can_create_invitations").
 		Joins("JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
 		Take(&context).Error
 	if err != nil {
@@ -432,10 +440,10 @@ func ListResellerAdminRecords() ([]ResellerAdminRecord, error) {
 
 func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 	var records []ResellerMemberRecord
-	err := DB.Table("reseller_members").
-		Select("id, subject, name, role, status").
-		Where("reseller_id = ?", resellerId).
-		Order("id ASC").
+	err := DB.Table("reseller_members AS rm").
+		Select("rm.id, rm.subject, rm.name, rm.role, rm.status, rm.can_manage_pricing, rm.can_create_invitations").
+		Where("rm.reseller_id = ?", resellerId).
+		Order("rm.id ASC").
 		Scan(&records).Error
 	if err != nil {
 		return nil, err
@@ -445,14 +453,24 @@ func ListResellerMemberRecords(resellerId int) ([]ResellerMemberRecord, error) {
 
 func GetResellerSubagentMemberRecord(resellerId int, memberId int) (*ResellerMemberRecord, error) {
 	var record ResellerMemberRecord
-	err := DB.Table("reseller_members").
-		Select("id, subject, name, role, status").
-		Where("id = ? AND reseller_id = ? AND role = ?", memberId, resellerId, ResellerRoleSubagent).
+	err := DB.Table("reseller_members AS rm").
+		Select("rm.id, rm.subject, rm.name, rm.role, rm.status, rm.can_manage_pricing, rm.can_create_invitations").
+		Where("rm.id = ? AND rm.reseller_id = ? AND rm.role = ?", memberId, resellerId, ResellerRoleSubagent).
 		Take(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrResellerForbidden
 	}
 	return &record, err
+}
+
+func UpdateResellerSubagentCapabilities(resellerId int, memberId int, canManagePricing bool, canCreateInvitations bool) (*ResellerMemberRecord, error) {
+	result := DB.Model(&ResellerMember{}).
+		Where("id = ? AND reseller_id = ? AND role = ?", memberId, resellerId, ResellerRoleSubagent).
+		Updates(map[string]any{"can_manage_pricing": canManagePricing, "can_create_invitations": canCreateInvitations})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return GetResellerSubagentMemberRecord(resellerId, memberId)
 }
 
 func CreateResellerSubagentMember(resellerId int, customerId int, name string) (*ResellerMemberRecord, error) {
@@ -536,7 +554,7 @@ func ListResellerCustomerRecords(resellerId int, includeRemark bool) ([]Reseller
 
 func ListResellerSubagentCustomerRecords(resellerId int, memberId int) ([]ResellerCustomerRecord, error) {
 	records := make([]ResellerCustomerRecord, 0)
-	err := resellerCustomerRecordsQuery(DB, false).
+	err := resellerCustomerRecordsQuery(DB, true).
 		Where("customers.reseller_id = ? AND customers.subagent_member_id = ?", resellerId, memberId).
 		Order("customers.id ASC").
 		Scan(&records).Error
@@ -567,7 +585,7 @@ func GetResellerCustomerRecord(resellerId int, customerId int, includeRemark boo
 
 func GetResellerSubagentCustomerRecord(resellerId int, memberId int, customerId int) (*ResellerCustomerRecord, error) {
 	var record ResellerCustomerRecord
-	result := resellerCustomerRecordsQuery(DB, false).
+	result := resellerCustomerRecordsQuery(DB, true).
 		Where("customers.id = ? AND customers.reseller_id = ? AND customers.subagent_member_id = ?", customerId, resellerId, memberId).
 		Limit(1).
 		Scan(&record)
@@ -708,9 +726,13 @@ func ListPendingResellerCustomerProfiles(afterId int, limit int) (*ResellerCusto
 	return &ResellerCustomerProfileBackfillPage{Items: items, NextAfterId: nextAfterId}, nil
 }
 
-func ListResellerInvitationRecords(resellerId int) ([]ResellerInvitationRecord, error) {
+func ListResellerInvitationRecords(resellerId int, subagentMemberId *int) ([]ResellerInvitationRecord, error) {
 	var invitations []ResellerInvitation
-	err := DB.Where("reseller_id = ?", resellerId).Order("id DESC").Find(&invitations).Error
+	query := DB.Where("reseller_id = ?", resellerId)
+	if subagentMemberId != nil {
+		query = query.Where("subagent_member_id = ?", *subagentMemberId)
+	}
+	err := query.Order("id DESC").Find(&invitations).Error
 	if err != nil {
 		return nil, err
 	}
@@ -722,11 +744,11 @@ func ListResellerInvitationRecords(resellerId int) ([]ResellerInvitationRecord, 
 	return records, nil
 }
 
-func CreateResellerInvitationRecord(resellerId int, createdBySubject string, expiresInHours int) (*ResellerInvitationCreateRecord, error) {
+func CreateResellerInvitationRecord(resellerId int, createdBySubject string, subagentMemberId *int, expiresInHours int) (*ResellerInvitationCreateRecord, error) {
 	if !ValidResellerSubject(createdBySubject) {
 		return nil, ErrInvalidResellerSubject
 	}
-	if expiresInHours < 1 || expiresInHours > 168 {
+	if expiresInHours < 1 || expiresInHours > 168 || subagentMemberId != nil && *subagentMemberId < 1 {
 		return nil, ErrInvalidResellerInvitation
 	}
 	tokenBytes := make([]byte, 24)
@@ -738,6 +760,7 @@ func CreateResellerInvitationRecord(resellerId int, createdBySubject string, exp
 		ResellerId:       resellerId,
 		TokenHash:        resellerInvitationTokenHash(token),
 		CreatedBySubject: createdBySubject,
+		SubagentMemberId: subagentMemberId,
 		ExpiresAt:        common.GetTimestamp() + int64(expiresInHours*3600),
 	}
 	if err := DB.Create(&invitation).Error; err != nil {
@@ -752,11 +775,11 @@ func CreateResellerInvitationRecord(resellerId int, createdBySubject string, exp
 	}, nil
 }
 
-func RevokeResellerInvitationRecord(resellerId int, invitationId int) (*ResellerInvitationRecord, error) {
+func RevokeResellerInvitationRecord(resellerId int, invitationId int, subagentMemberId *int) (*ResellerInvitationRecord, error) {
 	now := common.GetTimestamp()
 	var record *ResellerInvitationRecord
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		invitation, err := getResellerInvitationByID(tx, resellerId, invitationId)
+		invitation, err := getResellerInvitationByID(tx, resellerId, invitationId, subagentMemberId)
 		if err != nil {
 			return err
 		}
@@ -776,7 +799,7 @@ func RevokeResellerInvitationRecord(resellerId int, invitationId int) (*Reseller
 			return update.Error
 		}
 		if update.RowsAffected == 0 {
-			current, err := getResellerInvitationByID(tx, resellerId, invitationId)
+			current, err := getResellerInvitationByID(tx, resellerId, invitationId, subagentMemberId)
 			if err != nil {
 				return err
 			}
@@ -823,6 +846,16 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 		if reseller.Status != ResellerStatusActive {
 			return ErrResellerNotFound
 		}
+		if invitation.SubagentMemberId != nil {
+			var member ResellerMember
+			if err := tx.Where("id = ? AND reseller_id = ? AND role = ? AND status = ? AND can_create_invitations = ?", *invitation.SubagentMemberId, invitation.ResellerId, ResellerRoleSubagent, ResellerMemberStatusActive, true).
+				Take(&member).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrResellerInvitationRevoked
+				}
+				return err
+			}
+		}
 
 		update := tx.Model(&ResellerInvitation{}).
 			Where("id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at >= ?", invitation.Id, now).
@@ -841,13 +874,19 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 			return resellerInvitationStateError(current, now)
 		}
 
+		subagentAssignedAt := int64(0)
+		if invitation.SubagentMemberId != nil {
+			subagentAssignedAt = now
+		}
 		customer := ResellerCustomer{
-			ResellerId:      invitation.ResellerId,
-			Subject:         subject,
-			MatrixName:      matrixName,
-			Phone:           phone,
-			ProfileSyncedAt: now,
-			Status:          ResellerCustomerStatusActive,
+			ResellerId:         invitation.ResellerId,
+			Subject:            subject,
+			MatrixName:         matrixName,
+			Phone:              phone,
+			ProfileSyncedAt:    now,
+			SubagentMemberId:   invitation.SubagentMemberId,
+			SubagentAssignedAt: subagentAssignedAt,
+			Status:             ResellerCustomerStatusActive,
 		}
 		if err := tx.Create(&customer).Error; err != nil {
 			if isResellerUniqueConstraintError(err) {
@@ -863,6 +902,8 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 				MatrixName:         customer.MatrixName,
 				Phone:              customer.Phone,
 				ProfileSyncedAt:    customer.ProfileSyncedAt,
+				SubagentMemberId:   customer.SubagentMemberId,
+				SubagentAssignedAt: customer.SubagentAssignedAt,
 				Status:             customer.Status,
 				JoinedAt:           customer.CreatedAt,
 				UseResellerPayment: true,
@@ -1339,6 +1380,7 @@ func resellerInvitationRecordFromModel(invitation ResellerInvitation, now int64)
 	return ResellerInvitationRecord{
 		Id:                invitation.Id,
 		CreatedBySubject:  invitation.CreatedBySubject,
+		SubagentMemberId:  invitation.SubagentMemberId,
 		ExpiresAt:         invitation.ExpiresAt,
 		RevokedAt:         invitation.RevokedAt,
 		ConsumedAt:        invitation.ConsumedAt,
@@ -1366,9 +1408,13 @@ func resellerInvitationStateError(invitation *ResellerInvitation, now int64) err
 	}
 }
 
-func getResellerInvitationByID(tx *gorm.DB, resellerId int, invitationId int) (*ResellerInvitation, error) {
+func getResellerInvitationByID(tx *gorm.DB, resellerId int, invitationId int, subagentMemberId *int) (*ResellerInvitation, error) {
 	var invitation ResellerInvitation
-	if err := tx.Where("id = ? AND reseller_id = ?", invitationId, resellerId).Take(&invitation).Error; err != nil {
+	query := tx.Where("id = ? AND reseller_id = ?", invitationId, resellerId)
+	if subagentMemberId != nil {
+		query = query.Where("subagent_member_id = ?", *subagentMemberId)
+	}
+	if err := query.Take(&invitation).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrResellerInvitationNotFound
 		}

@@ -17,10 +17,25 @@ import (
 const resellerContextBodyLimit = 4 << 10
 
 var resellerRolePermissions = map[string][]string{
-	model.ResellerRoleOwner:    {"reseller:read", "reseller:write", "reseller:pricing:read", "reseller:pricing:write"},
-	model.ResellerRoleAdmin:    {"reseller:read", "reseller:write", "reseller:pricing:read", "reseller:pricing:write"},
-	model.ResellerRoleViewer:   {"reseller:read", "reseller:pricing:read"},
+	model.ResellerRoleOwner:    {"reseller:read", "reseller:write", "reseller:pricing:read", "reseller:pricing:write", "reseller:invitations:read", "reseller:invitations:write"},
+	model.ResellerRoleAdmin:    {"reseller:read", "reseller:write", "reseller:pricing:read", "reseller:pricing:write", "reseller:invitations:read", "reseller:invitations:write"},
+	model.ResellerRoleViewer:   {"reseller:read", "reseller:pricing:read", "reseller:invitations:read"},
 	model.ResellerRoleSubagent: {"reseller:customers:read", "reseller:usage:read"},
+}
+
+func resellerPermissions(resellerContext *model.ResellerContext) ([]string, bool) {
+	base, knownRole := resellerRolePermissions[resellerContext.Role]
+	if !knownRole {
+		return nil, false
+	}
+	permissions := append([]string(nil), base...)
+	if resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManagePricing {
+		permissions = append(permissions, "reseller:pricing:read", "reseller:pricing:write")
+	}
+	if resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanCreateInvitations {
+		permissions = append(permissions, "reseller:invitations:read", "reseller:invitations:write")
+	}
+	return permissions, true
 }
 
 type resellerContextRequest struct {
@@ -92,7 +107,7 @@ func GetResellerContext(c *gin.Context) {
 		return
 	}
 
-	permissions, knownRole := resellerRolePermissions[resellerContext.Role]
+	permissions, knownRole := resellerPermissions(resellerContext)
 	if !knownRole {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorContextNotFound, "reseller context not found")
 		return

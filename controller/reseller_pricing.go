@@ -92,7 +92,7 @@ func CreateResellerPlatformWholesalePrice(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rule, err := createResellerPriceRule(resellerId, model.ResellerPriceRuleKindWholesale, request, "platform")
+	rule, err := createResellerPriceRule(resellerId, model.ResellerPriceRuleKindWholesale, request, "platform", nil)
 	if err != nil {
 		handleResellerPricingError(c, err)
 		return
@@ -145,7 +145,7 @@ func GetResellerManagementPricing(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if resellerContext.Role == model.ResellerRoleSubagent {
+	if resellerContext.Role == model.ResellerRoleSubagent && !resellerContext.CanManagePricing {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller pricing forbidden")
 		return
 	}
@@ -153,7 +153,13 @@ func GetResellerManagementPricing(c *gin.Context) {
 	if !ok {
 		return
 	}
-	records, err := model.ListResellerPriceRules(resellerContext.ResellerId, customerId)
+	var records []model.ResellerPriceRuleRecord
+	var err error
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		records, err = model.ListResellerSubagentPriceRules(resellerContext.ResellerId, resellerContext.MemberId, customerId)
+	} else {
+		records, err = model.ListResellerPriceRules(resellerContext.ResellerId, customerId)
+	}
 	if err != nil {
 		handleResellerPricingError(c, err)
 		return
@@ -192,7 +198,7 @@ func CreateResellerManagementRetailPrice(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !resellerManagementWriteAllowed(resellerContext.Role) {
+	if !resellerManagementWriteAllowed(resellerContext.Role) && !(resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManagePricing) {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller pricing write forbidden")
 		return
 	}
@@ -200,7 +206,15 @@ func CreateResellerManagementRetailPrice(c *gin.Context) {
 	if !ok {
 		return
 	}
-	rule, err := createResellerPriceRule(resellerContext.ResellerId, model.ResellerPriceRuleKindRetail, request, resellerContext.Subject)
+	var requiredSubagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		if request.CustomerId == nil {
+			middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "subagent pricing requires customer_id")
+			return
+		}
+		requiredSubagentMemberId = &resellerContext.MemberId
+	}
+	rule, err := createResellerPriceRule(resellerContext.ResellerId, model.ResellerPriceRuleKindRetail, request, resellerContext.Subject, requiredSubagentMemberId)
 	if err != nil {
 		handleResellerPricingError(c, err)
 		return
@@ -213,7 +227,7 @@ func PreviewResellerManagementPricing(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if resellerContext.Role == model.ResellerRoleSubagent {
+	if resellerContext.Role == model.ResellerRoleSubagent && !resellerContext.CanManagePricing {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller pricing forbidden")
 		return
 	}
@@ -224,7 +238,13 @@ func PreviewResellerManagementPricing(c *gin.Context) {
 	customerId := 0
 	if request.CustomerId != nil {
 		customerId = *request.CustomerId
-		if _, err := model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, false); err != nil {
+		var err error
+		if resellerContext.Role == model.ResellerRoleSubagent {
+			_, err = model.GetResellerSubagentCustomerRecord(resellerContext.ResellerId, resellerContext.MemberId, customerId)
+		} else {
+			_, err = model.GetResellerCustomerRecord(resellerContext.ResellerId, customerId, false)
+		}
+		if err != nil {
 			handleResellerPricingError(c, err)
 			return
 		}
@@ -288,7 +308,7 @@ func resellerPriceRuleBody(c *gin.Context, allowCustomer bool) (resellerPriceRul
 	return request, true
 }
 
-func createResellerPriceRule(resellerId int, kind string, request resellerPriceRuleRequest, createdBy string) (*model.ResellerPriceRule, error) {
+func createResellerPriceRule(resellerId int, kind string, request resellerPriceRuleRequest, createdBy string, requiredSubagentMemberId *int) (*model.ResellerPriceRule, error) {
 	multiplierPPM, err := model.ParseResellerMultiplier(request.Multiplier)
 	if err != nil {
 		return nil, err
@@ -301,6 +321,7 @@ func createResellerPriceRule(resellerId int, kind string, request resellerPriceR
 		ResellerId: resellerId, Kind: kind, ModelName: request.Model, CustomerId: customerId,
 		MultiplierPPM: multiplierPPM, ExpectedVersion: request.ExpectedVersion,
 		Enabled: true, EffectiveAt: common.GetTimestamp(), CreatedBy: createdBy,
+		RequiredSubagentMemberId: requiredSubagentMemberId,
 	})
 }
 
