@@ -38,6 +38,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 			}
 		}
 	}
+	if surcharge := info.PriceData.TaskBillingSurcharge; surcharge != nil {
+		logContent = fmt.Sprintf("%s, 附加费用：%s: %d 张，免费 %d 张，计费 %d 张，附加 %.2f", logContent, surcharge.Name, surcharge.Count, surcharge.FreeCount, surcharge.BillableCount, surcharge.Price)
+	}
 	other := make(map[string]interface{})
 	other["is_task"] = true
 	other["request_path"] = c.Request.URL.Path
@@ -45,6 +48,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	if info.PriceData.TaskBillingMode != "" {
 		other["task_billing_mode"] = info.PriceData.TaskBillingMode
 		other["task_billing_version"] = info.PriceData.TaskBillingVersion
+	}
+	if info.PriceData.TaskBillingSurcharge != nil {
+		other["task_billing_surcharge"] = info.PriceData.TaskBillingSurcharge
 	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
@@ -160,6 +166,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		if bc.TaskBillingMode != "" {
 			other["task_billing_mode"] = bc.TaskBillingMode
 			other["task_billing_version"] = bc.TaskBillingVersion
+		}
+		if bc.TaskBillingSurcharge != nil {
+			other["task_billing_surcharge"] = bc.TaskBillingSurcharge
 		}
 	}
 	props := task.Properties

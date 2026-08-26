@@ -19,8 +19,9 @@ const (
 	ModePerSecond  = "per_second"
 	ModeParametric = "parametric"
 
-	DimensionNumber = "number"
-	DimensionEnum   = "enum"
+	DimensionNumber    = "number"
+	DimensionEnum      = "enum"
+	SurchargeItemCount = "item_count"
 
 	RoundNone    = "none"
 	RoundCeil    = "ceil"
@@ -39,6 +40,33 @@ type Config struct {
 	Mode       string      `json:"mode"`
 	Duration   *Dimension  `json:"duration,omitempty"`
 	Dimensions []Dimension `json:"dimensions,omitempty"`
+	Surcharge  *Surcharge  `json:"surcharge,omitempty"`
+}
+
+// Surcharge adds a fixed price for each billable item after FreeCount. The
+// first present array in Paths is used. Arrays of objects can be restricted by
+// their type field; arrays of strings count every item.
+type Surcharge struct {
+	Name      string   `json:"name"`
+	Kind      string   `json:"kind"`
+	Paths     []string `json:"paths"`
+	ItemTypes []string `json:"item_types,omitempty"`
+	FreeCount int      `json:"free_count,omitempty"`
+	UnitPrice float64  `json:"unit_price"`
+}
+
+type SurchargeResult struct {
+	Name          string  `json:"name"`
+	Count         int     `json:"count"`
+	FreeCount     int     `json:"free_count"`
+	BillableCount int     `json:"billable_count"`
+	UnitPrice     float64 `json:"unit_price"`
+	Price         float64 `json:"price"`
+}
+
+type Evaluation struct {
+	Ratios    map[string]float64 `json:"ratios,omitempty"`
+	Surcharge *SurchargeResult   `json:"surcharge,omitempty"`
 }
 
 // Dimension reads the first present JSON path from Paths. A number dimension
@@ -61,49 +89,82 @@ func Validate(config Config) error {
 		return fmt.Errorf("unsupported task billing version %d", config.Version)
 	}
 
+	var modeErr error
 	switch config.Mode {
 	case ModePerRequest:
 		if config.Duration != nil || len(config.Dimensions) != 0 {
-			return fmt.Errorf("per_request task billing cannot define dimensions")
+			modeErr = fmt.Errorf("per_request task billing cannot define dimensions")
 		}
-		return nil
 	case ModePerSecond:
 		if config.Duration == nil {
-			return fmt.Errorf("per_second task billing requires duration")
+			modeErr = fmt.Errorf("per_second task billing requires duration")
+		} else if len(config.Dimensions) != 0 {
+			modeErr = fmt.Errorf("per_second task billing cannot define dimensions")
+		} else {
+			dimension := *config.Duration
+			if dimension.Name == "" {
+				dimension.Name = "duration"
+			}
+			if dimension.Kind == "" {
+				dimension.Kind = DimensionNumber
+			}
+			modeErr = validateDimension(dimension)
 		}
-		if len(config.Dimensions) != 0 {
-			return fmt.Errorf("per_second task billing cannot define dimensions")
-		}
-		dimension := *config.Duration
-		if dimension.Name == "" {
-			dimension.Name = "duration"
-		}
-		if dimension.Kind == "" {
-			dimension.Kind = DimensionNumber
-		}
-		return validateDimension(dimension)
 	case ModeParametric:
 		if config.Duration != nil {
-			return fmt.Errorf("parametric task billing must use dimensions instead of duration")
-		}
-		if len(config.Dimensions) == 0 {
-			return fmt.Errorf("parametric task billing requires at least one dimension")
-		}
-		seen := make(map[string]struct{}, len(config.Dimensions))
-		for _, dimension := range config.Dimensions {
-			if err := validateDimension(dimension); err != nil {
-				return err
+			modeErr = fmt.Errorf("parametric task billing must use dimensions instead of duration")
+		} else if len(config.Dimensions) == 0 {
+			modeErr = fmt.Errorf("parametric task billing requires at least one dimension")
+		} else {
+			seen := make(map[string]struct{}, len(config.Dimensions))
+			for _, dimension := range config.Dimensions {
+				if err := validateDimension(dimension); err != nil {
+					modeErr = err
+					break
+				}
+				name := strings.TrimSpace(dimension.Name)
+				if _, ok := seen[name]; ok {
+					modeErr = fmt.Errorf("duplicate task billing dimension %q", name)
+					break
+				}
+				seen[name] = struct{}{}
 			}
-			name := strings.TrimSpace(dimension.Name)
-			if _, ok := seen[name]; ok {
-				return fmt.Errorf("duplicate task billing dimension %q", name)
-			}
-			seen[name] = struct{}{}
 		}
-		return nil
 	default:
-		return fmt.Errorf("unsupported task billing mode %q", config.Mode)
+		modeErr = fmt.Errorf("unsupported task billing mode %q", config.Mode)
 	}
+	if modeErr != nil {
+		return modeErr
+	}
+	return validateSurcharge(config.Surcharge)
+}
+
+func validateSurcharge(surcharge *Surcharge) error {
+	if surcharge == nil {
+		return nil
+	}
+	name := strings.TrimSpace(surcharge.Name)
+	if name == "" {
+		return fmt.Errorf("task billing surcharge name is required")
+	}
+	if surcharge.Kind != SurchargeItemCount {
+		return fmt.Errorf("task billing surcharge %q has unsupported kind %q", name, surcharge.Kind)
+	}
+	if len(surcharge.Paths) == 0 {
+		return fmt.Errorf("task billing surcharge %q requires paths", name)
+	}
+	for _, path := range surcharge.Paths {
+		if strings.TrimSpace(path) == "" {
+			return fmt.Errorf("task billing surcharge %q has an empty path", name)
+		}
+	}
+	if surcharge.FreeCount < 0 {
+		return fmt.Errorf("task billing surcharge %q has invalid free_count", name)
+	}
+	if !isFinite(surcharge.UnitPrice) || surcharge.UnitPrice <= 0 {
+		return fmt.Errorf("task billing surcharge %q has invalid unit_price", name)
+	}
+	return nil
 }
 
 func validateDimension(dimension Dimension) error {
@@ -183,13 +244,22 @@ func validateRound(round string) error {
 // Evaluate returns named multipliers for the effective JSON request body.
 // Callers multiply the returned values with the configured ModelPrice.
 func Evaluate(config Config, body []byte) (map[string]float64, error) {
-	if err := Validate(config); err != nil {
+	evaluation, err := EvaluatePricing(config, body)
+	if err != nil {
 		return nil, err
 	}
+	return evaluation.Ratios, nil
+}
 
+// EvaluatePricing returns both multiplicative quantities and additive prices.
+func EvaluatePricing(config Config, body []byte) (Evaluation, error) {
+	if err := Validate(config); err != nil {
+		return Evaluation{}, err
+	}
+
+	var ratios map[string]float64
 	switch config.Mode {
 	case ModePerRequest:
-		return nil, nil
 	case ModePerSecond:
 		dimension := *config.Duration
 		if dimension.Name == "" {
@@ -200,22 +270,81 @@ func Evaluate(config Config, body []byte) (map[string]float64, error) {
 		}
 		value, err := evaluateDimension(dimension, body)
 		if err != nil {
-			return nil, err
+			return Evaluation{}, err
 		}
-		return map[string]float64{dimension.Name: value}, nil
+		ratios = map[string]float64{dimension.Name: value}
 	case ModeParametric:
-		ratios := make(map[string]float64, len(config.Dimensions))
+		ratios = make(map[string]float64, len(config.Dimensions))
 		for _, dimension := range config.Dimensions {
 			value, err := evaluateDimension(dimension, body)
 			if err != nil {
-				return nil, err
+				return Evaluation{}, err
 			}
 			ratios[dimension.Name] = value
 		}
-		return ratios, nil
 	default:
-		return nil, fmt.Errorf("unsupported task billing mode %q", config.Mode)
+		return Evaluation{}, fmt.Errorf("unsupported task billing mode %q", config.Mode)
 	}
+
+	var surchargeResult *SurchargeResult
+	if config.Surcharge != nil {
+		count, err := evaluateItemCount(*config.Surcharge, body)
+		if err != nil {
+			return Evaluation{}, err
+		}
+		billableCount := max(count-config.Surcharge.FreeCount, 0)
+		surchargeResult = &SurchargeResult{
+			Name:          config.Surcharge.Name,
+			Count:         count,
+			FreeCount:     config.Surcharge.FreeCount,
+			BillableCount: billableCount,
+			UnitPrice:     config.Surcharge.UnitPrice,
+			Price:         float64(billableCount) * config.Surcharge.UnitPrice,
+		}
+	}
+	return Evaluation{Ratios: ratios, Surcharge: surchargeResult}, nil
+}
+
+func evaluateItemCount(surcharge Surcharge, body []byte) (int, error) {
+	var raw gjson.Result
+	for _, path := range surcharge.Paths {
+		candidate := gjson.GetBytes(body, path)
+		if !candidate.Exists() || candidate.Value() == nil {
+			continue
+		}
+		if candidate.IsArray() && len(candidate.Array()) == 0 {
+			continue
+		}
+		if candidate.Type == gjson.String && strings.TrimSpace(candidate.String()) == "" {
+			continue
+		}
+		raw = candidate
+		break
+	}
+	if !raw.Exists() {
+		return 0, nil
+	}
+	if !raw.IsArray() {
+		if raw.Type == gjson.String {
+			return 1, nil
+		}
+		return 0, fmt.Errorf("task billing surcharge %q requires an array or string", surcharge.Name)
+	}
+	allowed := make(map[string]struct{}, len(surcharge.ItemTypes))
+	for _, itemType := range surcharge.ItemTypes {
+		allowed[normalizeEnum(itemType)] = struct{}{}
+	}
+	count := 0
+	for _, item := range raw.Array() {
+		if item.Type == gjson.String || len(allowed) == 0 {
+			count++
+			continue
+		}
+		if _, ok := allowed[normalizeEnum(item.Get("type").String())]; ok {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func evaluateDimension(dimension Dimension, body []byte) (float64, error) {

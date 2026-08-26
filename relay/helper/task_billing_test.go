@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTaskBillingRatiosUsesExplicitModelConfiguration(t *testing.T) {
+func TestTaskBillingEvaluationUsesExplicitModelConfiguration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	const model = "task-billing-test-model"
 	original, err := common.Marshal(billing_setting.GetTaskBillingCopy())
@@ -26,6 +26,9 @@ func TestTaskBillingRatiosUsesExplicitModelConfiguration(t *testing.T) {
 		Duration: &taskbilling.Dimension{
 			Paths: []string{"duration", "seconds"},
 			Round: taskbilling.RoundCeil,
+		},
+		Surcharge: &taskbilling.Surcharge{
+			Name: "images", Kind: taskbilling.SurchargeItemCount, Paths: []string{"images"}, FreeCount: 5, UnitPrice: 0.2,
 		},
 	}})
 	require.NoError(t, err)
@@ -39,24 +42,27 @@ func TestTaskBillingRatiosUsesExplicitModelConfiguration(t *testing.T) {
 	})
 
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"duration":4.2}`))
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", bytes.NewBufferString(`{"duration":4.2,"images":["1","2","3","4","5","6"]}`))
 	ctx.Request.Header.Set("Content-Type", "application/json")
 	storage, err := common.GetBodyStorage(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = storage.Close() })
 
-	ratios, rule, isConfigured, err := TaskBillingRatios(ctx, model)
+	evaluation, rule, isConfigured, err := TaskBillingEvaluation(ctx, model)
 	require.NoError(t, err)
 	assert.True(t, isConfigured)
 	assert.Equal(t, taskbilling.ModePerSecond, rule.Mode)
-	assert.Equal(t, map[string]float64{"duration": 5}, ratios)
+	assert.Equal(t, map[string]float64{"duration": 5}, evaluation.Ratios)
+	require.NotNil(t, evaluation.Surcharge)
+	assert.Equal(t, 1, evaluation.Surcharge.BillableCount)
+	assert.InDelta(t, 0.2, evaluation.Surcharge.Price, 0.000001)
 
-	_, _, isConfigured, err = TaskBillingRatios(ctx, "unconfigured-task-billing-model")
+	_, _, isConfigured, err = TaskBillingEvaluation(ctx, "unconfigured-task-billing-model")
 	require.NoError(t, err)
 	assert.False(t, isConfigured)
 }
 
-func TestTaskBillingRatiosPerRequestDoesNotReadTheBody(t *testing.T) {
+func TestTaskBillingEvaluationPerRequestDoesNotReadTheBody(t *testing.T) {
 	const model = "per-request-task-billing-test-model"
 	original, err := common.Marshal(billing_setting.GetTaskBillingCopy())
 	require.NoError(t, err)
@@ -74,9 +80,9 @@ func TestTaskBillingRatiosPerRequestDoesNotReadTheBody(t *testing.T) {
 		})
 	})
 
-	ratios, rule, isConfigured, err := TaskBillingRatios(nil, model)
+	evaluation, rule, isConfigured, err := TaskBillingEvaluation(nil, model)
 	require.NoError(t, err)
 	assert.True(t, isConfigured)
 	assert.Equal(t, taskbilling.ModePerRequest, rule.Mode)
-	assert.Nil(t, ratios)
+	assert.Nil(t, evaluation.Ratios)
 }

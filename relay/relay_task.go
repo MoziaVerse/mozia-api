@@ -199,7 +199,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 5. 计费估算：显式 task_billing 配置优先；未配置时保持每个
 	//    adaptor 的既有 EstimateBilling 语义。两者均使用已经过渠道参数
 	//    覆盖处理的请求体。
-	configuredRatios, taskBillingConfig, hasTaskBillingConfig, err := helper.TaskBillingRatios(c, modelName)
+	taskBillingEvaluation, taskBillingConfig, hasTaskBillingConfig, err := helper.TaskBillingEvaluation(c, modelName)
 	if err != nil {
 		return nil, service.TaskErrorWrapperLocal(err, "invalid_task_billing", http.StatusBadRequest)
 	}
@@ -213,9 +213,10 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 		info.PriceData.TaskBillingMode = taskBillingConfig.Mode
 		info.PriceData.TaskBillingVersion = taskBillingConfig.Version
-		for k, v := range configuredRatios {
+		for k, v := range taskBillingEvaluation.Ratios {
 			info.PriceData.AddOtherRatio(k, v)
 		}
+		info.PriceData.TaskBillingSurcharge = taskBillingEvaluation.Surcharge
 	} else if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
 		for k, v := range estimatedRatios {
 			info.PriceData.AddOtherRatio(k, v)
@@ -223,7 +224,12 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度
-	if hasTaskBillingConfig || !common.StringsContains(constant.TaskPricePatches, modelName) {
+	if hasTaskBillingConfig {
+		info.PriceData.Quota = configuredTaskBillingQuota(info.PriceData)
+		if info.PriceData.Quota > 0 {
+			info.PriceData.FreeModel = false
+		}
+	} else if !common.StringsContains(constant.TaskPricePatches, modelName) {
 		for _, ra := range info.PriceData.OtherRatios {
 			if ra != 1.0 {
 				info.PriceData.Quota = int(float64(info.PriceData.Quota) * ra)
@@ -339,6 +345,19 @@ func applyTaskParamOverride(c *gin.Context, info *relaycommon.RelayInfo) (func()
 		c.Request.ContentLength = originalContentLength
 	}
 	return restore, nil
+}
+
+// configuredTaskBillingQuota applies additive prices before the normal group
+// ratio: (ModelPrice × ratios + additive price) × QuotaPerUnit × GroupRatio.
+func configuredTaskBillingQuota(priceData types.PriceData) int {
+	price := priceData.ModelPrice
+	for _, ratio := range priceData.OtherRatios {
+		price *= ratio
+	}
+	if priceData.TaskBillingSurcharge != nil {
+		price += priceData.TaskBillingSurcharge.Price
+	}
+	return int(price * common.QuotaPerUnit * priceData.GroupRatioInfo.GroupRatio)
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

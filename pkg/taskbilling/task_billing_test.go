@@ -64,9 +64,70 @@ func TestValidateRejectsAmbiguousOrInvalidTaskBilling(t *testing.T) {
 		{Version: Version1, Mode: ModeParametric, Dimensions: []Dimension{{Name: "mode", Kind: DimensionEnum, Paths: []string{"mode"}}}},
 		{Version: 2, Mode: ModePerRequest},
 		{Version: Version1, Mode: ModeParametric, Dimensions: []Dimension{{Name: "quality", Kind: DimensionEnum, Paths: []string{"quality"}, Default: "high", Values: map[string]float64{"low": 1}}}},
+		{Version: Version1, Mode: ModePerRequest, Surcharge: &Surcharge{Name: "images", Kind: SurchargeItemCount, Paths: []string{"images"}, UnitPrice: -0.2}},
 	}
 
 	for _, config := range tests {
 		assert.Error(t, Validate(config))
 	}
+}
+
+func TestEvaluatePricingCountsBillableImages(t *testing.T) {
+	config := Config{
+		Version: Version1,
+		Mode:    ModePerSecond,
+		Duration: &Dimension{
+			Paths: []string{"duration"},
+			Round: RoundCeil,
+		},
+		Surcharge: &Surcharge{
+			Name:      "input_images",
+			Kind:      SurchargeItemCount,
+			Paths:     []string{"conditions", "metadata.conditions", "content", "images", "image", "input_reference"},
+			ItemTypes: []string{"image", "image_url"},
+			FreeCount: 5,
+			UnitPrice: 0.2,
+		},
+	}
+
+	tests := []struct {
+		name          string
+		body          string
+		count         int
+		billableCount int
+		price         float64
+	}{
+		{name: "five images are free", body: `{"duration":15,"images":["1","2","3","4","5"]}`, count: 5},
+		{name: "string image list", body: `{"duration":15,"images":["1","2","3","4","5","6"]}`, count: 6, billableCount: 1, price: 0.2},
+		{name: "condition types are filtered", body: `{"duration":15,"conditions":[{"type":"image"},{"type":"video"},{"type":"image"},{"type":"audio"},{"type":"image"},{"type":"image"},{"type":"image"},{"type":"image"}]}`, count: 6, billableCount: 1, price: 0.2},
+		{name: "content image urls", body: `{"duration":15,"content":[{"type":"text"},{"type":"image_url"},{"type":"image_url"},{"type":"image_url"},{"type":"image_url"},{"type":"image_url"},{"type":"image_url"}]}`, count: 6, billableCount: 1, price: 0.2},
+		{name: "first present source wins", body: `{"duration":15,"conditions":[{"type":"image"}],"images":["1","2","3","4","5","6"]}`, count: 1},
+		{name: "empty sources are skipped", body: `{"duration":15,"conditions":[],"content":[],"images":["1","2","3","4","5","6"]}`, count: 6, billableCount: 1, price: 0.2},
+		{name: "single image is counted", body: `{"duration":15,"image":"https://example.com/image.png"}`, count: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			evaluation, err := EvaluatePricing(config, []byte(test.body))
+			require.NoError(t, err)
+			assert.Equal(t, map[string]float64{"duration": 15}, evaluation.Ratios)
+			require.NotNil(t, evaluation.Surcharge)
+			assert.Equal(t, test.count, evaluation.Surcharge.Count)
+			assert.Equal(t, test.billableCount, evaluation.Surcharge.BillableCount)
+			assert.InDelta(t, test.price, evaluation.Surcharge.Price, 0.000001)
+		})
+	}
+}
+
+func TestEvaluatePricingRejectsObjectSurchargeInput(t *testing.T) {
+	config := Config{
+		Version: Version1,
+		Mode:    ModePerRequest,
+		Surcharge: &Surcharge{
+			Name: "images", Kind: SurchargeItemCount, Paths: []string{"images"}, UnitPrice: 0.2,
+		},
+	}
+
+	_, err := EvaluatePricing(config, []byte(`{"images":{"url":"not-an-array"}}`))
+	assert.Error(t, err)
 }

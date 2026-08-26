@@ -1,6 +1,10 @@
 package types
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/QuantumNous/new-api/pkg/taskbilling"
+)
 
 type GroupRatioInfo struct {
 	GroupRatio        float64
@@ -24,6 +28,7 @@ type PriceData struct {
 	AudioRatio           float64
 	AudioCompletionRatio float64
 	OtherRatios          map[string]float64
+	TaskBillingSurcharge *taskbilling.SurchargeResult
 	TaskBillingMode      string
 	TaskBillingVersion   int
 	UsePrice             bool
