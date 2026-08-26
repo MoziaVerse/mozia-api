@@ -79,6 +79,12 @@ func TestResellerM3PricingContract(t *testing.T) {
 	})
 
 	t.Run("platform writes immutable wholesale versions and previews string quotas", func(t *testing.T) {
+		marginConflict := request(http.MethodPost, platformBase+"/wholesale", `{"model":"enabled-only-a","multiplier":"1.1","expected_version":0}`, "mozia-mega-test-token", "platform-margin_123", nil)
+		marginEnvelope := decodeM2Envelope(t, marginConflict)
+		assert.Equal(t, http.StatusConflict, marginConflict.Code)
+		assert.Equal(t, middleware.ResellerErrorPricingMargin, marginEnvelope.Error.Code)
+		assert.Equal(t, "customer retail multiplier must be greater than or equal to wholesale multiplier", marginEnvelope.Error.Message)
+
 		create := request(http.MethodPost, platformBase+"/wholesale", `{"model":"m3-model","multiplier":"0.8","expected_version":0}`, "mozia-mega-test-token", "platform-create_123", nil)
 		createEnvelope := decodeM2Envelope(t, create)
 		require.Equal(t, http.StatusCreated, create.Code)
@@ -91,7 +97,7 @@ func TestResellerM3PricingContract(t *testing.T) {
 		stale := request(http.MethodPost, platformBase+"/wholesale", `{"model":"m3-model","multiplier":"0.9","expected_version":0}`, "mozia-mega-test-token", "platform-stale_123", nil)
 		staleEnvelope := decodeM2Envelope(t, stale)
 		assert.Equal(t, http.StatusConflict, stale.Code)
-		assert.Equal(t, middleware.ResellerErrorConflict, staleEnvelope.Error.Code)
+		assert.Equal(t, middleware.ResellerErrorPricingVersion, staleEnvelope.Error.Code)
 
 		require.NoError(t, db.Create(&model.ResellerPriceRule{
 			ResellerId:    resellerA.Id,
@@ -176,7 +182,7 @@ func TestResellerM3PricingContract(t *testing.T) {
 		stale := request(http.MethodPost, "/api/internal/v1/reseller/management/pricing/retail", fmt.Sprintf(`{"model":"m3-model","multiplier":"1.3","customer_id":%d,"expected_version":0}`, customerA.Id), "matrix-reseller-management-test-token", "retail-stale_123", managementHeaders)
 		staleEnvelope := decodeM2Envelope(t, stale)
 		assert.Equal(t, http.StatusConflict, stale.Code)
-		assert.Equal(t, middleware.ResellerErrorConflict, staleEnvelope.Error.Code)
+		assert.Equal(t, middleware.ResellerErrorPricingVersion, staleEnvelope.Error.Code)
 
 		forged := request(http.MethodPost, "/api/internal/v1/reseller/management/pricing/retail", fmt.Sprintf(`{"model":"m3-model","multiplier":"1.3","customer_id":%d,"reseller_id":%d}`, customerA.Id, resellerB.Id), "matrix-reseller-management-test-token", "retail-forged_123", managementHeaders)
 		forgedEnvelope := decodeM2Envelope(t, forged)

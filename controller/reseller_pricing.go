@@ -378,8 +378,10 @@ func handleResellerPricingError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, model.ErrInvalidResellerPriceRule), errors.Is(err, model.ErrResellerQuotaOverflow):
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid pricing request")
-	case errors.Is(err, model.ErrResellerPriceRuleVersionConflict), errors.Is(err, model.ErrResellerPriceMarginConflict):
-		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorConflict, "pricing conflict")
+	case errors.Is(err, model.ErrResellerPriceRuleVersionConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorPricingVersion, "pricing version changed; refresh rules and retry")
+	case errors.Is(err, model.ErrResellerPriceMarginConflict):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorPricingMargin, "customer retail multiplier must be greater than or equal to wholesale multiplier")
 	case errors.Is(err, model.ErrResellerNotFound):
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
 	case errors.Is(err, model.ErrResellerCustomerNotFound):
