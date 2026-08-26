@@ -214,7 +214,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 }
 
 func (a *TaskAdaptor) GetModelList() []string {
-	return []string{"minimax/minimax-h3-fl2va", "minimax/minimax-h3-ref2va"}
+	return []string{"minimax/minimax-h3-t2va", "minimax/minimax-h3-fl2va", "minimax/minimax-h3-ref2va"}
 }
 
 func (a *TaskAdaptor) GetChannelName() string {
@@ -239,14 +239,16 @@ func normalizedRequest(c *gin.Context, info *relaycommon.RelayInfo) (*upstreamRe
 	if task == "" {
 		modelName := strings.ToLower(info.OriginModelName)
 		switch {
+		case strings.Contains(modelName, "t2va"):
+			task = "t2va"
 		case strings.Contains(modelName, "fl2va"):
 			task = "fl2va"
 		case strings.Contains(modelName, "ref2va"):
 			task = "ref2va"
 		}
 	}
-	if task != "fl2va" && task != "ref2va" {
-		return nil, fmt.Errorf("MoziaH3 task must be fl2va or ref2va")
+	if task != "t2va" && task != "fl2va" && task != "ref2va" {
+		return nil, fmt.Errorf("MoziaH3 task must be t2va, fl2va or ref2va")
 	}
 
 	duration := clientReq.Duration
@@ -263,6 +265,20 @@ func normalizedRequest(c *gin.Context, info *relaycommon.RelayInfo) (*upstreamRe
 	conditions, err := resolveConditions(clientReq, taskReq, summary, task)
 	if err != nil {
 		return nil, err
+	}
+	switch task {
+	case "fl2va":
+		if len(conditions) == 0 {
+			task = "t2va"
+		}
+	case "t2va":
+		if len(conditions) > 0 {
+			return nil, fmt.Errorf("MoziaH3 t2va task does not accept conditions")
+		}
+	case "ref2va":
+		if len(conditions) == 0 {
+			return nil, fmt.Errorf("MoziaH3 ref2va task requires reference material")
+		}
 	}
 	requestTarget, err := resolveTarget(clientReq.Target, taskReq, duration)
 	if err != nil {
@@ -317,7 +333,7 @@ func normalizedRequest(c *gin.Context, info *relaycommon.RelayInfo) (*upstreamRe
 		OutputCompression:      compression,
 		PreserveReferenceAudio: clientReq.PreserveReferenceAudio,
 	}
-	if task == "fl2va" {
+	if task == "fl2va" || task == "t2va" {
 		request.Seconds = duration
 	}
 	return request, nil

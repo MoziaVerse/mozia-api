@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,75 @@ func TestBuildFL2VARequestFromOpenAIVideoContent(t *testing.T) {
 	assert.Equal(t, 15.0, *request.Seconds)
 	assert.Equal(t, 2.0, *request.AudioFlowShift)
 	assert.Equal(t, map[string]float64{"duration": 15}, adaptor.EstimateBilling(info.context, info.relay))
+}
+
+func TestBuildTextOnlyFL2VARequestAsT2VA(t *testing.T) {
+	tests := []struct {
+		name string
+		task string
+	}{
+		{name: "task inferred from model"},
+		{name: "explicit fl2va task", task: `"task":"fl2va",`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{
+				"model":"minimax/minimax-h3-fl2va",
+				` + tc.task + `
+				"prompt":"waves rolling onto a quiet beach",
+				"duration":4,
+				"size":"1344x768"
+			}`
+			request, _, _ := buildUpstreamRequest(t, body, "minimax/minimax-h3-fl2va")
+
+			assert.Equal(t, "t2va", request.Task)
+			assert.Empty(t, request.Conditions)
+			assert.Equal(t, 4.0, *request.Target.DurationSeconds)
+			assert.Equal(t, 4.0, *request.Seconds)
+		})
+	}
+}
+
+func TestBuildT2VAModelWithoutConditions(t *testing.T) {
+	body := `{
+		"model":"minimax/minimax-h3-t2va",
+		"prompt":"waves rolling onto a quiet beach",
+		"conditions":[],
+		"target":{"short_edge":768,"aspect_ratio":"16:9","duration_seconds":4},
+		"seconds":4
+	}`
+	request, adaptor, _ := buildUpstreamRequest(t, body, "minimax/minimax-h3-t2va")
+
+	assert.Equal(t, "t2va", request.Task)
+	assert.Empty(t, request.Conditions)
+	assert.Equal(t, 4.0, *request.Seconds)
+	assert.Contains(t, adaptor.GetModelList(), "minimax/minimax-h3-t2va")
+	assert.NotContains(t, adaptor.GetModelList(), "minimax/minimax-h3")
+}
+
+func TestRejectT2VARequestWithConditions(t *testing.T) {
+	body := `{
+		"model":"minimax/minimax-h3-t2va",
+		"prompt":"animate the first frame",
+		"conditions":[{"type":"image","uri":"https://example.com/first.jpg","role":"keyframe","frame_index":0}],
+		"target":{"short_edge":768,"aspect_ratio":"16:9","duration_seconds":4}
+	}`
+	taskErr := validateUpstreamRequest(t, body, "minimax/minimax-h3-t2va")
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "MoziaH3 t2va task does not accept conditions", taskErr.Message)
+}
+
+func TestRejectRef2VARequestWithoutReferenceMaterial(t *testing.T) {
+	body := `{
+		"model":"minimax/minimax-h3-ref2va",
+		"prompt":"follow the reference motion",
+		"duration":4
+	}`
+	taskErr := validateUpstreamRequest(t, body, "minimax/minimax-h3-ref2va")
+
+	require.NotNil(t, taskErr)
+	assert.Equal(t, "MoziaH3 ref2va task requires reference material", taskErr.Message)
 }
 
 func TestBuildRef2VARequestPreservesFractionalDurationAndReferenceAudio(t *testing.T) {
@@ -134,6 +204,16 @@ func buildUpstreamRequest(t *testing.T, body, publicModel string) (*upstreamRequ
 	var request upstreamRequest
 	require.NoError(t, common.Unmarshal(data, &request))
 	return &request, adaptor, requestInfo{context: ctx, relay: info}
+}
+
+func validateUpstreamRequest(t *testing.T, body, publicModel string) *dto.TaskError {
+	t.Helper()
+	ctx, cleanup := requestContext(t, body)
+	t.Cleanup(cleanup)
+	info := relayInfo(publicModel)
+	adaptor := &TaskAdaptor{}
+	adaptor.Init(info)
+	return adaptor.ValidateRequestAndSetAction(ctx, info)
 }
 
 func requestContext(t *testing.T, body string) (*gin.Context, func()) {
