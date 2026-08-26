@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,4 +69,62 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid stream value")
 	})
+}
+
+func TestGetAndValidOpenAIImageRequestMultipartSGLangParameters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "Qwen-Image-Edit-2511"))
+	require.NoError(t, writer.WriteField("prompt", "edit this image"))
+	require.NoError(t, writer.WriteField("url", "https://example.com/input.png"))
+	require.NoError(t, writer.WriteField("response_format", "b64_json"))
+	require.NoError(t, writer.WriteField("num_inference_steps", "0"))
+	require.NoError(t, writer.WriteField("guidance_scale", "0"))
+	require.NoError(t, writer.WriteField("true_cfg_scale", "0"))
+	require.NoError(t, writer.WriteField("seed", "0"))
+	require.NoError(t, writer.WriteField("negative_prompt", ""))
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	request, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+	require.NoError(t, err)
+	assert.Equal(t, "b64_json", request.ResponseFormat)
+	require.NotNil(t, request.NumInferenceSteps)
+	require.NotNil(t, request.GuidanceScale)
+	require.NotNil(t, request.TrueCfgScale)
+	require.NotNil(t, request.Seed)
+	require.NotNil(t, request.NegativePrompt)
+	assert.Zero(t, *request.NumInferenceSteps)
+	assert.Zero(t, *request.GuidanceScale)
+	assert.Zero(t, *request.TrueCfgScale)
+	assert.Zero(t, *request.Seed)
+	assert.Empty(t, *request.NegativePrompt)
+}
+
+func TestGetAndValidOpenAIImageRequestRejectsInvalidMultipartNumbers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, field := range []string{"n", "num_inference_steps", "guidance_scale", "true_cfg_scale", "seed"} {
+		t.Run(field, func(t *testing.T) {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			require.NoError(t, writer.WriteField("model", "Qwen-Image-Edit-2511"))
+			require.NoError(t, writer.WriteField("prompt", "edit this image"))
+			require.NoError(t, writer.WriteField(field, "invalid"))
+			require.NoError(t, writer.Close())
+
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+			c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+			_, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "invalid "+field+" value")
+		})
+	}
 }

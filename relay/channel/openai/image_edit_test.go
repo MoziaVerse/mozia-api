@@ -13,6 +13,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -95,4 +96,80 @@ func TestConvertImageEditRequestMultipart(t *testing.T) {
 
 		convertAndReplay(t, c, prompt)
 	})
+}
+
+func TestConvertImageEditRequestAllowsURLOnlyInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "Qwen-Image-Edit-2511"))
+	require.NoError(t, writer.WriteField("prompt", "replace the background"))
+	require.NoError(t, writer.WriteField("url", "https://example.com/one.png"))
+	require.NoError(t, writer.WriteField("url", "https://example.com/two.png"))
+	require.NoError(t, writer.WriteField("num_inference_steps", "40"))
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	info := &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeImagesEdits}
+
+	converted, err := (&Adaptor{}).ConvertImageRequest(c, info, dto.ImageRequest{
+		Model:  "Qwen-Image-Edit-2511",
+		Prompt: "replace the background",
+	})
+	require.NoError(t, err)
+	convertedBody, ok := converted.(*bytes.Buffer)
+	require.True(t, ok)
+
+	replayedRequest := httptest.NewRequest(http.MethodPost, "/v1/images/edits", bytes.NewReader(convertedBody.Bytes()))
+	replayedRequest.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+	require.NoError(t, replayedRequest.ParseMultipartForm(32<<20))
+	assert.Equal(t, []string{"https://example.com/one.png", "https://example.com/two.png"}, replayedRequest.PostForm["url"])
+	assert.Equal(t, "40", replayedRequest.PostForm.Get("num_inference_steps"))
+	assert.Empty(t, replayedRequest.MultipartForm.File)
+}
+
+func TestConvertImageEditRequestRequiresImageOrURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "Qwen-Image-Edit-2511"))
+	require.NoError(t, writer.WriteField("prompt", "replace the background"))
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	info := &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeImagesEdits}
+
+	_, err := (&Adaptor{}).ConvertImageRequest(c, info, dto.ImageRequest{
+		Model:  "Qwen-Image-Edit-2511",
+		Prompt: "replace the background",
+	})
+	require.EqualError(t, err, "image or url is required")
+}
+
+func TestConvertImageEditRequestRejectsRelativeURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "Qwen-Image-Edit-2511"))
+	require.NoError(t, writer.WriteField("prompt", "replace the background"))
+	require.NoError(t, writer.WriteField("url", "/private/input.png"))
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+	info := &relaycommon.RelayInfo{RelayMode: relayconstant.RelayModeImagesEdits}
+
+	_, err := (&Adaptor{}).ConvertImageRequest(c, info, dto.ImageRequest{
+		Model:  "Qwen-Image-Edit-2511",
+		Prompt: "replace the background",
+	})
+	require.EqualError(t, err, "url must be an absolute HTTP(S) URL")
 }

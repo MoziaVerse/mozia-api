@@ -155,9 +155,48 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			c.Request.PostForm = formData
 			imageRequest.Prompt = formData.Get("prompt")
 			imageRequest.Model = formData.Get("model")
-			imageRequest.N = common.GetPointer(uint(common.String2Int(formData.Get("n"))))
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
+			imageRequest.ResponseFormat = formData.Get("response_format")
+
+			if nValue := strings.TrimSpace(formData.Get("n")); nValue != "" {
+				n, err := strconv.ParseUint(nValue, 10, strconv.IntSize)
+				if err != nil {
+					return nil, fmt.Errorf("invalid n value: %w", err)
+				}
+				imageRequest.N = common.GetPointer(uint(n))
+			}
+			if value := strings.TrimSpace(formData.Get("num_inference_steps")); value != "" {
+				parsed, err := strconv.ParseInt(value, 10, strconv.IntSize)
+				if err != nil {
+					return nil, fmt.Errorf("invalid num_inference_steps value: %w", err)
+				}
+				imageRequest.NumInferenceSteps = common.GetPointer(int(parsed))
+			}
+			if value := strings.TrimSpace(formData.Get("guidance_scale")); value != "" {
+				parsed, err := strconv.ParseFloat(value, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid guidance_scale value: %w", err)
+				}
+				imageRequest.GuidanceScale = common.GetPointer(parsed)
+			}
+			if value := strings.TrimSpace(formData.Get("true_cfg_scale")); value != "" {
+				parsed, err := strconv.ParseFloat(value, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid true_cfg_scale value: %w", err)
+				}
+				imageRequest.TrueCfgScale = common.GetPointer(parsed)
+			}
+			if value := strings.TrimSpace(formData.Get("seed")); value != "" {
+				parsed, err := strconv.ParseInt(value, 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("invalid seed value: %w", err)
+				}
+				imageRequest.Seed = common.GetPointer(parsed)
+			}
+			if formData.Has("negative_prompt") {
+				imageRequest.NegativePrompt = common.GetPointer(formData.Get("negative_prompt"))
+			}
 			if streamValue := strings.TrimSpace(formData.Get("stream")); streamValue != "" {
 				stream, err := strconv.ParseBool(streamValue)
 				if err != nil {
@@ -176,6 +215,12 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			}
 			if imageRequest.N == nil || *imageRequest.N == 0 {
 				imageRequest.N = common.GetPointer(uint(1))
+			}
+			if strings.TrimSpace(imageRequest.Model) == "" {
+				return nil, errors.New("model is required")
+			}
+			if strings.TrimSpace(imageRequest.Prompt) == "" {
+				return nil, errors.New("prompt is required")
 			}
 
 			hasWatermark := formData.Has("watermark")

@@ -461,31 +461,41 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 			}
 		}
 
-		if mf != nil && mf.File != nil {
-			// Check if "image" field exists in any form, including array notation
-			var imageFiles []*multipart.FileHeader
-			var exists bool
+		if mf == nil {
+			return nil, errors.New("no multipart form data found")
+		}
 
-			// First check for standard "image" field
-			if imageFiles, exists = mf.File["image"]; !exists || len(imageFiles) == 0 {
-				// If not found, check for "image[]" field
-				if imageFiles, exists = mf.File["image[]"]; !exists || len(imageFiles) == 0 {
-					// If still not found, iterate through all fields to find any that start with "image["
-					foundArrayImages := false
-					for fieldName, files := range mf.File {
-						if strings.HasPrefix(fieldName, "image[") && len(files) > 0 {
-							foundArrayImages = true
-							imageFiles = append(imageFiles, files...)
-						}
-					}
-
-					// If no image fields found at all
-					if !foundArrayImages && (len(imageFiles) == 0) {
-						return nil, errors.New("image is required")
-					}
-				}
+		var imageFiles []*multipart.FileHeader
+		for fieldName, files := range mf.File {
+			if fieldName == "image" || fieldName == "image[]" ||
+				(strings.HasPrefix(fieldName, "image[") && strings.HasSuffix(fieldName, "]")) {
+				imageFiles = append(imageFiles, files...)
 			}
+		}
 
+		imageURLCount := 0
+		for fieldName, values := range mf.Value {
+			if fieldName != "url" && fieldName != "url[]" &&
+				!(strings.HasPrefix(fieldName, "url[") && strings.HasSuffix(fieldName, "]")) {
+				continue
+			}
+			for _, value := range values {
+				value = strings.TrimSpace(value)
+				if value == "" {
+					continue
+				}
+				parsedURL, err := url.Parse(value)
+				if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+					return nil, errors.New("url must be an absolute HTTP(S) URL")
+				}
+				imageURLCount++
+			}
+		}
+		if len(imageFiles) == 0 && imageURLCount == 0 {
+			return nil, errors.New("image or url is required")
+		}
+
+		if len(imageFiles) > 0 {
 			// Process all image files
 			for i, fileHeader := range imageFiles {
 				file, err := fileHeader.Open()
@@ -546,8 +556,6 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 				}
 				_ = maskFile.Close()
 			}
-		} else {
-			return nil, errors.New("no multipart form data found")
 		}
 
 		// 关闭 multipart 编写器以设置分界线

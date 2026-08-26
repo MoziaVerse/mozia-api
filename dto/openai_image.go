@@ -18,6 +18,11 @@ type ImageRequest struct {
 	Size              string          `json:"size,omitempty"`
 	Quality           string          `json:"quality,omitempty"`
 	ResponseFormat    string          `json:"response_format,omitempty"`
+	NumInferenceSteps *int            `json:"num_inference_steps,omitempty"`
+	GuidanceScale     *float64        `json:"guidance_scale,omitempty"`
+	TrueCfgScale      *float64        `json:"true_cfg_scale,omitempty"`
+	Seed              *int64          `json:"seed,omitempty"`
+	NegativePrompt    *string         `json:"negative_prompt,omitempty"`
 	Style             json.RawMessage `json:"style,omitempty"`
 	User              json.RawMessage `json:"user,omitempty"`
 	ExtraFields       json.RawMessage `json:"extra_fields,omitempty"`

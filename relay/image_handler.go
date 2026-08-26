@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -53,6 +55,14 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		}
 		requestBody = common.ReaderOnly(storage)
 	} else {
+		if info.RelayMode == relayconstant.RelayModeImagesEdits &&
+			strings.HasPrefix(c.Request.Header.Get("Content-Type"), "multipart/form-data") &&
+			len(info.ParamOverride) > 0 {
+			if err := applyImageMultipartParamOverride(c, info, request); err != nil {
+				return newAPIErrorFromParamOverride(err)
+			}
+		}
+
 		convertedRequest, err := adaptor.ConvertImageRequest(c, info, *request)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed)
@@ -158,5 +168,55 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	}
 
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), logContent)
+	return nil
+}
+
+func applyImageMultipartParamOverride(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ImageRequest) error {
+	form := c.Request.MultipartForm
+	if form == nil {
+		return errors.New("multipart form is not parsed")
+	}
+
+	requestJSON, err := common.Marshal(request)
+	if err != nil {
+		return err
+	}
+	overriddenJSON, err := relaycommon.ApplyParamOverrideWithRelayInfo(requestJSON, info)
+	if err != nil {
+		return err
+	}
+
+	var overriddenRequest dto.ImageRequest
+	if err := common.Unmarshal(overriddenJSON, &overriddenRequest); err != nil {
+		return err
+	}
+	if strings.TrimSpace(overriddenRequest.Model) == "" {
+		return errors.New("model is required after applying channel parameter override")
+	}
+	if strings.TrimSpace(overriddenRequest.Prompt) == "" {
+		return errors.New("prompt is required after applying channel parameter override")
+	}
+	if overriddenRequest.N != nil && *overriddenRequest.N == 0 {
+		return errors.New("n must be greater than zero after applying channel parameter override")
+	}
+
+	var overriddenFields map[string]interface{}
+	if err := common.Unmarshal(overriddenJSON, &overriddenFields); err != nil {
+		return err
+	}
+	for _, key := range []string{
+		"model", "prompt", "n", "size", "quality", "response_format", "num_inference_steps",
+		"guidance_scale", "true_cfg_scale", "seed", "negative_prompt", "stream",
+	} {
+		value, ok := overriddenFields[key]
+		if !ok || value == nil {
+			delete(form.Value, key)
+			continue
+		}
+		form.Value[key] = []string{common.Interface2String(value)}
+	}
+
+	c.Request.PostForm = form.Value
+	*request = overriddenRequest
 	return nil
 }
