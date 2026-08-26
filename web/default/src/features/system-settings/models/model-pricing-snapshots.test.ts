@@ -60,6 +60,7 @@ describe('task billing pricing summaries', () => {
       audioRatio: '{}',
       audioCompletionRatio: '{}',
       videoInputRatio: '{}',
+      referenceVideoPrice: '{"per-second-model":0.7}',
       billingMode: '{}',
       billingExpr: '{}',
       taskBilling:
@@ -73,6 +74,12 @@ describe('task billing pricing summaries', () => {
     assert.equal(
       rows.find((row) => row.name === 'parameter-model')?.billingMode,
       'parametric'
+    )
+    const perSecondRow = rows.find((row) => row.name === 'per-second-model')
+    assert.ok(perSecondRow)
+    assert.equal(
+      getPriceSummary(perSecondRow, (key) => key),
+      '$0.9 / second · Reference video $0.7'
     )
   })
 })
@@ -89,6 +96,7 @@ describe('reference video token pricing', () => {
       audioRatio: '{}',
       audioCompletionRatio: '{}',
       videoInputRatio: '{"doubao/seedance-2.0-pro-480p":0.6086956521739131}',
+      referenceVideoPrice: '{}',
       billingMode: '{}',
       billingExpr: '{}',
       taskBilling: '{}',

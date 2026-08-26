@@ -76,6 +76,7 @@ type ModelRatioVisualEditorProps = {
   savedAudioRatio: string
   savedAudioCompletionRatio: string
   savedVideoInputRatio: string
+  savedReferenceVideoPrice: string
   savedBillingMode: string
   savedBillingExpr: string
   savedTaskBilling: string
@@ -88,6 +89,7 @@ type ModelRatioVisualEditorProps = {
   audioRatio: string
   audioCompletionRatio: string
   videoInputRatio: string
+  referenceVideoPrice: string
   billingMode: string
   billingExpr: string
   taskBilling: string
@@ -116,6 +118,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioRatio,
     savedAudioCompletionRatio,
     savedVideoInputRatio,
+    savedReferenceVideoPrice,
     savedBillingMode,
     savedBillingExpr,
     savedTaskBilling,
@@ -128,6 +131,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     audioRatio,
     audioCompletionRatio,
     videoInputRatio,
+    referenceVideoPrice,
     billingMode,
     billingExpr,
     taskBilling,
@@ -201,6 +205,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioRatio: savedAudioRatio,
       audioCompletionRatio: savedAudioCompletionRatio,
       videoInputRatio: savedVideoInputRatio,
+      referenceVideoPrice: savedReferenceVideoPrice,
       billingMode: savedBillingMode,
       billingExpr: savedBillingExpr,
       taskBilling: savedTaskBilling,
@@ -215,6 +220,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioRatio,
       audioCompletionRatio,
       videoInputRatio,
+      referenceVideoPrice,
       billingMode,
       billingExpr,
       taskBilling,
@@ -253,6 +259,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioRatio,
     savedAudioCompletionRatio,
     savedVideoInputRatio,
+    savedReferenceVideoPrice,
     savedBillingMode,
     savedBillingExpr,
     savedTaskBilling,
@@ -265,6 +272,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     audioRatio,
     audioCompletionRatio,
     videoInputRatio,
+    referenceVideoPrice,
     billingMode,
     billingExpr,
     taskBilling,
@@ -319,6 +327,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         audioRatio: editableModel.audioRatio,
         audioCompletionRatio: editableModel.audioCompletionRatio,
         videoInputRatio: editableModel.videoInputRatio,
+        referenceVideoPrice: editableModel.referenceVideoPrice,
         billingMode: nextBillingMode,
         billingExpr: editableModel.billingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
@@ -389,6 +398,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         videoInputRatio,
         { fallback: {}, silent: true }
       )
+      const referenceVideoPriceMap = safeJsonParse<Record<string, number>>(
+        referenceVideoPrice,
+        { fallback: {}, silent: true }
+      )
       const billingModeMap = safeJsonParse<Record<string, string>>(
         billingMode,
         { fallback: {}, silent: true }
@@ -411,6 +424,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       delete audioMap[name]
       delete audioCompletionMap[name]
       delete videoInputMap[name]
+      delete referenceVideoPriceMap[name]
       delete billingModeMap[name]
       delete billingExprMap[name]
       delete taskBillingMap[name]
@@ -427,6 +441,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         JSON.stringify(audioCompletionMap, null, 2)
       )
       onChange('VideoInputRatio', JSON.stringify(videoInputMap, null, 2))
+      onChange(
+        'ReferenceVideoPrice',
+        JSON.stringify(referenceVideoPriceMap, null, 2)
+      )
       onChange(
         'billing_setting.billing_mode',
         JSON.stringify(billingModeMap, null, 2)
@@ -456,6 +474,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioRatio,
       audioCompletionRatio,
       videoInputRatio,
+      referenceVideoPrice,
       billingMode,
       billingExpr,
       taskBilling,
@@ -535,6 +554,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         videoInputRatio,
         { fallback: {}, silent: true }
       )
+      const referenceVideoPriceMap = safeJsonParse<Record<string, number>>(
+        referenceVideoPrice,
+        { fallback: {}, silent: true }
+      )
       const billingModeMap = safeJsonParse<Record<string, string>>(
         billingMode,
         { fallback: {}, silent: true }
@@ -568,6 +591,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         delete audioMap[name]
         delete audioCompletionMap[name]
         delete videoInputMap[name]
+        delete referenceVideoPriceMap[name]
         delete billingModeMap[name]
         delete billingExprMap[name]
         delete taskBillingMap[name]
@@ -578,6 +602,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         ) {
           taskBillingMap[name] = JSON.parse(data.taskBilling || '{}')
           setIfPresent(priceMap, name, data.price)
+          setIfPresent(referenceVideoPriceMap, name, data.referenceVideoPrice)
         } else if (data.billingMode === 'tiered_expr') {
           const combined = combineBillingExpr(
             data.billingExpr || '',
@@ -602,6 +627,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
           setIfPresent(videoInputMap, name, data.videoInputRatio)
         } else if (data.price && data.price !== '') {
           setIfPresent(priceMap, name, data.price)
+          setIfPresent(referenceVideoPriceMap, name, data.referenceVideoPrice)
         } else {
           setIfPresent(ratioMap, name, data.ratio)
           setIfPresent(cacheMap, name, data.cacheRatio)
@@ -627,6 +653,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
       )
       onChange('VideoInputRatio', JSON.stringify(videoInputMap, null, 2))
       onChange(
+        'ReferenceVideoPrice',
+        JSON.stringify(referenceVideoPriceMap, null, 2)
+      )
+      onChange(
         'billing_setting.billing_mode',
         JSON.stringify(billingModeMap, null, 2)
       )
@@ -649,6 +679,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioRatio,
       audioCompletionRatio,
       videoInputRatio,
+      referenceVideoPrice,
       billingMode,
       billingExpr,
       taskBilling,

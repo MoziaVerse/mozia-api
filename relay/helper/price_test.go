@@ -3,6 +3,7 @@ package helper
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -185,4 +186,29 @@ func TestModelPriceHelpersApplyUserModelRatioToRatioAndFixedPricing(t *testing.T
 	require.True(t, ok)
 	assert.Equal(t, int(modelPrice*common.QuotaPerUnit*0.36), fixedPrice.Quota)
 	assert.True(t, fixedPrice.GroupRatioInfo.HasUserModelRatio)
+}
+
+func TestModelPriceHelperPerCallUsesReferenceVideoPrice(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalPrices := ratio_setting.ModelPrice2JSONString()
+	originalReferencePrices := ratio_setting.ReferenceVideoPrice2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(originalPrices))
+		require.NoError(t, ratio_setting.UpdateReferenceVideoPriceByJSONString(originalReferencePrices))
+	})
+	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"dual-price-video-model":0.1}`))
+	require.NoError(t, ratio_setting.UpdateReferenceVideoPriceByJSONString(`{"dual-price-video-model":0.2}`))
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"reference_video":"https://example.com/ref.mp4"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	priceData, err := ModelPriceHelperPerCall(ctx, &relaycommon.RelayInfo{
+		OriginModelName: "dual-price-video-model",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, 0.2, priceData.ModelPrice)
+	assert.Equal(t, int(0.2*common.QuotaPerUnit), priceData.Quota)
 }

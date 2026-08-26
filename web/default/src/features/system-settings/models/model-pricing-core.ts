@@ -34,6 +34,7 @@ export const createModelPricingSchema = (t: (key: string) => string) =>
     audioRatio: z.string().optional(),
     audioCompletionRatio: z.string().optional(),
     videoInputRatio: z.string().optional(),
+    referenceVideoPrice: z.string().optional(),
   })
 
 export type ModelPricingFormValues = z.infer<
@@ -67,6 +68,7 @@ export type ModelRatioData = {
   audioRatio?: string
   audioCompletionRatio?: string
   videoInputRatio?: string
+  referenceVideoPrice?: string
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
@@ -258,6 +260,11 @@ export function buildPreviewRows(
         label: 'ModelPrice',
         value: values.price || t('Empty'),
       },
+      {
+        key: 'referenceVideoPrice',
+        label: t('Reference video price'),
+        value: values.referenceVideoPrice || t('Empty'),
+      },
     ]
   }
 
@@ -272,6 +279,11 @@ export function buildPreviewRows(
         key: 'rule',
         label: t('Task parameter billing'),
         value: t('Configured'),
+      },
+      {
+        key: 'referenceVideoPrice',
+        label: t('Reference video price'),
+        value: values.referenceVideoPrice || t('Empty'),
       },
     ]
   }

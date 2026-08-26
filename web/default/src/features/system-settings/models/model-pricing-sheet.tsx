@@ -26,7 +26,7 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, type UseFormReturn } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { sideDrawerContentClassName } from '@/components/drawer-layout'
@@ -112,6 +112,51 @@ export type ModelPricingEditorPanelHandle = {
   commitDraft: () => Promise<ModelRatioData | null>
 }
 
+function ReferenceVideoPriceField(props: {
+  form: UseFormReturn<ModelPricingFormValues>
+  showPerRequestUnit?: boolean
+}) {
+  const { t } = useTranslation()
+  return (
+    <FormField
+      control={props.form.control}
+      name='referenceVideoPrice'
+      render={({ field }) => (
+        <FormItem className='contents'>
+          <Field>
+            <FieldLabel>{t('Reference video price')}</FieldLabel>
+            <FormControl>
+              <InputGroup>
+                <InputGroupAddon>$</InputGroupAddon>
+                <InputGroupInput
+                  inputMode='decimal'
+                  placeholder='0.02'
+                  {...field}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    if (numericDraftRegex.test(value)) field.onChange(value)
+                  }}
+                />
+                {props.showPerRequestUnit && (
+                  <InputGroupAddon align='inline-end'>
+                    {t('per request')}
+                  </InputGroupAddon>
+                )}
+              </InputGroup>
+            </FormControl>
+            <FieldDescription>
+              {t(
+                'Overrides the base price when the request includes a reference video.'
+              )}
+            </FieldDescription>
+            <FormMessage />
+          </Field>
+        </FormItem>
+      )}
+    />
+  )
+}
+
 export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingSheetProps
@@ -182,6 +227,7 @@ export const ModelPricingEditorPanel = forwardRef<
       audioRatio: '',
       audioCompletionRatio: '',
       videoInputRatio: '',
+      referenceVideoPrice: '',
     },
   })
 
@@ -200,6 +246,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: editData.audioRatio || '',
         audioCompletionRatio: editData.audioCompletionRatio || '',
         videoInputRatio: editData.videoInputRatio || '',
+        referenceVideoPrice: editData.referenceVideoPrice || '',
       })
       const nextTaskBillingDraft = parseTaskBillingDraft(
         editData.taskBilling || ''
@@ -230,6 +277,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: '',
         audioCompletionRatio: '',
         videoInputRatio: '',
+        referenceVideoPrice: '',
       })
       setPricingMode('per-token')
       setBillingExpr('')
@@ -500,6 +548,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioRatio: values.audioRatio || '',
         audioCompletionRatio: values.audioCompletionRatio || '',
         videoInputRatio: values.videoInputRatio || '',
+        referenceVideoPrice: values.referenceVideoPrice || '',
       }
 
       if (pricingMode === 'tiered_expr') {
@@ -696,6 +745,10 @@ export const ModelPricingEditorPanel = forwardRef<
                           </FormItem>
                         )}
                       />
+                      <ReferenceVideoPriceField
+                        form={form}
+                        showPerRequestUnit
+                      />
                     </FieldGroup>
                   </TabsContent>
 
@@ -749,6 +802,7 @@ export const ModelPricingEditorPanel = forwardRef<
                             </FormItem>
                           )}
                         />
+                        <ReferenceVideoPriceField form={form} />
                         <TaskBillingEditor
                           draft={taskBillingDraft}
                           onChange={setTaskBillingDraft}

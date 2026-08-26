@@ -5244,6 +5244,9 @@
     "Reference video": "Video tham chiếu",
     "Reference video input ratio": "Hệ số video tham chiếu",
     "Reference video token price": "Giá token video tham chiếu",
-    "Token price used when the video generation request includes a reference video.": "Giá token áp dụng khi yêu cầu tạo video có video tham chiếu."
+    "Token price used when the video generation request includes a reference video.": "Giá token áp dụng khi yêu cầu tạo video có video tham chiếu.",
+    "Reference video price": "Giá video tham chiếu",
+    "JSON map of model → USD base price used when a video task includes a reference video.": "Ánh xạ JSON từ mô hình sang giá cơ sở USD dùng khi tác vụ video có video tham chiếu.",
+    "Overrides the base price when the request includes a reference video.": "Ghi đè giá cơ sở khi yêu cầu có video tham chiếu."
   }
 }

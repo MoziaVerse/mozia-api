@@ -5258,6 +5258,9 @@
     "Reference video": "Reference video",
     "Reference video input ratio": "Reference video input ratio",
     "Reference video token price": "Reference video token price",
-    "Token price used when the video generation request includes a reference video.": "Token price used when the video generation request includes a reference video."
+    "Token price used when the video generation request includes a reference video.": "Token price used when the video generation request includes a reference video.",
+    "Reference video price": "Reference video price",
+    "JSON map of model → USD base price used when a video task includes a reference video.": "JSON map of model → USD base price used when a video task includes a reference video.",
+    "Overrides the base price when the request includes a reference video.": "Overrides the base price when the request includes a reference video."
   }
 }

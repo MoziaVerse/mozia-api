@@ -656,6 +656,7 @@ var imageRatioMap = types.NewRWMap[string, float64]()
 var audioRatioMap = types.NewRWMap[string, float64]()
 var audioCompletionRatioMap = types.NewRWMap[string, float64]()
 var videoInputRatioMap = types.NewRWMap[string, float64]()
+var referenceVideoPriceMap = types.NewRWMap[string, float64]()
 
 func ImageRatio2JSONString() string {
 	return imageRatioMap.MarshalJSONString()
@@ -713,6 +714,32 @@ func GetVideoInputRatio(name string) (float64, bool) {
 	name = FormatMatchingModelName(name)
 	ratio, ok := videoInputRatioMap.Get(name)
 	return ratio, ok
+}
+
+func ReferenceVideoPrice2JSONString() string {
+	return referenceVideoPriceMap.MarshalJSONString()
+}
+
+func UpdateReferenceVideoPriceByJSONString(jsonStr string) error {
+	prices := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &prices); err != nil {
+		return err
+	}
+	for model, price := range prices {
+		if strings.TrimSpace(model) == "" {
+			return fmt.Errorf("reference video price model name is required")
+		}
+		if math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+			return fmt.Errorf("reference video price for model %q must be non-negative", model)
+		}
+	}
+	return types.LoadFromJsonStringWithCallback(referenceVideoPriceMap, jsonStr, InvalidateExposedDataCache)
+}
+
+func GetReferenceVideoPrice(name string) (float64, bool) {
+	name = FormatMatchingModelName(name)
+	price, ok := referenceVideoPriceMap.Get(name)
+	return price, ok
 }
 
 func GetModelRatioCopy() map[string]float64 {

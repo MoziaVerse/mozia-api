@@ -39,6 +39,7 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 	common.OptionMap = map[string]string{
 		"ModelPrice":                   `{ "gpt-test": 1 }`,
 		"VideoInputRatio":              `{ "video-test": 0.6 }`,
+		"ReferenceVideoPrice":          `{ "video-test": 0.08 }`,
 		"billing_setting.task_billing": `{ "video-test": { "version": 1, "mode": "per_request" } }`,
 		"SMTPToken":                    "must-not-leak",
 	}
@@ -63,6 +64,7 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 	require.True(t, response.Success)
 	foundTaskBilling := false
 	foundVideoInputRatio := false
+	foundReferenceVideoPrice := false
 	for _, option := range response.Data {
 		assert.NotEqual(t, "SMTPToken", option.Key)
 		assert.NotEqual(t, "must-not-leak", option.Value)
@@ -74,7 +76,12 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 			foundVideoInputRatio = true
 			assert.JSONEq(t, `{ "video-test": 0.6 }`, option.Value)
 		}
+		if option.Key == "ReferenceVideoPrice" {
+			foundReferenceVideoPrice = true
+			assert.JSONEq(t, `{ "video-test": 0.08 }`, option.Value)
+		}
 	}
 	assert.True(t, foundTaskBilling)
 	assert.True(t, foundVideoInputRatio)
+	assert.True(t, foundReferenceVideoPrice)
 }
