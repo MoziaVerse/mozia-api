@@ -448,8 +448,8 @@ func UpdateResellerManagementCustomerRemark(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if resellerContext.Role != model.ResellerRoleOwner {
-		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller owner access required")
+	if resellerContext.Role != model.ResellerRoleOwner && resellerContext.Role != model.ResellerRoleSubagent {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller customer remark write forbidden")
 		return
 	}
 	customerId, valid := positivePathID(c)
@@ -465,7 +465,11 @@ func UpdateResellerManagementCustomerRemark(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
-	record, err := model.UpdateResellerCustomerRecordRemark(resellerContext.ResellerId, customerId, *request.Remark)
+	var subagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		subagentMemberId = &resellerContext.MemberId
+	}
+	record, err := model.UpdateResellerCustomerRecordRemark(resellerContext.ResellerId, customerId, *request.Remark, subagentMemberId)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, record)
@@ -484,7 +488,7 @@ func UpdateResellerManagementCustomerOverseasModelAccess(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !resellerManagementWriteAllowed(resellerContext.Role) {
+	if !resellerManagementWriteAllowed(resellerContext.Role) && resellerContext.Role != model.ResellerRoleSubagent {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
 		return
 	}
@@ -502,7 +506,11 @@ func UpdateResellerManagementCustomerOverseasModelAccess(c *gin.Context) {
 		return
 	}
 
-	record, err := model.UpdateResellerCustomerOverseasModelAccess(resellerContext.ResellerId, customerId, allowed, resellerContext.Role == model.ResellerRoleOwner)
+	var subagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		subagentMemberId = &resellerContext.MemberId
+	}
+	record, err := model.UpdateResellerCustomerOverseasModelAccess(resellerContext.ResellerId, customerId, allowed, resellerContext.Role == model.ResellerRoleOwner || subagentMemberId != nil, subagentMemberId)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, record)
@@ -521,7 +529,7 @@ func UpdateResellerManagementCustomerPaymentPreference(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !resellerManagementWriteAllowed(resellerContext.Role) {
+	if !resellerManagementWriteAllowed(resellerContext.Role) && resellerContext.Role != model.ResellerRoleSubagent {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
 		return
 	}
@@ -539,7 +547,11 @@ func UpdateResellerManagementCustomerPaymentPreference(c *gin.Context) {
 		return
 	}
 
-	record, err := model.UpdateResellerCustomerPaymentPreference(resellerContext.ResellerId, customerId, enabled, resellerContext.Role == model.ResellerRoleOwner)
+	var subagentMemberId *int
+	if resellerContext.Role == model.ResellerRoleSubagent {
+		subagentMemberId = &resellerContext.MemberId
+	}
+	record, err := model.UpdateResellerCustomerPaymentPreference(resellerContext.ResellerId, customerId, enabled, resellerContext.Role == model.ResellerRoleOwner || subagentMemberId != nil, subagentMemberId)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, record)

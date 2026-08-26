@@ -452,6 +452,33 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		missingSubagent := request(http.MethodGet, "/api/internal/v1/reseller/management/usage?subagent_member_id=999999", "", "matrix-reseller-management-test-token", "owner-missing-subagent_123", ownerHeaders)
 		require.Equal(t, http.StatusNotFound, missingSubagent.Code)
 
+		remark := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/remark", customerA.Id), `{"remark":"子代理重点客户"}`, "matrix-reseller-management-test-token", "subagent-remark_123", subagentHeaders)
+		require.Equal(t, http.StatusOK, remark.Code)
+		payment := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customerA.Id), `{"enabled":false}`, "matrix-reseller-management-test-token", "subagent-payment_123", subagentHeaders)
+		require.Equal(t, http.StatusOK, payment.Code)
+		overseas := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/overseas-model-access", customerA.Id), `{"allowed":true}`, "matrix-reseller-management-test-token", "subagent-overseas_123", subagentHeaders)
+		require.Equal(t, http.StatusOK, overseas.Code)
+		var updatedCustomer model.ResellerCustomer
+		require.NoError(t, db.First(&updatedCustomer, customerA.Id).Error)
+		assert.Equal(t, "子代理重点客户", updatedCustomer.Remark)
+		require.NotNil(t, updatedCustomer.UseResellerPayment)
+		assert.False(t, *updatedCustomer.UseResellerPayment)
+		var updatedUser model.User
+		require.NoError(t, db.First(&updatedUser, userA.Id).Error)
+		assert.Equal(t, "ext", updatedUser.Group)
+
+		for _, operation := range []struct {
+			path string
+			body string
+		}{
+			{path: "remark", body: `{"remark":"越权"}`},
+			{path: "reseller-payment", body: `{"enabled":false}`},
+			{path: "overseas-model-access", body: `{"allowed":true}`},
+		} {
+			forged := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/%s", customerD.Id, operation.path), operation.body, "matrix-reseller-management-test-token", "subagent-customer-forged_123", subagentHeaders)
+			require.Equal(t, http.StatusNotFound, forged.Code)
+		}
+
 		for _, path := range []string{
 			fmt.Sprintf("/api/internal/v1/reseller/management/usage?customer_id=%d", customerC.Id),
 			"/api/internal/v1/reseller/management/pricing",

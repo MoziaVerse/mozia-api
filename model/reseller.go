@@ -616,21 +616,26 @@ func UpdateResellerCustomerRecordStatus(resellerId int, customerId int, status s
 	return record, nil
 }
 
-func UpdateResellerCustomerRecordRemark(resellerId int, customerId int, remark string) (*ResellerCustomerRecord, error) {
+func UpdateResellerCustomerRecordRemark(resellerId int, customerId int, remark string, subagentMemberId *int) (*ResellerCustomerRecord, error) {
 	remark = strings.TrimSpace(remark)
 	if !validResellerCustomerText(remark, 255) {
 		return nil, ErrInvalidResellerCustomerRemark
 	}
-	update := DB.Model(&ResellerCustomer{}).
-		Where("id = ? AND reseller_id = ?", customerId, resellerId).
-		Update("remark", remark)
+	query := DB.Model(&ResellerCustomer{}).Where("id = ? AND reseller_id = ?", customerId, resellerId)
+	if subagentMemberId != nil {
+		query = query.Where("subagent_member_id = ?", *subagentMemberId)
+	}
+	update := query.Update("remark", remark)
 	if update.Error != nil {
 		return nil, update.Error
+	}
+	if subagentMemberId != nil {
+		return GetResellerSubagentCustomerRecord(resellerId, *subagentMemberId, customerId)
 	}
 	return GetResellerCustomerRecord(resellerId, customerId, true)
 }
 
-func UpdateResellerCustomerOverseasModelAccess(resellerId int, customerId int, allowed bool, includeRemark bool) (*ResellerCustomerRecord, error) {
+func UpdateResellerCustomerOverseasModelAccess(resellerId int, customerId int, allowed bool, includeRemark bool, subagentMemberId *int) (*ResellerCustomerRecord, error) {
 	targetGroup := resellerCustomerDefaultGroup
 	if allowed {
 		targetGroup = resellerCustomerExtGroup
@@ -641,8 +646,12 @@ func UpdateResellerCustomerOverseasModelAccess(resellerId int, customerId int, a
 		var linked struct {
 			UserId int `gorm:"column:user_id"`
 		}
-		result := resellerCustomerLinkedUserQuery(tx).
-			Where("customers.id = ? AND customers.reseller_id = ?", customerId, resellerId).
+		query := resellerCustomerLinkedUserQuery(tx).
+			Where("customers.id = ? AND customers.reseller_id = ?", customerId, resellerId)
+		if subagentMemberId != nil {
+			query = query.Where("customers.subagent_member_id = ?", *subagentMemberId)
+		}
+		result := query.
 			Limit(1).
 			Scan(&linked)
 		if result.Error != nil {
@@ -677,15 +686,23 @@ func UpdateResellerCustomerOverseasModelAccess(resellerId int, customerId int, a
 	if common.RedisEnabled && common.RDB != nil {
 		_ = UpdateUserGroupCache(userId, targetGroup)
 	}
+	if subagentMemberId != nil {
+		return GetResellerSubagentCustomerRecord(resellerId, *subagentMemberId, customerId)
+	}
 	return GetResellerCustomerRecord(resellerId, customerId, includeRemark)
 }
 
-func UpdateResellerCustomerPaymentPreference(resellerId int, customerId int, enabled bool, includeRemark bool) (*ResellerCustomerRecord, error) {
-	update := DB.Model(&ResellerCustomer{}).
-		Where("id = ? AND reseller_id = ?", customerId, resellerId).
-		Update("use_reseller_payment", enabled)
+func UpdateResellerCustomerPaymentPreference(resellerId int, customerId int, enabled bool, includeRemark bool, subagentMemberId *int) (*ResellerCustomerRecord, error) {
+	query := DB.Model(&ResellerCustomer{}).Where("id = ? AND reseller_id = ?", customerId, resellerId)
+	if subagentMemberId != nil {
+		query = query.Where("subagent_member_id = ?", *subagentMemberId)
+	}
+	update := query.Update("use_reseller_payment", enabled)
 	if update.Error != nil {
 		return nil, update.Error
+	}
+	if subagentMemberId != nil {
+		return GetResellerSubagentCustomerRecord(resellerId, *subagentMemberId, customerId)
 	}
 	return GetResellerCustomerRecord(resellerId, customerId, includeRemark)
 }
