@@ -5258,6 +5258,9 @@
     "Reference video": "参考视频",
     "Reference video input ratio": "参考视频输入倍率",
     "Reference video token price": "参考视频 Token 单价",
-    "Token price used when the video generation request includes a reference video.": "视频生成请求包含参考视频时使用的 Token 单价。"
+    "Token price used when the video generation request includes a reference video.": "视频生成请求包含参考视频时使用的 Token 单价。",
+    "Reference video price": "参考视频单价",
+    "JSON map of model → USD base price used when a video task includes a reference video.": "JSON 映射：模型 → 视频任务包含参考视频时使用的美元基础单价。",
+    "Overrides the base price when the request includes a reference video.": "当请求包含参考视频时覆盖基础单价。"
   }
 }

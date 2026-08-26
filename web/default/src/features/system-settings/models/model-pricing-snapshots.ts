@@ -31,6 +31,7 @@ export type ModelPricingSnapshotInput = {
   audioRatio: string
   audioCompletionRatio: string
   videoInputRatio: string
+  referenceVideoPrice: string
   billingMode: string
   billingExpr: string
   taskBilling: string
@@ -47,6 +48,7 @@ export type ModelPricingSnapshot = {
   audioRatio?: string
   audioCompletionRatio?: string
   videoInputRatio?: string
+  referenceVideoPrice?: string
   billingMode?: string
   billingExpr?: string
   requestRuleExpr?: string
@@ -96,7 +98,8 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
 }
 
 export const getModeLabel = (mode?: string) => {
-  if (mode === 'task-parameter') return 'Parameter'
+  if (mode === 'per_second') return 'Per-second'
+  if (mode === 'parametric') return 'Multi-parameter'
   if (mode === 'per-request') return 'Per-request'
   if (mode === 'tiered_expr') return 'Expression'
   return 'Per-token'
@@ -105,7 +108,7 @@ export const getModeLabel = (mode?: string) => {
 export const getModeVariant = (
   mode?: string
 ): 'warning' | 'info' | 'success' => {
-  if (mode === 'task-parameter') return 'warning'
+  if (mode === 'per_second' || mode === 'parametric') return 'warning'
   if (mode === 'per-request') return 'warning'
   if (mode === 'tiered_expr') return 'info'
   return 'success'
@@ -130,14 +133,21 @@ export const getPriceSummary = (
     return getExpressionSummary(row, t)
   }
   if (row.billingMode === 'per-request') {
-    return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
+    if (!row.price) return t('Unset price')
+    return row.referenceVideoPrice
+      ? `$${row.price} / ${t('request')} · ${t('Reference video')} $${row.referenceVideoPrice}`
+      : `$${row.price} / ${t('request')}`
   }
-  if (row.billingMode === 'task-parameter') {
+  if (row.billingMode === 'per_second' || row.billingMode === 'parametric') {
     if (!row.price) return t('Unset price')
     const rule = getTaskBillingRuleSummary(row.taskBilling)
-    return rule.mode === 'per_second'
-      ? `$${row.price} / ${t('second')}`
-      : `$${row.price} / ${t('parameter')}`
+    const baseSummary =
+      rule.mode === 'per_second'
+        ? `$${row.price} / ${t('second')}`
+        : `$${row.price} / ${t('parameter')}`
+    return row.referenceVideoPrice
+      ? `${baseSummary} · ${t('Reference video')} $${row.referenceVideoPrice}`
+      : baseSummary
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -170,7 +180,7 @@ export const getPriceDetail = (
   if (row.billingMode === 'per-request') {
     return t('Fixed request price')
   }
-  if (row.billingMode === 'task-parameter') {
+  if (row.billingMode === 'per_second' || row.billingMode === 'parametric') {
     const surcharge = getTaskBillingRuleSummary(row.taskBilling).surcharge
     if (
       typeof surcharge?.free_count === 'number' &&
@@ -210,6 +220,7 @@ export const buildModelSnapshots = ({
   audioRatio,
   audioCompletionRatio,
   videoInputRatio,
+  referenceVideoPrice,
   billingMode,
   billingExpr,
   taskBilling,
@@ -250,6 +261,10 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'reference video input ratios',
   })
+  const referenceVideoPriceMap = safeJsonParse<Record<string, number>>(
+    referenceVideoPrice,
+    { fallback: {}, context: 'reference video prices' }
+  )
   const billingModeMap = safeJsonParse<Record<string, string>>(billingMode, {
     fallback: {},
     context: 'billing mode',
@@ -258,10 +273,13 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'billing expression',
   })
-  const taskBillingMap = safeJsonParse<Record<string, unknown>>(taskBilling, {
-    fallback: {},
-    context: 'task parameter billing',
-  })
+  const taskBillingMap = safeJsonParse<Record<string, TaskBillingRuleSummary>>(
+    taskBilling,
+    {
+      fallback: {},
+      context: 'task parameter billing',
+    }
+  )
 
   const modelNames = new Set([
     ...Object.keys(priceMap),
@@ -273,6 +291,7 @@ export const buildModelSnapshots = ({
     ...Object.keys(audioMap),
     ...Object.keys(audioCompletionMap),
     ...Object.keys(videoInputMap),
+    ...Object.keys(referenceVideoPriceMap),
     ...Object.keys(billingModeMap),
     ...Object.keys(billingExprMap),
     ...Object.keys(taskBillingMap),
@@ -288,13 +307,15 @@ export const buildModelSnapshots = ({
     const audio = audioMap[name]?.toString() || ''
     const audioCompletion = audioCompletionMap[name]?.toString() || ''
     const videoInput = videoInputMap[name]?.toString() || ''
+    const referenceVideo = referenceVideoPriceMap[name]?.toString() || ''
 
     const modeForModel = billingModeMap[name]
     const taskBillingRule = taskBillingMap[name]
     if (taskBillingRule) {
       return {
         name,
-        billingMode: 'task-parameter',
+        billingMode:
+          taskBillingRule.mode === 'per_second' ? 'per_second' : 'parametric',
         taskBilling: JSON.stringify(taskBillingRule, null, 2),
         price,
         ratio,
@@ -305,6 +326,7 @@ export const buildModelSnapshots = ({
         audioRatio: audio,
         audioCompletionRatio: audioCompletion,
         videoInputRatio: videoInput,
+        referenceVideoPrice: referenceVideo,
         hasConflict: false,
       }
     }
@@ -326,6 +348,7 @@ export const buildModelSnapshots = ({
         audioRatio: audio,
         audioCompletionRatio: audioCompletion,
         videoInputRatio: videoInput,
+        referenceVideoPrice: referenceVideo,
         hasConflict: false,
       }
     }
@@ -341,6 +364,7 @@ export const buildModelSnapshots = ({
       audioRatio: audio,
       audioCompletionRatio: audioCompletion,
       videoInputRatio: videoInput,
+      referenceVideoPrice: referenceVideo,
       billingMode: price !== '' ? 'per-request' : 'per-token',
       hasConflict:
         price !== '' &&
@@ -368,6 +392,7 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     audioRatio: snapshot.audioRatio || '',
     audioCompletionRatio: snapshot.audioCompletionRatio || '',
     videoInputRatio: snapshot.videoInputRatio || '',
+    referenceVideoPrice: snapshot.referenceVideoPrice || '',
     billingMode: snapshot.billingMode || 'per-token',
     billingExpr: snapshot.billingExpr || '',
     requestRuleExpr: snapshot.requestRuleExpr || '',

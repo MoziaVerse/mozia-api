@@ -30,6 +30,7 @@ var completionRatioMetaOptionKeys = []string{
 	"AudioRatio",
 	"AudioCompletionRatio",
 	"VideoInputRatio",
+	"ReferenceVideoPrice",
 	billing_setting.TaskBillingOptionKey,
 }
 
@@ -299,6 +300,15 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "参考视频倍率设置失败: " + err.Error(),
+			})
+			return
+		}
+	case "ReferenceVideoPrice":
+		err = ratio_setting.UpdateReferenceVideoPriceByJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "参考视频单价设置失败: " + err.Error(),
 			})
 			return
 		}

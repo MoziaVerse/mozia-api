@@ -5244,6 +5244,9 @@
     "Reference video": "Референсное видео",
     "Reference video input ratio": "Множитель референсного видео",
     "Reference video token price": "Цена токенов с референсным видео",
-    "Token price used when the video generation request includes a reference video.": "Цена токенов для генерации с референсным видео."
+    "Token price used when the video generation request includes a reference video.": "Цена токенов для генерации с референсным видео.",
+    "Reference video price": "Цена с референсным видео",
+    "JSON map of model → USD base price used when a video task includes a reference video.": "JSON-сопоставление модели с базовой ценой в USD для видеозадач с референсным видео.",
+    "Overrides the base price when the request includes a reference video.": "Заменяет базовую цену, если запрос содержит референсное видео."
   }
 }

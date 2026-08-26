@@ -16,6 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type {
+  ColumnFiltersState,
+  OnChangeFn,
+  PaginationState,
+  RowSelectionState,
+  SortingState,
+  VisibilityState,
+} from '@tanstack/react-table'
+import { Copy, Plus } from 'lucide-react'
 import {
   useState,
   useMemo,
@@ -26,19 +35,9 @@ import {
   useImperativeHandle,
   useRef,
 } from 'react'
-import type {
-  ColumnFiltersState,
-  OnChangeFn,
-  PaginationState,
-  RowSelectionState,
-  VisibilityState,
-  SortingState,
-} from '@tanstack/react-table'
-import { useMediaQuery } from '@/hooks'
-import { Copy, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
+
 import {
   DataTableBulkActions,
   DataTableToolbar,
@@ -47,15 +46,18 @@ import {
   DataTableView,
   useDataTable,
 } from '@/components/data-table'
+import { Button } from '@/components/ui/button'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
+import { useMediaQuery } from '@/hooks'
+
 import { safeJsonParse } from '../utils/json-parser'
+import type { PricingMode } from './model-pricing-core'
 import {
   ModelPricingEditorPanel,
   type ModelPricingEditorPanelHandle,
   ModelPricingSheet,
   type ModelRatioData,
 } from './model-pricing-sheet'
-import type { PricingMode } from './model-pricing-core'
 import {
   buildModelSnapshots,
   getSnapshotSignature,
@@ -74,6 +76,7 @@ type ModelRatioVisualEditorProps = {
   savedAudioRatio: string
   savedAudioCompletionRatio: string
   savedVideoInputRatio: string
+  savedReferenceVideoPrice: string
   savedBillingMode: string
   savedBillingExpr: string
   savedTaskBilling: string
@@ -86,6 +89,7 @@ type ModelRatioVisualEditorProps = {
   audioRatio: string
   audioCompletionRatio: string
   videoInputRatio: string
+  referenceVideoPrice: string
   billingMode: string
   billingExpr: string
   taskBilling: string
@@ -114,6 +118,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioRatio,
     savedAudioCompletionRatio,
     savedVideoInputRatio,
+    savedReferenceVideoPrice,
     savedBillingMode,
     savedBillingExpr,
     savedTaskBilling,
@@ -126,6 +131,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     audioRatio,
     audioCompletionRatio,
     videoInputRatio,
+    referenceVideoPrice,
     billingMode,
     billingExpr,
     taskBilling,
@@ -199,6 +205,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioRatio: savedAudioRatio,
       audioCompletionRatio: savedAudioCompletionRatio,
       videoInputRatio: savedVideoInputRatio,
+      referenceVideoPrice: savedReferenceVideoPrice,
       billingMode: savedBillingMode,
       billingExpr: savedBillingExpr,
       taskBilling: savedTaskBilling,
@@ -213,6 +220,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioRatio,
       audioCompletionRatio,
       videoInputRatio,
+      referenceVideoPrice,
       billingMode,
       billingExpr,
       taskBilling,
@@ -251,6 +259,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioRatio,
     savedAudioCompletionRatio,
     savedVideoInputRatio,
+    savedReferenceVideoPrice,
     savedBillingMode,
     savedBillingExpr,
     savedTaskBilling,
@@ -263,6 +272,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     audioRatio,
     audioCompletionRatio,
     videoInputRatio,
+    referenceVideoPrice,
     billingMode,
     billingExpr,
     taskBilling,
@@ -275,7 +285,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
           const mode =
             model.billingMode === 'per-request' ||
             model.billingMode === 'tiered_expr' ||
-            model.billingMode === 'task-parameter'
+            model.billingMode === 'per_second' ||
+            model.billingMode === 'parametric'
               ? model.billingMode
               : 'per-token'
           acc[mode] += 1
@@ -285,7 +296,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
           'per-token': 0,
           'per-request': 0,
           tiered_expr: 0,
-          'task-parameter': 0,
+          per_second: 0,
+          parametric: 0,
         } as Record<PricingMode, number>
       ),
     [models]
@@ -297,7 +309,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
       let nextBillingMode: PricingMode = 'per-token'
       if (
         editableModel.billingMode === 'tiered_expr' ||
-        editableModel.billingMode === 'task-parameter'
+        editableModel.billingMode === 'per_second' ||
+        editableModel.billingMode === 'parametric'
       ) {
         nextBillingMode = editableModel.billingMode
       } else if (editableModel.price && editableModel.price !== '') {
@@ -314,6 +327,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         audioRatio: editableModel.audioRatio,
         audioCompletionRatio: editableModel.audioCompletionRatio,
         videoInputRatio: editableModel.videoInputRatio,
+        referenceVideoPrice: editableModel.referenceVideoPrice,
         billingMode: nextBillingMode,
         billingExpr: editableModel.billingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
@@ -384,6 +398,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         videoInputRatio,
         { fallback: {}, silent: true }
       )
+      const referenceVideoPriceMap = safeJsonParse<Record<string, number>>(
+        referenceVideoPrice,
+        { fallback: {}, silent: true }
+      )
       const billingModeMap = safeJsonParse<Record<string, string>>(
         billingMode,
         { fallback: {}, silent: true }
@@ -406,6 +424,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       delete audioMap[name]
       delete audioCompletionMap[name]
       delete videoInputMap[name]
+      delete referenceVideoPriceMap[name]
       delete billingModeMap[name]
       delete billingExprMap[name]
       delete taskBillingMap[name]
@@ -422,6 +441,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         JSON.stringify(audioCompletionMap, null, 2)
       )
       onChange('VideoInputRatio', JSON.stringify(videoInputMap, null, 2))
+      onChange(
+        'ReferenceVideoPrice',
+        JSON.stringify(referenceVideoPriceMap, null, 2)
+      )
       onChange(
         'billing_setting.billing_mode',
         JSON.stringify(billingModeMap, null, 2)
@@ -451,6 +474,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioRatio,
       audioCompletionRatio,
       videoInputRatio,
+      referenceVideoPrice,
       billingMode,
       billingExpr,
       taskBilling,
@@ -530,6 +554,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         videoInputRatio,
         { fallback: {}, silent: true }
       )
+      const referenceVideoPriceMap = safeJsonParse<Record<string, number>>(
+        referenceVideoPrice,
+        { fallback: {}, silent: true }
+      )
       const billingModeMap = safeJsonParse<Record<string, string>>(
         billingMode,
         { fallback: {}, silent: true }
@@ -563,13 +591,18 @@ const ModelRatioVisualEditorComponent = forwardRef<
         delete audioMap[name]
         delete audioCompletionMap[name]
         delete videoInputMap[name]
+        delete referenceVideoPriceMap[name]
         delete billingModeMap[name]
         delete billingExprMap[name]
         delete taskBillingMap[name]
 
-        if (data.billingMode === 'task-parameter') {
+        if (
+          data.billingMode === 'per_second' ||
+          data.billingMode === 'parametric'
+        ) {
           taskBillingMap[name] = JSON.parse(data.taskBilling || '{}')
           setIfPresent(priceMap, name, data.price)
+          setIfPresent(referenceVideoPriceMap, name, data.referenceVideoPrice)
         } else if (data.billingMode === 'tiered_expr') {
           const combined = combineBillingExpr(
             data.billingExpr || '',
@@ -594,6 +627,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
           setIfPresent(videoInputMap, name, data.videoInputRatio)
         } else if (data.price && data.price !== '') {
           setIfPresent(priceMap, name, data.price)
+          setIfPresent(referenceVideoPriceMap, name, data.referenceVideoPrice)
         } else {
           setIfPresent(ratioMap, name, data.ratio)
           setIfPresent(cacheMap, name, data.cacheRatio)
@@ -619,6 +653,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
       )
       onChange('VideoInputRatio', JSON.stringify(videoInputMap, null, 2))
       onChange(
+        'ReferenceVideoPrice',
+        JSON.stringify(referenceVideoPriceMap, null, 2)
+      )
+      onChange(
         'billing_setting.billing_mode',
         JSON.stringify(billingModeMap, null, 2)
       )
@@ -641,6 +679,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       audioRatio,
       audioCompletionRatio,
       videoInputRatio,
+      referenceVideoPrice,
       billingMode,
       billingExpr,
       taskBilling,
@@ -718,9 +757,14 @@ const ModelRatioVisualEditorComponent = forwardRef<
                     count: modeCounts.tiered_expr,
                   },
                   {
-                    label: 'Parameter',
-                    value: 'task-parameter',
-                    count: modeCounts['task-parameter'],
+                    label: 'Per-second',
+                    value: 'per_second',
+                    count: modeCounts.per_second,
+                  },
+                  {
+                    label: 'Multi-parameter',
+                    value: 'parametric',
+                    count: modeCounts.parametric,
                   },
                 ],
               },

@@ -222,6 +222,11 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 			}
 		}
 	}
+	if usePrice && relaycommon.TaskRequestHasReferenceVideo(c) {
+		if referenceVideoPrice, ok := ratio_setting.GetReferenceVideoPrice(info.OriginModelName); ok {
+			modelPrice = referenceVideoPrice
+		}
+	}
 
 	var quota int
 	freeModel := false

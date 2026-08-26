@@ -34,6 +34,7 @@ export const createModelPricingSchema = (t: (key: string) => string) =>
     audioRatio: z.string().optional(),
     audioCompletionRatio: z.string().optional(),
     videoInputRatio: z.string().optional(),
+    referenceVideoPrice: z.string().optional(),
   })
 
 export type ModelPricingFormValues = z.infer<
@@ -44,7 +45,8 @@ export type PricingMode =
   | 'per-token'
   | 'per-request'
   | 'tiered_expr'
-  | 'task-parameter'
+  | 'per_second'
+  | 'parametric'
 
 export type LaneKey =
   | 'completion'
@@ -66,6 +68,7 @@ export type ModelRatioData = {
   audioRatio?: string
   audioCompletionRatio?: string
   videoInputRatio?: string
+  referenceVideoPrice?: string
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
@@ -257,10 +260,15 @@ export function buildPreviewRows(
         label: 'ModelPrice',
         value: values.price || t('Empty'),
       },
+      {
+        key: 'referenceVideoPrice',
+        label: t('Reference video price'),
+        value: values.referenceVideoPrice || t('Empty'),
+      },
     ]
   }
 
-  if (mode === 'task-parameter') {
+  if (mode === 'per_second' || mode === 'parametric') {
     return [
       {
         key: 'price',
@@ -271,6 +279,11 @@ export function buildPreviewRows(
         key: 'rule',
         label: t('Task parameter billing'),
         value: t('Configured'),
+      },
+      {
+        key: 'referenceVideoPrice',
+        label: t('Reference video price'),
+        value: values.referenceVideoPrice || t('Empty'),
       },
     ]
   }

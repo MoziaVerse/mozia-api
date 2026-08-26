@@ -1,3 +1,4 @@
+import { Code2, Eye, RotateCcw, Save } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -18,8 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { memo, useCallback, useRef, useState } from 'react'
 import type { UseFormReturn } from 'react-hook-form'
-import { Code2, Eye, RotateCcw, Save } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
+import { JsonCodeEditor } from '@/components/json-code-editor'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -31,7 +33,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Switch } from '@/components/ui/switch'
-import { JsonCodeEditor } from '@/components/json-code-editor'
+
 import {
   SettingsForm,
   SettingsSwitchContent,
@@ -52,6 +54,7 @@ type ModelFormValues = {
   AudioRatio: string
   AudioCompletionRatio: string
   VideoInputRatio: string
+  ReferenceVideoPrice: string
   ExposeRatioEnabled: boolean
   BillingMode: string
   BillingExpr: string
@@ -77,6 +80,7 @@ type ModelJsonFieldName =
   | 'AudioRatio'
   | 'AudioCompletionRatio'
   | 'VideoInputRatio'
+  | 'ReferenceVideoPrice'
   | 'TaskBilling'
 
 const modelJsonFields: Array<{
@@ -133,6 +137,12 @@ const modelJsonFields: Array<{
     labelKey: 'Reference video input ratio',
     descriptionKey:
       'JSON map of model → multiplier used when a video task includes a reference video.',
+  },
+  {
+    name: 'ReferenceVideoPrice',
+    labelKey: 'Reference video price',
+    descriptionKey:
+      'JSON map of model → USD base price used when a video task includes a reference video.',
   },
   {
     name: 'TaskBilling',
@@ -259,6 +269,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               savedAudioRatio={savedValues.AudioRatio}
               savedAudioCompletionRatio={savedValues.AudioCompletionRatio}
               savedVideoInputRatio={savedValues.VideoInputRatio}
+              savedReferenceVideoPrice={savedValues.ReferenceVideoPrice}
               savedBillingMode={savedValues.BillingMode}
               savedBillingExpr={savedValues.BillingExpr}
               savedTaskBilling={savedValues.TaskBilling}
@@ -271,6 +282,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               audioRatio={form.watch('AudioRatio')}
               audioCompletionRatio={form.watch('AudioCompletionRatio')}
               videoInputRatio={form.watch('VideoInputRatio')}
+              referenceVideoPrice={form.watch('ReferenceVideoPrice')}
               billingMode={form.watch('BillingMode')}
               billingExpr={form.watch('BillingExpr')}
               taskBilling={form.watch('TaskBilling')}

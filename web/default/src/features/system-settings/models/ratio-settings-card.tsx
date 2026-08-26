@@ -1,3 +1,5 @@
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,14 +19,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as z from 'zod'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import * as z from 'zod'
+
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
 import { resetModelRatios } from '../api'
 import { SettingsPageTitleStatusPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
@@ -106,6 +108,7 @@ const createModelSchema = (t: Translate) =>
     AudioRatio: createJsonStringField(t),
     AudioCompletionRatio: createJsonStringField(t),
     VideoInputRatio: createJsonStringField(t),
+    ReferenceVideoPrice: createJsonStringField(t),
     ExposeRatioEnabled: z.boolean(),
     BillingMode: createJsonStringField(t),
     BillingExpr: createJsonStringField(t),
@@ -180,6 +183,7 @@ export function RatioSettingsCard({
       modelDefaults.AudioCompletionRatio
     ),
     VideoInputRatio: normalizeJsonString(modelDefaults.VideoInputRatio),
+    ReferenceVideoPrice: normalizeJsonString(modelDefaults.ReferenceVideoPrice),
     ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
     BillingMode: normalizeJsonString(modelDefaults.BillingMode),
     BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
@@ -219,6 +223,9 @@ export function RatioSettingsCard({
         modelDefaults.AudioCompletionRatio
       ),
       VideoInputRatio: formatJsonForTextarea(modelDefaults.VideoInputRatio),
+      ReferenceVideoPrice: formatJsonForTextarea(
+        modelDefaults.ReferenceVideoPrice
+      ),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
       TaskBilling: formatJsonForTextarea(modelDefaults.TaskBilling),
@@ -254,6 +261,9 @@ export function RatioSettingsCard({
         modelDefaults.AudioCompletionRatio
       ),
       VideoInputRatio: normalizeJsonString(modelDefaults.VideoInputRatio),
+      ReferenceVideoPrice: normalizeJsonString(
+        modelDefaults.ReferenceVideoPrice
+      ),
       ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
       BillingMode: normalizeJsonString(modelDefaults.BillingMode),
       BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
@@ -274,6 +284,9 @@ export function RatioSettingsCard({
         modelDefaults.AudioCompletionRatio
       ),
       VideoInputRatio: formatJsonForTextarea(modelDefaults.VideoInputRatio),
+      ReferenceVideoPrice: formatJsonForTextarea(
+        modelDefaults.ReferenceVideoPrice
+      ),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
       TaskBilling: formatJsonForTextarea(modelDefaults.TaskBilling),
@@ -318,6 +331,7 @@ export function RatioSettingsCard({
         AudioRatio: normalizeJsonString(values.AudioRatio),
         AudioCompletionRatio: normalizeJsonString(values.AudioCompletionRatio),
         VideoInputRatio: normalizeJsonString(values.VideoInputRatio),
+        ReferenceVideoPrice: normalizeJsonString(values.ReferenceVideoPrice),
         ExposeRatioEnabled: values.ExposeRatioEnabled,
         BillingMode: normalizeJsonString(values.BillingMode),
         BillingExpr: normalizeJsonString(values.BillingExpr),

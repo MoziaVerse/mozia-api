@@ -221,6 +221,7 @@ export function ModelMutateDrawer({
       AudioRatio: '',
       AudioCompletionRatio: '',
       VideoInputRatio: '',
+      ReferenceVideoPrice: '',
       ExposeRatioEnabled: false,
       'billing_setting.billing_mode': '{}',
       'billing_setting.billing_expr': '{}',

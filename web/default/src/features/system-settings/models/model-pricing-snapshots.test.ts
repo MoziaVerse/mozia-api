@@ -30,7 +30,7 @@ describe('task billing pricing summaries', () => {
     const row = {
       name: 'minimax/minimax-h3-2k',
       price: '0.9',
-      billingMode: 'task-parameter',
+      billingMode: 'per_second',
       taskBilling: JSON.stringify({
         mode: 'per_second',
         surcharge: {
@@ -48,6 +48,40 @@ describe('task billing pricing summaries', () => {
       '5 free items · $0.2 / additional item'
     )
   })
+
+  test('maps stored task rules to separate pricing modes', () => {
+    const rows = buildModelSnapshots({
+      modelPrice: '{"per-second-model":0.9,"parameter-model":1.2}',
+      modelRatio: '{}',
+      cacheRatio: '{}',
+      createCacheRatio: '{}',
+      completionRatio: '{}',
+      imageRatio: '{}',
+      audioRatio: '{}',
+      audioCompletionRatio: '{}',
+      videoInputRatio: '{}',
+      referenceVideoPrice: '{"per-second-model":0.7}',
+      billingMode: '{}',
+      billingExpr: '{}',
+      taskBilling:
+        '{"per-second-model":{"mode":"per_second"},"parameter-model":{"mode":"parametric"}}',
+    })
+
+    assert.equal(
+      rows.find((row) => row.name === 'per-second-model')?.billingMode,
+      'per_second'
+    )
+    assert.equal(
+      rows.find((row) => row.name === 'parameter-model')?.billingMode,
+      'parametric'
+    )
+    const perSecondRow = rows.find((row) => row.name === 'per-second-model')
+    assert.ok(perSecondRow)
+    assert.equal(
+      getPriceSummary(perSecondRow, (key) => key),
+      '$0.9 / second · Reference video $0.7'
+    )
+  })
 })
 
 describe('reference video token pricing', () => {
@@ -62,6 +96,7 @@ describe('reference video token pricing', () => {
       audioRatio: '{}',
       audioCompletionRatio: '{}',
       videoInputRatio: '{"doubao/seedance-2.0-pro-480p":0.6086956521739131}',
+      referenceVideoPrice: '{}',
       billingMode: '{}',
       billingExpr: '{}',
       taskBilling: '{}',

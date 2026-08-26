@@ -5244,6 +5244,9 @@
     "Reference video": "参照動画",
     "Reference video input ratio": "参照動画入力倍率",
     "Reference video token price": "参照動画トークン価格",
-    "Token price used when the video generation request includes a reference video.": "動画生成リクエストに参照動画が含まれる場合のトークン価格です。"
+    "Token price used when the video generation request includes a reference video.": "動画生成リクエストに参照動画が含まれる場合のトークン価格です。",
+    "Reference video price": "参照動画単価",
+    "JSON map of model → USD base price used when a video task includes a reference video.": "モデル → 動画タスクに参照動画が含まれる場合に使用する米ドル建て基本単価の JSON マップ。",
+    "Overrides the base price when the request includes a reference video.": "リクエストに参照動画が含まれる場合、基本単価を上書きします。"
   }
 }
