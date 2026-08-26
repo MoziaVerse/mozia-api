@@ -25,6 +25,7 @@ type resellerContextTestResponse struct {
 		Host         string   `json:"host"`
 		Role         string   `json:"role"`
 		Permissions  []string `json:"permissions"`
+		Logo         string   `json:"logo"`
 	} `json:"data"`
 	Error struct {
 		Code    string `json:"code"`
@@ -42,6 +43,7 @@ func TestResellerContextContract(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.Reseller{}, &model.ResellerDomain{}, &model.ResellerMember{}))
 	model.DB = db
 	t.Setenv("MATRIX_RESELLER_SERVICE_TOKEN", "matrix-reseller-test-token")
+	t.Setenv("MATRIX_RESELLER_REGISTRATION_TOKEN", "matrix-registration-test-token")
 	t.Cleanup(func() {
 		model.DB = originalDB
 		sqlDB, dbErr := db.DB()
@@ -62,6 +64,9 @@ func TestResellerContextContract(t *testing.T) {
 		{ResellerId: resellerA.Id, Subject: "oidc-owner-a", Role: model.ResellerRoleOwner, Status: model.ResellerMemberStatusActive},
 		{ResellerId: resellerB.Id, Subject: "oidc-owner-b", Role: model.ResellerRoleOwner, Status: model.ResellerMemberStatusActive},
 	}).Error)
+	resellerA.Logo = "data:image/png;base64,aGR1"
+	matrixHost := "matrix.hdu.edu.cn"
+	require.NoError(t, db.Model(&resellerA).Updates(map[string]any{"logo": resellerA.Logo, "matrix_host": matrixHost}).Error)
 
 	engine := gin.New()
 	engine.Use(middleware.RequestId())
@@ -99,6 +104,21 @@ func TestResellerContextContract(t *testing.T) {
 		assert.Equal(t, []string{"reseller:read", "reseller:write", "reseller:pricing:read", "reseller:pricing:write"}, response.Data.Permissions)
 		assert.Equal(t, "reseller-request_123", response.RequestId)
 		assert.Equal(t, response.RequestId, recorder.Header().Get(common.RequestIdKey))
+	})
+
+	t.Run("resolves Matrix branding from its independent host", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		httpRequest := httptest.NewRequest(http.MethodPost, "/api/internal/v1/reseller/registration/presentation", strings.NewReader(`{"host":"MATRIX.HDU.EDU.CN.:443"}`))
+		httpRequest.Header.Set("Content-Type", "application/json")
+		httpRequest.Header.Set("Authorization", "Bearer matrix-registration-test-token")
+		httpRequest.Header.Set(common.RequestIdKey, "matrix-brand_123")
+		engine.ServeHTTP(recorder, httpRequest)
+		var response resellerContextTestResponse
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, "Agency A", response.Data.ResellerName)
+		assert.Equal(t, "matrix.hdu.edu.cn", response.Data.Host)
+		assert.Equal(t, resellerA.Logo, response.Data.Logo)
 	})
 
 	t.Run("rejects forged reseller id", func(t *testing.T) {

@@ -27,8 +27,9 @@ type updateResellerAdminStatusRequest struct {
 }
 
 type updateResellerAdminRequest struct {
-	Name string `json:"name"`
-	Host string `json:"host"`
+	Name       string  `json:"name"`
+	Host       string  `json:"host"`
+	MatrixHost *string `json:"matrix_host"`
 }
 
 type updateResellerAdminBankTransferRequest struct {
@@ -138,7 +139,7 @@ func UpdateResellerAdmin(c *gin.Context) {
 		return
 	}
 
-	record, err := model.UpdateResellerAdminRecord(id, request.Name, request.Host)
+	record, err := model.UpdateResellerAdminRecord(id, request.Name, request.Host, request.MatrixHost)
 	if err != nil {
 		logger.LogWarn(c.Request.Context(), fmt.Sprintf("UpdateResellerAdmin failed reseller_id=%d error=%q body=%q", id, err.Error(), common.GetJsonString(request)))
 	}

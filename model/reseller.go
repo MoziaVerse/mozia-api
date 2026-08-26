@@ -65,14 +65,15 @@ var (
 )
 
 type Reseller struct {
-	Id                   int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name                 string `json:"name" gorm:"type:varchar(128);not null"`
-	Logo                 string `json:"logo" gorm:"type:text;not null;default:''"`
-	Status               string `json:"status" gorm:"type:varchar(16);not null;index"`
-	PaymentConfigEnabled bool   `json:"payment_config_enabled" gorm:"column:bank_transfer_enabled"`
-	BankAccountName      string `json:"bank_account_name" gorm:"type:varchar(128);not null;default:''"`
-	BankAccountNumber    string `json:"bank_account_number" gorm:"type:varchar(64);not null;default:''"`
-	BankName             string `json:"bank_name" gorm:"type:varchar(255);not null;default:''"`
+	Id                   int     `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name                 string  `json:"name" gorm:"type:varchar(128);not null"`
+	MatrixHost           *string `json:"-" gorm:"type:varchar(260);uniqueIndex"`
+	Logo                 string  `json:"logo" gorm:"type:text;not null;default:''"`
+	Status               string  `json:"status" gorm:"type:varchar(16);not null;index"`
+	PaymentConfigEnabled bool    `json:"payment_config_enabled" gorm:"column:bank_transfer_enabled"`
+	BankAccountName      string  `json:"bank_account_name" gorm:"type:varchar(128);not null;default:''"`
+	BankAccountNumber    string  `json:"bank_account_number" gorm:"type:varchar(64);not null;default:''"`
+	BankName             string  `json:"bank_name" gorm:"type:varchar(255);not null;default:''"`
 }
 
 type ResellerDomain struct {
@@ -134,6 +135,7 @@ type ResellerAdminRecord struct {
 	Name                  string  `json:"name"`
 	Status                string  `json:"status"`
 	Host                  string  `json:"host"`
+	MatrixHost            string  `json:"matrix_host"`
 	Logo                  string  `json:"logo"`
 	OwnerSubject          string  `json:"owner_subject"`
 	OwnerUserId           int     `json:"owner_user_id"`
@@ -397,6 +399,18 @@ func ResolveResellerPresentation(host string) (*ResellerPresentation, error) {
 		Select("r.id AS reseller_id, r.name AS reseller_name, rd.host, r.logo").
 		Joins("JOIN resellers AS r ON r.id = rd.reseller_id AND r.status = ?", ResellerStatusActive).
 		Where("rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
+		Take(&presentation).Error
+	if err != nil {
+		return nil, err
+	}
+	return &presentation, nil
+}
+
+func ResolveResellerMatrixPresentation(host string) (*ResellerPresentation, error) {
+	var presentation ResellerPresentation
+	err := DB.Table("resellers AS r").
+		Select("r.id AS reseller_id, r.name AS reseller_name, r.matrix_host AS host, r.logo").
+		Where("r.matrix_host = ? AND r.status = ?", host, ResellerStatusActive).
 		Take(&presentation).Error
 	if err != nil {
 		return nil, err
@@ -1116,13 +1130,22 @@ func ResolveResellerCustomerPaymentMethod(subject string) (*ResellerCustomerPaym
 	}, nil
 }
 
-func UpdateResellerAdminRecord(id int, name string, host string) (*ResellerAdminRecord, error) {
+func UpdateResellerAdminRecord(id int, name string, host string, matrixHost *string) (*ResellerAdminRecord, error) {
 	if !validResellerName(name) {
 		return nil, ErrInvalidResellerName
 	}
 	normalizedHost, err := NormalizeResellerHost(host)
 	if err != nil {
 		return nil, err
+	}
+	var normalizedMatrixHost *string
+	if matrixHost != nil && strings.TrimSpace(*matrixHost) != "" {
+		normalized, normalizeErr := NormalizeResellerHost(*matrixHost)
+		err = normalizeErr
+		if err != nil {
+			return nil, err
+		}
+		normalizedMatrixHost = &normalized
 	}
 
 	var record ResellerAdminRecord
@@ -1136,6 +1159,11 @@ func UpdateResellerAdminRecord(id int, name string, host string) (*ResellerAdmin
 		}
 		if err := tx.Model(&reseller).Update("name", name).Error; err != nil {
 			return err
+		}
+		if matrixHost != nil {
+			if err := tx.Model(&reseller).Update("matrix_host", normalizedMatrixHost).Error; err != nil {
+				return err
+			}
 		}
 		if err := tx.Where("reseller_id = ?", id).Delete(&ResellerDomain{}).Error; err != nil {
 			return err
@@ -1184,14 +1212,14 @@ func GetResellerAdminRecord(id int) (*ResellerAdminRecord, error) {
 
 func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("resellers AS r").
-		Select("r.id, r.name, r.logo, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
+		Select("r.id, r.name, r.logo, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, COALESCE(r.matrix_host, '') AS matrix_host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
 		Joins("LEFT JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.verified = ? AND rd.status = ?", true, ResellerDomainStatusActive).
 		Joins("LEFT JOIN reseller_members AS owner ON owner.reseller_id = r.id AND owner.role = ? AND owner.status = ?", ResellerRoleOwner, ResellerMemberStatusActive).
 		Joins("LEFT JOIN user_ssos AS owner_sso ON owner_sso.sso_sub = owner.subject").
 		Joins("LEFT JOIN users AS owner_sso_user ON owner_sso_user.id = owner_sso.user_id AND owner_sso_user.deleted_at IS NULL").
 		Joins("LEFT JOIN users AS owner_oidc_user ON owner_oidc_user.id = (SELECT MIN(owner_candidate.id) FROM users AS owner_candidate WHERE owner_candidate.oidc_id = owner.subject AND owner_candidate.deleted_at IS NULL)").
 		Joins("LEFT JOIN reseller_members AS members ON members.reseller_id = r.id AND members.status = ?", ResellerMemberStatusActive).
-		Group("r.id, r.name, r.logo, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
+		Group("r.id, r.name, r.logo, r.status, r.matrix_host, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
 }
 
 func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {

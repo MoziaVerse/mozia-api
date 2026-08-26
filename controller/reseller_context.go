@@ -35,6 +35,14 @@ type resellerPresentationRequest struct {
 }
 
 func GetResellerPresentation(c *gin.Context) {
+	getResellerPresentation(c, model.ResolveResellerPresentation)
+}
+
+func GetResellerMatrixPresentation(c *gin.Context) {
+	getResellerPresentation(c, model.ResolveResellerMatrixPresentation)
+}
+
+func getResellerPresentation(c *gin.Context, resolve func(string) (*model.ResellerPresentation, error)) {
 	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, resellerContextBodyLimit))
 	var request resellerPresentationRequest
 	if err != nil || common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 {
@@ -46,7 +54,7 @@ func GetResellerPresentation(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
-	presentation, err := model.ResolveResellerPresentation(host)
+	presentation, err := resolve(host)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorContextNotFound, "reseller context not found")
 		return
