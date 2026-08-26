@@ -323,7 +323,7 @@ func TestResellerM2Contract(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, invalid.Code)
 	})
 
-	t.Run("only the reseller owner can read and edit customer remarks", func(t *testing.T) {
+	t.Run("reseller owner can edit remarks and platform administrators can read them", func(t *testing.T) {
 		customer := model.ResellerCustomer{
 			ResellerId: resellerA.Id,
 			Subject:    "customer-remark",
@@ -392,7 +392,7 @@ func TestResellerM2Contract(t *testing.T) {
 		platformList := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/customers", resellerA.Id), "", "mozia-mega-test-token", "remark-platform-list_123", nil)
 		platformResponse := decodeM2Envelope(t, platformList)
 		require.Equal(t, http.StatusOK, platformList.Code)
-		assert.NotContains(t, string(platformResponse.RawData), `"remark"`)
+		assert.Contains(t, string(platformResponse.RawData), `"remark":"重点客户"`)
 	})
 
 	t.Run("overseas model access toggles by reseller scope without leaking group", func(t *testing.T) {

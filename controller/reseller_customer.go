@@ -696,7 +696,7 @@ func ListResellerAdminCustomers(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 		return
 	}
-	records, err := model.ListResellerCustomerRecords(resellerId, false)
+	records, err := model.ListResellerCustomerRecords(resellerId, true)
 	if err != nil {
 		logger.LogError(c.Request.Context(), "ListResellerCustomerRecords database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
