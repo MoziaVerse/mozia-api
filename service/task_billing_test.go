@@ -824,6 +824,29 @@ func TestRecalculateTaskQuotaByTokensUsesFrozenUserModelRatioSnapshot(t *testing
 	assert.Equal(t, 0.36, other["user_model_ratio"])
 }
 
+func TestRecalculateTaskQuotaByTokensAppliesReferenceVideoRatio(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, channelID = 34, 34
+	seedUser(t, userID, 2000)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, 1000, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.ModelRatio = 10
+	task.PrivateData.BillingContext.GroupRatio = 1
+	task.PrivateData.BillingContext.OtherRatios = map[string]float64{
+		"video_input": 0.5,
+	}
+
+	RecalculateTaskQuotaByTokens(ctx, task, 100)
+
+	assert.Equal(t, 500, task.Quota)
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Contains(t, log.Content, "otherMultiplier=0.5000")
+}
+
 func TestResellerTaskRecalculationUsesFrozenMultipliersAndPersistsUsage(t *testing.T) {
 	truncate(t)
 	ctx := context.Background()

@@ -17,7 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import * as z from 'zod'
+
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
+
 import { formatPricingNumber } from './pricing-format'
 
 export const createModelPricingSchema = (t: (key: string) => string) =>
@@ -31,6 +33,7 @@ export const createModelPricingSchema = (t: (key: string) => string) =>
     imageRatio: z.string().optional(),
     audioRatio: z.string().optional(),
     audioCompletionRatio: z.string().optional(),
+    videoInputRatio: z.string().optional(),
   })
 
 export type ModelPricingFormValues = z.infer<
@@ -50,6 +53,7 @@ export type LaneKey =
   | 'image'
   | 'audioInput'
   | 'audioOutput'
+  | 'videoInput'
 
 export type ModelRatioData = {
   name: string
@@ -61,6 +65,7 @@ export type ModelRatioData = {
   imageRatio?: string
   audioRatio?: string
   audioCompletionRatio?: string
+  videoInputRatio?: string
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
@@ -83,6 +88,7 @@ export const EMPTY_LANE_PRICES: Record<LaneKey, string> = {
   image: '',
   audioInput: '',
   audioOutput: '',
+  videoInput: '',
 }
 
 export const EMPTY_LANE_ENABLED: Record<LaneKey, boolean> = {
@@ -92,6 +98,7 @@ export const EMPTY_LANE_ENABLED: Record<LaneKey, boolean> = {
   image: false,
   audioInput: false,
   audioOutput: false,
+  videoInput: false,
 }
 
 export const ratioFieldByLane: Record<LaneKey, keyof ModelPricingFormValues> = {
@@ -101,6 +108,7 @@ export const ratioFieldByLane: Record<LaneKey, keyof ModelPricingFormValues> = {
   image: 'imageRatio',
   audioInput: 'audioRatio',
   audioOutput: 'audioCompletionRatio',
+  videoInput: 'videoInputRatio',
 }
 
 export const laneConfigs: Array<{
@@ -144,6 +152,13 @@ export const laneConfigs: Array<{
     titleKey: 'Audio output price',
     descriptionKey: 'Token price for audio output.',
     placeholder: '15.11',
+  },
+  {
+    key: 'videoInput',
+    titleKey: 'Reference video token price',
+    descriptionKey:
+      'Token price used when the video generation request includes a reference video.',
+    placeholder: '28',
   },
 ]
 
@@ -194,6 +209,7 @@ export function createInitialLaneState(data?: ModelRatioData | null) {
     image: deriveLanePrice(data.imageRatio, promptPrice),
     audioInput: audioInputPrice,
     audioOutput: deriveLanePrice(data.audioCompletionRatio, audioInputPrice),
+    videoInput: deriveLanePrice(data.videoInputRatio, promptPrice),
   }
 
   return {
@@ -206,6 +222,7 @@ export function createInitialLaneState(data?: ModelRatioData | null) {
       image: hasValue(data.imageRatio),
       audioInput: hasValue(data.audioRatio),
       audioOutput: hasValue(data.audioCompletionRatio),
+      videoInput: hasValue(data.videoInputRatio),
     },
   }
 }
@@ -310,6 +327,14 @@ export function buildPreviewRows(
       value:
         laneEnabled.audioOutput && lanePrices.audioOutput
           ? `$${lanePrices.audioOutput}`
+          : t('Empty'),
+    },
+    {
+      key: 'videoInput',
+      label: t('Reference video token price'),
+      value:
+        laneEnabled.videoInput && lanePrices.videoInput
+          ? `$${lanePrices.videoInput}`
           : t('Empty'),
     },
   ]

@@ -2046,7 +2046,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Related Projects",
     "footer.defaultCopyright": "All rights reserved.",
-    "footer.new\u0061pi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
+    "footer.newapi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment",
     "For private deployments, format: https://fastgpt.run/api/openapi": "For private deployments, format: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Force a syntactically valid JSON response",
@@ -5252,6 +5252,12 @@
     "The free item count must be a non-negative integer.": "The free item count must be a non-negative integer.",
     "The surcharge unit price must be greater than zero.": "The surcharge unit price must be greater than zero.",
     "free items": "free items",
-    "additional item": "additional item"
+    "additional item": "additional item",
+    "JSON map of model → multiplier used when a video task includes a reference video.": "JSON map of model → multiplier used when a video task includes a reference video.",
+    "Multiplier used when a video task includes a reference video.": "Multiplier used when a video task includes a reference video.",
+    "Reference video": "Reference video",
+    "Reference video input ratio": "Reference video input ratio",
+    "Reference video token price": "Reference video token price",
+    "Token price used when the video generation request includes a reference video.": "Token price used when the video generation request includes a reference video."
   }
 }

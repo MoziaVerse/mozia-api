@@ -2046,7 +2046,7 @@
     "footer.columns.related.links.oneApi": "1つのAPI",
     "footer.columns.related.title": "関連プロジェクト",
     "footer.defaultCopyright": "すべての権利を留保します。",
-    "footer.new\u0061pi.projectAttributionSuffix": "すべての権利を留保します。プロジェクトコントリビューターにより設計・開発されています。",
+    "footer.newapi.projectAttributionSuffix": "すべての権利を留保します。プロジェクトコントリビューターにより設計・開発されています。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "2025 年 5 月 10 日以降に追加されたチャネルの場合、デプロイ時にモデル名から「.」を削除する必要はありません",
     "For private deployments, format: https://fastgpt.run/api/openapi": "プライベートデプロイメントの場合、形式: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "構文的に有効な JSON 応答を強制",
@@ -5238,6 +5238,12 @@
     "The free item count must be a non-negative integer.": "無料項目数は0以上の整数である必要があります。",
     "The surcharge unit price must be greater than zero.": "追加料金の単価は0より大きい必要があります。",
     "free items": "無料項目",
-    "additional item": "超過項目"
+    "additional item": "超過項目",
+    "JSON map of model → multiplier used when a video task includes a reference video.": "参照動画を含む動画タスクに適用する、モデルごとの倍率の JSON マップです。",
+    "Multiplier used when a video task includes a reference video.": "動画タスクに参照動画が含まれる場合に適用する倍率です。",
+    "Reference video": "参照動画",
+    "Reference video input ratio": "参照動画入力倍率",
+    "Reference video token price": "参照動画トークン価格",
+    "Token price used when the video generation request includes a reference video.": "動画生成リクエストに参照動画が含まれる場合のトークン価格です。"
   }
 }

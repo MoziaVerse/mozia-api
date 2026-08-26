@@ -2046,7 +2046,7 @@
     "footer.columns.related.links.oneApi": "Один API",
     "footer.columns.related.title": "Связанные проекты",
     "footer.defaultCopyright": "Все права защищены.",
-    "footer.new\u0061pi.projectAttributionSuffix": "Все права защищены. Разработано участниками проекта.",
+    "footer.newapi.projectAttributionSuffix": "Все права защищены. Разработано участниками проекта.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "Для каналов, добавленных после 10 мая 2025 г., не нужно удалять \".\" из имён моделей при развёртывании",
     "For private deployments, format: https://fastgpt.run/api/openapi": "Для частных развертываний, формат: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Принудительно возвращать синтаксически корректный JSON",
@@ -5238,6 +5238,12 @@
     "The free item count must be a non-negative integer.": "Количество бесплатных элементов должно быть неотрицательным целым числом.",
     "The surcharge unit price must be greater than zero.": "Цена единицы доплаты должна быть больше нуля.",
     "free items": "бесплатных элементов",
-    "additional item": "дополнительный элемент"
+    "additional item": "дополнительный элемент",
+    "JSON map of model → multiplier used when a video task includes a reference video.": "JSON-карта моделей и множителей для задач с референсным видео.",
+    "Multiplier used when a video task includes a reference video.": "Множитель для видеозадач с референсным видео.",
+    "Reference video": "Референсное видео",
+    "Reference video input ratio": "Множитель референсного видео",
+    "Reference video token price": "Цена токенов с референсным видео",
+    "Token price used when the video generation request includes a reference video.": "Цена токенов для генерации с референсным видео."
   }
 }

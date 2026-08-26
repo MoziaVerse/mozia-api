@@ -71,6 +71,47 @@ func GetTaskRequest(c *gin.Context) (TaskSubmitReq, error) {
 	return req, nil
 }
 
+func TaskRequestHasReferenceVideo(c *gin.Context) bool {
+	var body map[string]any
+	if err := common.UnmarshalBodyReusable(c, &body); err != nil {
+		return false
+	}
+
+	fieldSets := []map[string]any{body}
+	if metadata, ok := body["metadata"].(map[string]any); ok {
+		fieldSets = append(fieldSets, metadata)
+	}
+	for _, fields := range fieldSets {
+		for _, key := range []string{"reference_video", "reference_videos", "referenceVideos", "video_urls", "videos"} {
+			switch value := fields[key].(type) {
+			case string:
+				if strings.TrimSpace(value) != "" {
+					return true
+				}
+			case []any:
+				if len(value) > 0 {
+					return true
+				}
+			case map[string]any:
+				if len(value) > 0 {
+					return true
+				}
+			}
+		}
+	}
+
+	content, _ := body["content"].([]any)
+	for _, rawItem := range content {
+		item, _ := rawItem.(map[string]any)
+		itemType, _ := item["type"].(string)
+		role, _ := item["role"].(string)
+		if itemType == taskContentTypeVideoURL || role == taskContentRoleReferenceVideo {
+			return true
+		}
+	}
+	return false
+}
+
 func validatePrompt(prompt string) *dto.TaskError {
 	if strings.TrimSpace(prompt) == "" {
 		return createTaskError(fmt.Errorf("prompt is required"), "invalid_request", http.StatusBadRequest, true)

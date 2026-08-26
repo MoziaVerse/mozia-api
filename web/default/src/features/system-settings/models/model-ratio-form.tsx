@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { memo, useCallback, useRef, useState } from 'react'
-import { type UseFormReturn } from 'react-hook-form'
+import type { UseFormReturn } from 'react-hook-form'
 import { Code2, Eye, RotateCcw, Save } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -51,6 +51,7 @@ type ModelFormValues = {
   ImageRatio: string
   AudioRatio: string
   AudioCompletionRatio: string
+  VideoInputRatio: string
   ExposeRatioEnabled: boolean
   BillingMode: string
   BillingExpr: string
@@ -75,6 +76,7 @@ type ModelJsonFieldName =
   | 'ImageRatio'
   | 'AudioRatio'
   | 'AudioCompletionRatio'
+  | 'VideoInputRatio'
   | 'TaskBilling'
 
 const modelJsonFields: Array<{
@@ -125,6 +127,12 @@ const modelJsonFields: Array<{
     name: 'AudioCompletionRatio',
     labelKey: 'Audio completion ratio',
     descriptionKey: 'Ratio applied to audio completions for streaming models.',
+  },
+  {
+    name: 'VideoInputRatio',
+    labelKey: 'Reference video input ratio',
+    descriptionKey:
+      'JSON map of model → multiplier used when a video task includes a reference video.',
   },
   {
     name: 'TaskBilling',
@@ -250,6 +258,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               savedImageRatio={savedValues.ImageRatio}
               savedAudioRatio={savedValues.AudioRatio}
               savedAudioCompletionRatio={savedValues.AudioCompletionRatio}
+              savedVideoInputRatio={savedValues.VideoInputRatio}
               savedBillingMode={savedValues.BillingMode}
               savedBillingExpr={savedValues.BillingExpr}
               savedTaskBilling={savedValues.TaskBilling}
@@ -261,6 +270,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               imageRatio={form.watch('ImageRatio')}
               audioRatio={form.watch('AudioRatio')}
               audioCompletionRatio={form.watch('AudioCompletionRatio')}
+              videoInputRatio={form.watch('VideoInputRatio')}
               billingMode={form.watch('BillingMode')}
               billingExpr={form.watch('BillingExpr')}
               taskBilling={form.watch('TaskBilling')}

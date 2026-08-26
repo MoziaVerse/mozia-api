@@ -20,6 +20,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -220,6 +221,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	} else if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
 		for k, v := range estimatedRatios {
 			info.PriceData.AddOtherRatio(k, v)
+		}
+	}
+	if !hasTaskBillingConfig && !info.PriceData.UsePrice && relaycommon.TaskRequestHasReferenceVideo(c) {
+		if ratio, ok := ratio_setting.GetVideoInputRatio(modelName); ok {
+			info.PriceData.AddOtherRatio("video_input", ratio)
 		}
 	}
 

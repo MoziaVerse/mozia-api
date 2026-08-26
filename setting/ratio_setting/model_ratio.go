@@ -1,6 +1,8 @@
 package ratio_setting
 
 import (
+	"fmt"
+	"math"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -653,6 +655,7 @@ var defaultImageRatio = map[string]float64{
 var imageRatioMap = types.NewRWMap[string, float64]()
 var audioRatioMap = types.NewRWMap[string, float64]()
 var audioCompletionRatioMap = types.NewRWMap[string, float64]()
+var videoInputRatioMap = types.NewRWMap[string, float64]()
 
 func ImageRatio2JSONString() string {
 	return imageRatioMap.MarshalJSONString()
@@ -686,6 +689,32 @@ func UpdateAudioCompletionRatioByJSONString(jsonStr string) error {
 	return types.LoadFromJsonStringWithCallback(audioCompletionRatioMap, jsonStr, InvalidateExposedDataCache)
 }
 
+func VideoInputRatio2JSONString() string {
+	return videoInputRatioMap.MarshalJSONString()
+}
+
+func UpdateVideoInputRatioByJSONString(jsonStr string) error {
+	ratios := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &ratios); err != nil {
+		return err
+	}
+	for model, ratio := range ratios {
+		if strings.TrimSpace(model) == "" {
+			return fmt.Errorf("reference video ratio model name is required")
+		}
+		if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio <= 0 {
+			return fmt.Errorf("reference video ratio for model %q must be positive", model)
+		}
+	}
+	return types.LoadFromJsonStringWithCallback(videoInputRatioMap, jsonStr, InvalidateExposedDataCache)
+}
+
+func GetVideoInputRatio(name string) (float64, bool) {
+	name = FormatMatchingModelName(name)
+	ratio, ok := videoInputRatioMap.Get(name)
+	return ratio, ok
+}
+
 func GetModelRatioCopy() map[string]float64 {
 	return modelRatioMap.ReadAll()
 }
@@ -708,6 +737,10 @@ func GetAudioRatioCopy() map[string]float64 {
 
 func GetAudioCompletionRatioCopy() map[string]float64 {
 	return audioCompletionRatioMap.ReadAll()
+}
+
+func GetVideoInputRatioCopy() map[string]float64 {
+	return videoInputRatioMap.ReadAll()
 }
 
 // 转换模型名，减少渠道必须配置各种带参数模型

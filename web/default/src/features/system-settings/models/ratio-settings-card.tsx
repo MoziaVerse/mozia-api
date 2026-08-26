@@ -56,18 +56,18 @@ function formatJsonValidationError(
     )
   }
 
-  const parts = [
-    error.line && error.column
-      ? t('JSON is invalid at line {{line}}, column {{column}}.', {
-          line: error.line,
-          column: error.column,
-        })
-      : error.position !== undefined
-        ? t('JSON is invalid at position {{position}}.', {
-            position: error.position,
-          })
-        : t('JSON is invalid. Please check the syntax.'),
-  ]
+  let primaryMessage = t('JSON is invalid. Please check the syntax.')
+  if (error.line && error.column) {
+    primaryMessage = t('JSON is invalid at line {{line}}, column {{column}}.', {
+      line: error.line,
+      column: error.column,
+    })
+  } else if (error.position !== undefined) {
+    primaryMessage = t('JSON is invalid at position {{position}}.', {
+      position: error.position,
+    })
+  }
+  const parts = [primaryMessage]
 
   if (error.missingCommaLine) {
     parts.push(
@@ -105,6 +105,7 @@ const createModelSchema = (t: Translate) =>
     ImageRatio: createJsonStringField(t),
     AudioRatio: createJsonStringField(t),
     AudioCompletionRatio: createJsonStringField(t),
+    VideoInputRatio: createJsonStringField(t),
     ExposeRatioEnabled: z.boolean(),
     BillingMode: createJsonStringField(t),
     BillingExpr: createJsonStringField(t),
@@ -178,6 +179,7 @@ export function RatioSettingsCard({
     AudioCompletionRatio: normalizeJsonString(
       modelDefaults.AudioCompletionRatio
     ),
+    VideoInputRatio: normalizeJsonString(modelDefaults.VideoInputRatio),
     ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
     BillingMode: normalizeJsonString(modelDefaults.BillingMode),
     BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
@@ -216,6 +218,7 @@ export function RatioSettingsCard({
       AudioCompletionRatio: formatJsonForTextarea(
         modelDefaults.AudioCompletionRatio
       ),
+      VideoInputRatio: formatJsonForTextarea(modelDefaults.VideoInputRatio),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
       TaskBilling: formatJsonForTextarea(modelDefaults.TaskBilling),
@@ -250,6 +253,7 @@ export function RatioSettingsCard({
       AudioCompletionRatio: normalizeJsonString(
         modelDefaults.AudioCompletionRatio
       ),
+      VideoInputRatio: normalizeJsonString(modelDefaults.VideoInputRatio),
       ExposeRatioEnabled: modelDefaults.ExposeRatioEnabled,
       BillingMode: normalizeJsonString(modelDefaults.BillingMode),
       BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
@@ -269,6 +273,7 @@ export function RatioSettingsCard({
       AudioCompletionRatio: formatJsonForTextarea(
         modelDefaults.AudioCompletionRatio
       ),
+      VideoInputRatio: formatJsonForTextarea(modelDefaults.VideoInputRatio),
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
       TaskBilling: formatJsonForTextarea(modelDefaults.TaskBilling),
@@ -312,6 +317,7 @@ export function RatioSettingsCard({
         ImageRatio: normalizeJsonString(values.ImageRatio),
         AudioRatio: normalizeJsonString(values.AudioRatio),
         AudioCompletionRatio: normalizeJsonString(values.AudioCompletionRatio),
+        VideoInputRatio: normalizeJsonString(values.VideoInputRatio),
         ExposeRatioEnabled: values.ExposeRatioEnabled,
         BillingMode: normalizeJsonString(values.BillingMode),
         BillingExpr: normalizeJsonString(values.BillingExpr),

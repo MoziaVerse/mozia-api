@@ -19,7 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { getPriceDetail, getPriceSummary } from './model-pricing-snapshots'
+import {
+  buildModelSnapshots,
+  getPriceDetail,
+  getPriceSummary,
+} from './model-pricing-snapshots'
 
 describe('task billing pricing summaries', () => {
   test('shows the per-second price and item surcharge in the model list', () => {
@@ -43,5 +47,28 @@ describe('task billing pricing summaries', () => {
       getPriceDetail(row, translate),
       '5 free items · $0.2 / additional item'
     )
+  })
+})
+
+describe('reference video token pricing', () => {
+  test('shows the configured conditional token price', () => {
+    const [row] = buildModelSnapshots({
+      modelPrice: '{}',
+      modelRatio: '{"doubao/seedance-2.0-pro-480p":23}',
+      cacheRatio: '{}',
+      createCacheRatio: '{}',
+      completionRatio: '{}',
+      imageRatio: '{}',
+      audioRatio: '{}',
+      audioCompletionRatio: '{}',
+      videoInputRatio: '{"doubao/seedance-2.0-pro-480p":0.6086956521739131}',
+      billingMode: '{}',
+      billingExpr: '{}',
+      taskBilling: '{}',
+    })
+    const translate = (key: string) => key
+
+    assert.equal(row.videoInputRatio, '0.6086956521739131')
+    assert.equal(getPriceDetail(row, translate), 'Reference video $28')
   })
 })

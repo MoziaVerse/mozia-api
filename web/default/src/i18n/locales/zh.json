@@ -2046,7 +2046,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "相关项目",
     "footer.defaultCopyright": "版权所有。",
-    "footer.new\u0061pi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
+    "footer.newapi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "对于 2025 年 5 月 10 日之后添加的渠道，在部署时无需从模型名称中移除 \".\"",
     "For private deployments, format: https://fastgpt.run/api/openapi": "对于私有部署，格式为：https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "强制返回语法合法的 JSON",
@@ -5252,6 +5252,12 @@
     "The free item count must be a non-negative integer.": "免费条目数必须是非负整数。",
     "The surcharge unit price must be greater than zero.": "附加费单价必须大于零。",
     "free items": "个免费条目",
-    "additional item": "个超出条目"
+    "additional item": "个超出条目",
+    "JSON map of model → multiplier used when a video task includes a reference video.": "模型到参考视频倍率的 JSON 映射，用于包含参考视频的视频任务。",
+    "Multiplier used when a video task includes a reference video.": "视频任务包含参考视频时使用的计费倍率。",
+    "Reference video": "参考视频",
+    "Reference video input ratio": "参考视频输入倍率",
+    "Reference video token price": "参考视频 Token 单价",
+    "Token price used when the video generation request includes a reference video.": "视频生成请求包含参考视频时使用的 Token 单价。"
   }
 }

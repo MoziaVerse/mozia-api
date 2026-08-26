@@ -103,3 +103,51 @@ func TestValidateBasicTaskRequestPrefersTopLevelPromptAndBackfillsImages(t *test
 	assert.Equal(t, []string{"https://example.com/first.png", "https://example.com/last.png"}, req.Images)
 	assert.Len(t, req.Content, 3)
 }
+
+func TestTaskRequestHasReferenceVideoSupportsPublicVideoEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		path string
+		body string
+		want bool
+	}{
+		{
+			name: "canonical content on video generations",
+			path: "/v1/video/generations",
+			body: `{"content":[{"type":"video_url","role":"reference_video","video_url":{"url":"https://example.com/ref.mp4"}}]}`,
+			want: true,
+		},
+		{
+			name: "legacy reference videos on videos endpoint",
+			path: "/v1/videos",
+			body: `{"reference_videos":["https://example.com/ref.mp4"]}`,
+			want: true,
+		},
+		{
+			name: "provider videos alias",
+			path: "/v1/video/generations",
+			body: `{"videos":[{"url":"https://example.com/ref.mp4"}]}`,
+			want: true,
+		},
+		{
+			name: "image input only",
+			path: "/v1/videos",
+			body: `{"images":["https://example.com/ref.png"]}`,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			storage, err := apicommon.GetBodyStorage(ctx)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = storage.Close() })
+
+			assert.Equal(t, tt.want, TaskRequestHasReferenceVideo(ctx))
+		})
+	}
+}
