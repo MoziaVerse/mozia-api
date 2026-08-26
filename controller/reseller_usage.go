@@ -21,9 +21,15 @@ const resellerTaskMaxPageSize = 100
 type resellerUsageResponse struct {
 	Summary       resellerUsageSummaryResponse    `json:"summary"`
 	Items         []resellerUsageItemResponse     `json:"items"`
+	DailySpend    []resellerDailySpendResponse    `json:"daily_spend"`
 	CustomerSpend []resellerCustomerSpendResponse `json:"customer_spend"`
 	ModelSpend    []resellerModelSpendResponse    `json:"model_spend"`
 	SubagentSpend []resellerSubagentSpendResponse `json:"subagent_spend"`
+}
+
+type resellerDailySpendResponse struct {
+	Date          string `json:"date"`
+	CustomerQuota string `json:"customer_quota"`
 }
 
 type resellerSubagentSpendResponse struct {
@@ -100,12 +106,56 @@ func GetResellerManagementUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := model.ListResellerUsage(resellerContext.ResellerId, customerId, startTimestamp, endTimestamp, modelName, subagentMemberId)
+	response, err := resellerUsageResponseFor(resellerContext.ResellerId, customerId, startTimestamp, endTimestamp, modelName, subagentMemberId)
 	if err != nil {
 		handleResellerUsageError(c, err)
 		return
 	}
-	writeResellerAdminSuccess(c, http.StatusOK, resellerUsageResponse{
+	writeResellerAdminSuccess(c, http.StatusOK, response)
+}
+
+func GetResellerPlatformUsage(c *gin.Context) {
+	resellerId, err := strconv.Atoi(c.Param("id"))
+	if err != nil || resellerId < 1 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	if _, err := model.GetResellerAdminRecord(resellerId); err != nil {
+		handleResellerUsageError(c, err)
+		return
+	}
+	customerId, ok := optionalPositiveQueryID(c, "customer_id")
+	if !ok {
+		return
+	}
+	if customerId != nil {
+		if _, err := model.GetResellerCustomerRecord(resellerId, *customerId, false); err != nil {
+			handleResellerUsageError(c, err)
+			return
+		}
+	}
+	startTimestamp, endTimestamp, ok := resellerTimeRangeQuery(c)
+	if !ok {
+		return
+	}
+	modelName, ok := optionalSafeQueryText(c, "model")
+	if !ok {
+		return
+	}
+	response, err := resellerUsageResponseFor(resellerId, customerId, startTimestamp, endTimestamp, modelName, nil)
+	if err != nil {
+		handleResellerUsageError(c, err)
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusOK, response)
+}
+
+func resellerUsageResponseFor(resellerId int, customerId *int, startTimestamp *int64, endTimestamp *int64, modelName *string, subagentMemberId *int) (*resellerUsageResponse, error) {
+	result, err := model.ListResellerUsage(resellerId, customerId, startTimestamp, endTimestamp, modelName, subagentMemberId)
+	if err != nil {
+		return nil, err
+	}
+	return &resellerUsageResponse{
 		Summary: resellerUsageSummaryResponse{
 			RequestCount:         strconv.FormatInt(result.Summary.RequestCount, 10),
 			PromptTokens:         strconv.FormatInt(result.Summary.PromptTokens, 10),
@@ -116,10 +166,22 @@ func GetResellerManagementUsage(c *gin.Context) {
 			ModelCount:           result.Summary.ModelCount,
 		},
 		Items:         resellerUsageItemsResponse(result.Items),
+		DailySpend:    resellerDailySpendResponses(result.DailySpend),
 		CustomerSpend: resellerCustomerSpendResponseFromItems(result.Items),
 		ModelSpend:    resellerModelSpendResponseFromItems(result.Items),
 		SubagentSpend: resellerSubagentSpendResponses(result.SubagentSpend),
-	})
+	}, nil
+}
+
+func resellerDailySpendResponses(items []model.ResellerDailyUsageSpend) []resellerDailySpendResponse {
+	response := make([]resellerDailySpendResponse, 0, len(items))
+	for _, item := range items {
+		response = append(response, resellerDailySpendResponse{
+			Date:          item.Date,
+			CustomerQuota: strconv.FormatInt(item.CustomerQuota, 10),
+		})
+	}
+	return response
 }
 
 func GetResellerManagementTasks(c *gin.Context) {
@@ -345,6 +407,8 @@ func formatResellerUsageQuota(quota int64) string {
 
 func handleResellerUsageError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, model.ErrResellerNotFound):
+		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
 	case errors.Is(err, model.ErrResellerCustomerNotFound):
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller customer not found")
 	case errors.Is(err, model.ErrResellerForbidden):

@@ -35,6 +35,10 @@ type resellerUsageEnvelopeData struct {
 		CustomerQuota        string `json:"customer_quota"`
 		CustomerQuotaDisplay string `json:"customer_quota_display"`
 	} `json:"items"`
+	DailySpend []struct {
+		Date          string `json:"date"`
+		CustomerQuota string `json:"customer_quota"`
+	} `json:"daily_spend"`
 	CustomerSpend []struct {
 		CustomerId           int    `json:"customer_id"`
 		CustomerQuota        string `json:"customer_quota"`
@@ -480,6 +484,9 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		assert.Equal(t, "200", data.Summary.CustomerQuota)
 		assert.Equal(t, logger.FormatQuota(200), data.Summary.CustomerQuotaDisplay)
 		assert.Equal(t, 2, data.Summary.ModelCount)
+		require.Len(t, data.DailySpend, 1)
+		assert.Equal(t, "1970-01-01", data.DailySpend[0].Date)
+		assert.Equal(t, "200", data.DailySpend[0].CustomerQuota)
 		require.Len(t, data.Items, 2)
 		assert.Equal(t, []string{"alpha-model", "beta-task-model"}, []string{data.Items[0].Model, data.Items[1].Model})
 		assert.Equal(t, "2", data.Items[0].RequestCount)
@@ -522,6 +529,24 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 		require.NoError(t, common.Unmarshal(allEnvelope.RawData, &allData))
 		assert.Equal(t, 2, allData.Summary.ModelCount, "model_count is distinct across customers")
 		require.Len(t, allData.Items, 3)
+	})
+
+	t.Run("platform usage uses the dedicated mega token and requested reseller scope", func(t *testing.T) {
+		unauthorized := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/usage", resellerA.Id), "", "matrix-reseller-management-test-token", "platform-usage-auth_123", nil)
+		require.Equal(t, http.StatusUnauthorized, unauthorized.Code)
+
+		recorder := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/usage?start_timestamp=100&end_timestamp=140", resellerA.Id), "", "mozia-mega-test-token", "platform-usage_123", nil)
+		envelope := decodeM2Envelope(t, recorder)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		assert.Equal(t, "platform-usage_123", envelope.RequestId)
+		var data resellerUsageEnvelopeData
+		require.NoError(t, common.Unmarshal(envelope.RawData, &data))
+		assert.Equal(t, "4", data.Summary.RequestCount)
+		assert.Equal(t, "210", data.Summary.CustomerQuota)
+		require.Len(t, data.CustomerSpend, 2)
+
+		crossTenantCustomer := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/usage?customer_id=%d", resellerA.Id, customerB.Id), "", "mozia-mega-test-token", "platform-usage-cross-tenant_123", nil)
+		require.Equal(t, http.StatusNotFound, crossTenantCustomer.Code)
 	})
 
 	t.Run("usage enforces tenant scope forged reseller id and valid time range", func(t *testing.T) {

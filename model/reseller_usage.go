@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -32,7 +33,13 @@ type ResellerUsageSummary struct {
 type ResellerUsageResult struct {
 	Summary       ResellerUsageSummary         `json:"summary"`
 	Items         []ResellerUsageItem          `json:"items"`
+	DailySpend    []ResellerDailyUsageSpend    `json:"daily_spend"`
 	SubagentSpend []ResellerSubagentUsageSpend `json:"subagent_spend"`
+}
+
+type ResellerDailyUsageSpend struct {
+	Date          string `json:"date"`
+	CustomerQuota int64  `json:"customer_quota"`
 }
 
 type ResellerSubagentUsageSpend struct {
@@ -70,6 +77,7 @@ type resellerUsageSettlementRow struct {
 	ModelName           string
 	ActualCustomerQuota int64
 	UsageJSON           string
+	CreatedAt           int64
 }
 
 type resellerTaskUsageJSON struct {
@@ -99,7 +107,7 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 	// ponytail: parse usage JSON in Go for SQLite/MySQL parity; add normalized token columns if full-history scans become costly.
 	rows := make([]resellerUsageSettlementRow, 0)
 	query := DB.Model(&ResellerRequestSettlement{}).
-		Select("reseller_request_settlements.customer_id, CASE WHEN usage_customer.subagent_member_id IS NOT NULL AND reseller_request_settlements.created_at >= usage_customer.subagent_assigned_at THEN usage_customer.subagent_member_id ELSE 0 END AS subagent_member_id, reseller_request_settlements.model_name, reseller_request_settlements.actual_customer_quota, reseller_request_settlements.usage_json").
+		Select("reseller_request_settlements.customer_id, CASE WHEN usage_customer.subagent_member_id IS NOT NULL AND reseller_request_settlements.created_at >= usage_customer.subagent_assigned_at THEN usage_customer.subagent_member_id ELSE 0 END AS subagent_member_id, reseller_request_settlements.model_name, reseller_request_settlements.actual_customer_quota, reseller_request_settlements.usage_json, reseller_request_settlements.created_at").
 		Joins("LEFT JOIN reseller_customers AS usage_customer ON usage_customer.id = reseller_request_settlements.customer_id AND usage_customer.reseller_id = reseller_request_settlements.reseller_id").
 		Where("reseller_request_settlements.reseller_id = ? AND reseller_request_settlements.status = ?", resellerId, ResellerSettlementStatusSettled)
 	if subagentMemberId != nil {
@@ -120,6 +128,7 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 
 	result := &ResellerUsageResult{
 		Items:         make([]ResellerUsageItem, 0),
+		DailySpend:    make([]ResellerDailyUsageSpend, 0),
 		SubagentSpend: make([]ResellerSubagentUsageSpend, 0),
 	}
 	if len(rows) == 0 {
@@ -127,6 +136,7 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 	}
 
 	aggregated := make(map[string]*ResellerUsageItem, len(rows))
+	dailySpend := make(map[string]*ResellerDailyUsageSpend)
 	subagentSpend := make(map[int]*ResellerSubagentUsageSpend)
 	for _, row := range rows {
 		modelName := strings.TrimSpace(row.ModelName)
@@ -140,6 +150,13 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 			aggregated[key] = item
 		}
 		promptTokens, completionTokens, totalTokens := parseResellerUsageTokens(row.UsageJSON)
+		date := time.Unix(row.CreatedAt, 0).UTC().Format("2006-01-02")
+		day := dailySpend[date]
+		if day == nil {
+			day = &ResellerDailyUsageSpend{Date: date}
+			dailySpend[date] = day
+		}
+		day.CustomerQuota += row.ActualCustomerQuota
 		if row.SubagentMemberId > 0 {
 			spend := subagentSpend[row.SubagentMemberId]
 			if spend == nil {
@@ -177,6 +194,12 @@ func ListResellerUsage(resellerId int, customerId *int, startTimestamp *int64, e
 		return result.Items[i].Model < result.Items[j].Model
 	})
 	result.Summary.ModelCount = len(models)
+	for _, day := range dailySpend {
+		result.DailySpend = append(result.DailySpend, *day)
+	}
+	sort.Slice(result.DailySpend, func(i, j int) bool {
+		return result.DailySpend[i].Date < result.DailySpend[j].Date
+	})
 	for _, spend := range subagentSpend {
 		result.SubagentSpend = append(result.SubagentSpend, *spend)
 	}
