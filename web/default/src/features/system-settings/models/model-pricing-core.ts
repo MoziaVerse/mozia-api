@@ -44,7 +44,8 @@ export type PricingMode =
   | 'per-token'
   | 'per-request'
   | 'tiered_expr'
-  | 'task-parameter'
+  | 'per_second'
+  | 'parametric'
 
 export type LaneKey =
   | 'completion'
@@ -260,7 +261,7 @@ export function buildPreviewRows(
     ]
   }
 
-  if (mode === 'task-parameter') {
+  if (mode === 'per_second' || mode === 'parametric') {
     return [
       {
         key: 'price',

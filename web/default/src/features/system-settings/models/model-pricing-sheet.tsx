@@ -201,19 +201,23 @@ export const ModelPricingEditorPanel = forwardRef<
         audioCompletionRatio: editData.audioCompletionRatio || '',
         videoInputRatio: editData.videoInputRatio || '',
       })
+      const nextTaskBillingDraft = parseTaskBillingDraft(
+        editData.taskBilling || ''
+      )
       let nextPricingMode: PricingMode = editData.price
         ? 'per-request'
         : 'per-token'
       if (
         editData.billingMode === 'tiered_expr' ||
-        editData.billingMode === 'task-parameter'
+        editData.billingMode === 'per_second' ||
+        editData.billingMode === 'parametric'
       ) {
         nextPricingMode = editData.billingMode
       }
       setPricingMode(nextPricingMode)
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
-      setTaskBillingDraft(parseTaskBillingDraft(editData.taskBilling || ''))
+      setTaskBillingDraft(nextTaskBillingDraft)
     } else {
       form.reset({
         name: '',
@@ -357,6 +361,9 @@ export const ModelPricingEditorPanel = forwardRef<
     if (nextMode === 'tiered_expr' && !billingExpr) {
       setBillingExpr('tier("base", p * 0 + c * 0)')
     }
+    if (nextMode === 'per_second' || nextMode === 'parametric') {
+      setTaskBillingDraft((draft) => ({ ...draft, mode: nextMode }))
+    }
   }
 
   const watchedValues = form.watch()
@@ -431,7 +438,7 @@ export const ModelPricingEditorPanel = forwardRef<
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const validatePricingValues = useCallback(() => {
-    if (pricingMode === 'task-parameter') {
+    if (pricingMode === 'per_second' || pricingMode === 'parametric') {
       if (toNumberOrNull(form.getValues('price')) === null) {
         form.setError('price', { message: t('Fixed price is required') })
         return false
@@ -499,7 +506,7 @@ export const ModelPricingEditorPanel = forwardRef<
         data.billingExpr = billingExpr
         data.requestRuleExpr = requestRuleExpr
       }
-      if (pricingMode === 'task-parameter') {
+      if (pricingMode === 'per_second' || pricingMode === 'parametric') {
         data.taskBilling = JSON.stringify(
           buildTaskBillingConfig(taskBillingDraft)
         )
@@ -591,7 +598,7 @@ export const ModelPricingEditorPanel = forwardRef<
                   onValueChange={handleModeChange}
                   className='gap-4'
                 >
-                  <TabsList className='grid w-full grid-cols-4'>
+                  <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5'>
                     <TabsTrigger value='per-token'>
                       {t('Per-token')}
                     </TabsTrigger>
@@ -601,8 +608,11 @@ export const ModelPricingEditorPanel = forwardRef<
                     <TabsTrigger value='tiered_expr'>
                       {t('Expression')}
                     </TabsTrigger>
-                    <TabsTrigger value='task-parameter'>
-                      {t('Parameter')}
+                    <TabsTrigger value='per_second'>
+                      {t('Per-second')}
+                    </TabsTrigger>
+                    <TabsTrigger value='parametric'>
+                      {t('Multi-parameter')}
                     </TabsTrigger>
                   </TabsList>
 
@@ -702,47 +712,50 @@ export const ModelPricingEditorPanel = forwardRef<
                     </FieldGroup>
                   </TabsContent>
 
-                  <TabsContent value='task-parameter' className='pt-0'>
-                    <FieldGroup className='gap-5'>
-                      <FormField
-                        control={form.control}
-                        name='price'
-                        render={({ field }) => (
-                          <FormItem className='contents'>
-                            <Field>
-                              <FieldLabel>{t('Fixed price')}</FieldLabel>
-                              <FormControl>
-                                <InputGroup>
-                                  <InputGroupAddon>$</InputGroupAddon>
-                                  <InputGroupInput
-                                    inputMode='decimal'
-                                    placeholder='0.01'
-                                    {...field}
-                                    onChange={(event) => {
-                                      const value = event.target.value
-                                      if (numericDraftRegex.test(value)) {
-                                        field.onChange(value)
-                                      }
-                                    }}
-                                  />
-                                </InputGroup>
-                              </FormControl>
-                              <FieldDescription>
-                                {t(
-                                  'Base USD price before applying the configured task parameters.'
-                                )}
-                              </FieldDescription>
-                              <FormMessage />
-                            </Field>
-                          </FormItem>
-                        )}
-                      />
-                      <TaskBillingEditor
-                        draft={taskBillingDraft}
-                        onChange={setTaskBillingDraft}
-                      />
-                    </FieldGroup>
-                  </TabsContent>
+                  {(pricingMode === 'per_second' ||
+                    pricingMode === 'parametric') && (
+                    <TabsContent value={pricingMode} className='pt-0'>
+                      <FieldGroup className='gap-5'>
+                        <FormField
+                          control={form.control}
+                          name='price'
+                          render={({ field }) => (
+                            <FormItem className='contents'>
+                              <Field>
+                                <FieldLabel>{t('Fixed price')}</FieldLabel>
+                                <FormControl>
+                                  <InputGroup>
+                                    <InputGroupAddon>$</InputGroupAddon>
+                                    <InputGroupInput
+                                      inputMode='decimal'
+                                      placeholder='0.01'
+                                      {...field}
+                                      onChange={(event) => {
+                                        const value = event.target.value
+                                        if (numericDraftRegex.test(value)) {
+                                          field.onChange(value)
+                                        }
+                                      }}
+                                    />
+                                  </InputGroup>
+                                </FormControl>
+                                <FieldDescription>
+                                  {t(
+                                    'Base USD price before applying the configured task parameters.'
+                                  )}
+                                </FieldDescription>
+                                <FormMessage />
+                              </Field>
+                            </FormItem>
+                          )}
+                        />
+                        <TaskBillingEditor
+                          draft={taskBillingDraft}
+                          onChange={setTaskBillingDraft}
+                        />
+                      </FieldGroup>
+                    </TabsContent>
+                  )}
                 </Tabs>
               </FieldGroup>
 

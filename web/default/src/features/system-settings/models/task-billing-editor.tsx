@@ -29,7 +29,6 @@ import {
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import {
   buildTaskBillingConfig,
@@ -223,21 +222,6 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
 
   return (
     <FieldGroup className='gap-5'>
-      <Tabs
-        value={props.draft.mode}
-        onValueChange={(mode) =>
-          props.onChange({
-            ...props.draft,
-            mode: mode as TaskBillingDraft['mode'],
-          })
-        }
-      >
-        <TabsList className='grid w-full grid-cols-2'>
-          <TabsTrigger value='per_second'>{t('Per-second')}</TabsTrigger>
-          <TabsTrigger value='parametric'>{t('Multi-parameter')}</TabsTrigger>
-        </TabsList>
-      </Tabs>
-
       {props.draft.mode === 'per_second' ? (
         <FieldGroup className='gap-4'>
           <Field>

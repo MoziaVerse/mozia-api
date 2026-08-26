@@ -16,6 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type {
+  ColumnFiltersState,
+  OnChangeFn,
+  PaginationState,
+  RowSelectionState,
+  SortingState,
+  VisibilityState,
+} from '@tanstack/react-table'
+import { Copy, Plus } from 'lucide-react'
 import {
   useState,
   useMemo,
@@ -26,19 +35,9 @@ import {
   useImperativeHandle,
   useRef,
 } from 'react'
-import type {
-  ColumnFiltersState,
-  OnChangeFn,
-  PaginationState,
-  RowSelectionState,
-  VisibilityState,
-  SortingState,
-} from '@tanstack/react-table'
-import { useMediaQuery } from '@/hooks'
-import { Copy, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { Button } from '@/components/ui/button'
+
 import {
   DataTableBulkActions,
   DataTableToolbar,
@@ -47,15 +46,18 @@ import {
   DataTableView,
   useDataTable,
 } from '@/components/data-table'
+import { Button } from '@/components/ui/button'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
+import { useMediaQuery } from '@/hooks'
+
 import { safeJsonParse } from '../utils/json-parser'
+import type { PricingMode } from './model-pricing-core'
 import {
   ModelPricingEditorPanel,
   type ModelPricingEditorPanelHandle,
   ModelPricingSheet,
   type ModelRatioData,
 } from './model-pricing-sheet'
-import type { PricingMode } from './model-pricing-core'
 import {
   buildModelSnapshots,
   getSnapshotSignature,
@@ -275,7 +277,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
           const mode =
             model.billingMode === 'per-request' ||
             model.billingMode === 'tiered_expr' ||
-            model.billingMode === 'task-parameter'
+            model.billingMode === 'per_second' ||
+            model.billingMode === 'parametric'
               ? model.billingMode
               : 'per-token'
           acc[mode] += 1
@@ -285,7 +288,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
           'per-token': 0,
           'per-request': 0,
           tiered_expr: 0,
-          'task-parameter': 0,
+          per_second: 0,
+          parametric: 0,
         } as Record<PricingMode, number>
       ),
     [models]
@@ -297,7 +301,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
       let nextBillingMode: PricingMode = 'per-token'
       if (
         editableModel.billingMode === 'tiered_expr' ||
-        editableModel.billingMode === 'task-parameter'
+        editableModel.billingMode === 'per_second' ||
+        editableModel.billingMode === 'parametric'
       ) {
         nextBillingMode = editableModel.billingMode
       } else if (editableModel.price && editableModel.price !== '') {
@@ -567,7 +572,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         delete billingExprMap[name]
         delete taskBillingMap[name]
 
-        if (data.billingMode === 'task-parameter') {
+        if (
+          data.billingMode === 'per_second' ||
+          data.billingMode === 'parametric'
+        ) {
           taskBillingMap[name] = JSON.parse(data.taskBilling || '{}')
           setIfPresent(priceMap, name, data.price)
         } else if (data.billingMode === 'tiered_expr') {
@@ -718,9 +726,14 @@ const ModelRatioVisualEditorComponent = forwardRef<
                     count: modeCounts.tiered_expr,
                   },
                   {
-                    label: 'Parameter',
-                    value: 'task-parameter',
-                    count: modeCounts['task-parameter'],
+                    label: 'Per-second',
+                    value: 'per_second',
+                    count: modeCounts.per_second,
+                  },
+                  {
+                    label: 'Multi-parameter',
+                    value: 'parametric',
+                    count: modeCounts.parametric,
                   },
                 ],
               },
