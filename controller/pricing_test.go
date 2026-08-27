@@ -165,7 +165,7 @@ func TestGetPricingProjectsRetailWithoutLeakingResellerMetadataOrMutatingCache(t
 	require.NotEmpty(t, projected["m3-ratio-model"].DisplayPricing.Rows)
 	assert.InDelta(t, 6, *projected["m3-ratio-model"].DisplayPricing.Rows[0].AmountUSD, 0.000001)
 	require.NotNil(t, projected["m3-tiered-model"].DisplayPricing)
-	assert.Equal(t, "dynamic", projected["m3-tiered-model"].DisplayPricing.Rows[0].Kind)
+	assert.Equal(t, "dynamic", projected["m3-tiered-model"].DisplayPricing.Rows[0].Unit)
 
 	body := recorder.Body.String()
 	for _, forbidden := range []string{`"wholesale`, `"retail_multiplier"`, `"reseller_id"`, `"customer_id"`, `"rule_id"`, `"settlement"`} {

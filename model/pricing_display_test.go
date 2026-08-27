@@ -26,7 +26,6 @@ func TestBuildPricingDisplayShowsReferenceVideoTokenVariants(t *testing.T) {
 	}, 0.5)
 
 	require.Len(t, display.Rows, 6)
-	assert.Equal(t, PricingDisplayVersion, display.Version)
 	assert.Equal(t, "不含参考视频", display.Rows[0].Condition)
 	assert.InDelta(t, 10, *display.Rows[0].AmountUSD, 0.000001)
 	assert.InDelta(t, 20, *display.Rows[1].AmountUSD, 0.000001)
@@ -100,7 +99,8 @@ func TestBuildPricingDisplayKeepsExpressionPricingExplicitlyDynamic(t *testing.T
 	}, 1)
 
 	require.Len(t, display.Rows, 1)
-	assert.Equal(t, "dynamic", display.Rows[0].Kind)
+	assert.Equal(t, "动态计费", display.Rows[0].Item)
+	assert.Equal(t, "dynamic", display.Rows[0].Unit)
 	assert.Nil(t, display.Rows[0].AmountUSD)
 	assert.Contains(t, display.Rows[0].Note, "实际账单")
 }

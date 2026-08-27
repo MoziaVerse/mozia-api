@@ -3,22 +3,17 @@ package model
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/pkg/taskbilling"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
-const PricingDisplayVersion = 1
-
 type PricingDisplay struct {
-	Version int                 `json:"version"`
-	Rows    []PricingDisplayRow `json:"rows"`
+	Rows []PricingDisplayRow `json:"rows"`
 }
 
 type PricingDisplayRow struct {
-	Kind       string   `json:"kind"`
 	Item       string   `json:"item"`
 	AmountUSD  *float64 `json:"amount_usd,omitempty"`
 	Multiplier *float64 `json:"multiplier,omitempty"`
@@ -35,8 +30,7 @@ func BuildPricingDisplay(pricing Pricing, customerRatio float64) *PricingDisplay
 		customerRatio = 0
 	}
 	if pricing.BillingMode == "tiered_expr" && strings.TrimSpace(pricing.BillingExpr) != "" {
-		return &PricingDisplay{Version: PricingDisplayVersion, Rows: []PricingDisplayRow{{
-			Kind:      "dynamic",
+		return &PricingDisplay{Rows: []PricingDisplayRow{{
 			Item:      "动态计费",
 			Unit:      "dynamic",
 			Condition: "按请求内容、参数与实际用量",
@@ -53,10 +47,10 @@ func BuildPricingDisplay(pricing Pricing, customerRatio float64) *PricingDisplay
 func buildTokenPricingDisplay(pricing Pricing, customerRatio float64) *PricingDisplay {
 	inputPrice := pricing.ModelRatio * 2 * customerRatio
 	rows := make([]PricingDisplayRow, 0, 14)
-	appendRates := func(kind string, priceScale float64, condition string) {
+	appendRates := func(priceScale float64, condition string) {
 		rows = append(rows,
-			amountRow(kind, "输入 Token", inputPrice*priceScale, "million_tokens", condition, "文本及未单独计价的输入"),
-			amountRow(kind, "输出 Token", inputPrice*pricing.CompletionRatio*priceScale, "million_tokens", condition, "文本及未单独计价的输出"),
+			amountRow("输入 Token", inputPrice*priceScale, "million_tokens", condition, "文本及未单独计价的输入"),
+			amountRow("输出 Token", inputPrice*pricing.CompletionRatio*priceScale, "million_tokens", condition, "文本及未单独计价的输出"),
 		)
 		optional := []struct {
 			item  string
@@ -73,17 +67,17 @@ func buildTokenPricingDisplay(pricing Pricing, customerRatio float64) *PricingDi
 			if rate.ratio == nil {
 				continue
 			}
-			rows = append(rows, amountRow(kind, rate.item, inputPrice**rate.ratio*priceScale, "million_tokens", condition, rate.note))
+			rows = append(rows, amountRow(rate.item, inputPrice**rate.ratio*priceScale, "million_tokens", condition, rate.note))
 		}
 	}
 
 	if videoRatio, ok := ratio_setting.GetVideoInputRatio(pricing.ModelName); ok {
-		appendRates("variant", 1, "不含参考视频")
-		appendRates("variant", videoRatio, "包含参考视频")
+		appendRates(1, "不含参考视频")
+		appendRates(videoRatio, "包含参考视频")
 	} else {
-		appendRates("base", 1, "全部请求")
+		appendRates(1, "全部请求")
 	}
-	return &PricingDisplay{Version: PricingDisplayVersion, Rows: rows}
+	return &PricingDisplay{Rows: rows}
 }
 
 func buildFixedPricingDisplay(pricing Pricing, customerRatio float64) *PricingDisplay {
@@ -98,7 +92,7 @@ func buildFixedPricingDisplay(pricing Pricing, customerRatio float64) *PricingDi
 	}
 	item, unit, condition, note := fixedBasePresentation(pricing, mode)
 	rows := make([]PricingDisplayRow, 0, 8)
-	appendBase := func(kind string, basePrice float64, referenceCondition string) {
+	appendBase := func(basePrice float64, referenceCondition string) {
 		rowCondition := condition
 		if referenceCondition != "" {
 			rowCondition = referenceCondition
@@ -106,14 +100,14 @@ func buildFixedPricingDisplay(pricing Pricing, customerRatio float64) *PricingDi
 				rowCondition += "；" + condition
 			}
 		}
-		rows = append(rows, amountRow(kind, item, basePrice*customerRatio, unit, rowCondition, note))
+		rows = append(rows, amountRow(item, basePrice*customerRatio, unit, rowCondition, note))
 	}
 
 	if referencePrice, ok := ratio_setting.GetReferenceVideoPrice(pricing.ModelName); ok {
-		appendBase("variant", pricing.ModelPrice, "不含参考视频")
-		appendBase("variant", referencePrice*resellerMultiplier, "包含参考视频")
+		appendBase(pricing.ModelPrice, "不含参考视频")
+		appendBase(referencePrice*resellerMultiplier, "包含参考视频")
 	} else {
-		appendBase("base", pricing.ModelPrice, "")
+		appendBase(pricing.ModelPrice, "")
 	}
 
 	if pricing.TaskBilling != nil && pricing.TaskBilling.Mode == taskbilling.ModeParametric {
@@ -128,7 +122,6 @@ func buildFixedPricingDisplay(pricing Pricing, customerRatio float64) *PricingDi
 			note = fmt.Sprintf("前 %d 个免费，超出部分逐个收费", surcharge.FreeCount)
 		}
 		rows = append(rows, amountRow(
-			"surcharge",
 			pricingItemName(surcharge.Name),
 			surcharge.UnitPrice*resellerMultiplier*customerRatio,
 			"item",
@@ -136,7 +129,7 @@ func buildFixedPricingDisplay(pricing Pricing, customerRatio float64) *PricingDi
 			note,
 		))
 	}
-	return &PricingDisplay{Version: PricingDisplayVersion, Rows: rows}
+	return &PricingDisplay{Rows: rows}
 }
 
 func fixedBasePresentation(pricing Pricing, mode string) (item string, unit string, condition string, note string) {
@@ -174,14 +167,14 @@ func parametricRows(dimensions []taskbilling.Dimension) []PricingDisplayRow {
 					note = "默认值"
 				}
 				rows = append(rows, PricingDisplayRow{
-					Kind: "parameter", Item: name, Multiplier: &multiplier, Unit: "multiplier",
+					Item: name, Multiplier: &multiplier, Unit: "multiplier",
 					Condition: fmt.Sprintf("%s = %s", dimension.Name, value), Note: note,
 				})
 			}
 			continue
 		}
 		rows = append(rows, PricingDisplayRow{
-			Kind: "parameter", Item: name, Unit: "dynamic",
+			Item: name, Unit: "dynamic",
 			Condition: fmt.Sprintf("按参数 %s 的数值", dimension.Name), Note: dimensionNote(dimension),
 		})
 	}
@@ -192,7 +185,7 @@ func dimensionNote(dimension taskbilling.Dimension) string {
 	parts := make([]string, 0, 3)
 	isDuration := strings.EqualFold(dimension.Name, "duration") || strings.EqualFold(dimension.Name, "seconds")
 	if dimension.Default != nil {
-		defaultValue := displayNumber(dimension.Default)
+		defaultValue := fmt.Sprint(dimension.Default)
 		if isDuration {
 			defaultValue += " 秒"
 		}
@@ -227,7 +220,7 @@ func dimensionNote(dimension taskbilling.Dimension) string {
 		if isDuration {
 			unitName = "秒"
 		}
-		parts = append(parts, fmt.Sprintf("每 %s %s折算 1 倍", displayNumber(unit), unitName))
+		parts = append(parts, fmt.Sprintf("每 %v %s折算 1 倍", unit, unitName))
 	}
 	return strings.Join(parts, "；")
 }
@@ -251,19 +244,8 @@ func pricingItemName(name string) string {
 	}
 }
 
-func amountRow(kind string, item string, amount float64, unit string, condition string, note string) PricingDisplayRow {
+func amountRow(item string, amount float64, unit string, condition string, note string) PricingDisplayRow {
 	return PricingDisplayRow{
-		Kind: kind, Item: item, AmountUSD: &amount, Unit: unit, Condition: condition, Note: note,
-	}
-}
-
-func displayNumber(value any) string {
-	switch number := value.(type) {
-	case float64:
-		return strconv.FormatFloat(number, 'f', -1, 64)
-	case float32:
-		return strconv.FormatFloat(float64(number), 'f', -1, 32)
-	default:
-		return fmt.Sprint(value)
+		Item: item, AmountUSD: &amount, Unit: unit, Condition: condition, Note: note,
 	}
 }
