@@ -81,6 +81,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.Ability{}))
 
 	resellerA := seedResellerM2(t, db, "Usage Agency A", "usage-a.example.com", model.ResellerRoleOwner, "usage-owner-a", "usage-admin-a", "usage-viewer-a")
+	require.NoError(t, db.Model(&model.Reseller{}).Where("id = ?", resellerA.Id).Update("bank_transfer_enabled", true).Error)
 	resellerB := seedResellerM2(t, db, "Usage Agency B", "usage-b.example.com", model.ResellerRoleOwner, "usage-owner-b", "usage-admin-b", "usage-viewer-b")
 	customerA := seedCustomerM2(t, db, resellerA.Id, "usage-customer-a", model.ResellerCustomerStatusActive)
 	customerC := seedCustomerM2(t, db, resellerA.Id, "usage-customer-c", model.ResellerCustomerStatusActive)

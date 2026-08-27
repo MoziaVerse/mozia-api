@@ -38,7 +38,7 @@ func resellerPermissions(resellerContext *model.ResellerContext) ([]string, bool
 	if resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerAccess {
 		permissions = append(permissions, "reseller:customer_access:write")
 	}
-	if resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerPayment {
+	if resellerContext.PaymentConfigEnabled && (resellerManagementWriteAllowed(resellerContext.Role) || resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerPayment) {
 		permissions = append(permissions, "reseller:customer_payment:write")
 	}
 	return permissions, true

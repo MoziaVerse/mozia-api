@@ -130,6 +130,7 @@ type ResellerContext struct {
 	MemberId                 int    `json:"member_id"`
 	ResellerId               int    `json:"reseller_id"`
 	ResellerName             string `json:"reseller_name"`
+	PaymentConfigEnabled     bool   `json:"payment_config_enabled"`
 	Subject                  string `json:"subject"`
 	Host                     string `json:"host"`
 	Role                     string `json:"role"`
@@ -384,7 +385,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 	if host == configuredResellerSharedHost() {
 		var contexts []ResellerContext
 		err := query.
-			Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rm.role, rm.can_manage_pricing, rm.can_create_invitations, rm.can_manage_customer_access, rm.can_manage_customer_payment").
+			Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, r.bank_transfer_enabled AS payment_config_enabled, rm.subject, rm.role, rm.can_manage_pricing, rm.can_create_invitations, rm.can_manage_customer_access, rm.can_manage_customer_payment").
 			Limit(2).
 			Scan(&contexts).Error
 		if err != nil {
@@ -399,7 +400,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 
 	var context ResellerContext
 	err := query.
-		Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, rm.subject, rd.host, rm.role, rm.can_manage_pricing, rm.can_create_invitations, rm.can_manage_customer_access, rm.can_manage_customer_payment").
+		Select("rm.id AS member_id, r.id AS reseller_id, r.name AS reseller_name, r.bank_transfer_enabled AS payment_config_enabled, rm.subject, rd.host, rm.role, rm.can_manage_pricing, rm.can_create_invitations, rm.can_manage_customer_access, rm.can_manage_customer_payment").
 		Joins("JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
 		Take(&context).Error
 	if err != nil {
@@ -916,6 +917,7 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 			SubagentMemberId:   invitation.SubagentMemberId,
 			SubagentAssignedAt: subagentAssignedAt,
 			Status:             ResellerCustomerStatusActive,
+			UseResellerPayment: new(bool),
 		}
 		if err := tx.Create(&customer).Error; err != nil {
 			if isResellerUniqueConstraintError(err) {
@@ -935,7 +937,7 @@ func ConsumeResellerInvitationRecord(token string, subject string, matrixName st
 				SubagentAssignedAt: customer.SubagentAssignedAt,
 				Status:             customer.Status,
 				JoinedAt:           customer.CreatedAt,
-				UseResellerPayment: true,
+				UseResellerPayment: false,
 			},
 			ResellerId:   invitation.ResellerId,
 			ResellerName: reseller.Name,
@@ -1007,12 +1009,13 @@ func batchAssignResellerCustomerRecord(resellerId int, subject string, matrixNam
 	now := common.GetTimestamp()
 	result := ResellerCustomerBatchAssignResult{Subject: subject}
 	customer := ResellerCustomer{
-		ResellerId:      resellerId,
-		Subject:         subject,
-		MatrixName:      matrixName,
-		Phone:           phone,
-		ProfileSyncedAt: now,
-		Status:          ResellerCustomerStatusActive,
+		ResellerId:         resellerId,
+		Subject:            subject,
+		MatrixName:         matrixName,
+		Phone:              phone,
+		ProfileSyncedAt:    now,
+		Status:             ResellerCustomerStatusActive,
+		UseResellerPayment: new(bool),
 	}
 	if err := DB.Create(&customer).Error; err == nil {
 		customerId := customer.Id
@@ -1182,7 +1185,7 @@ func ResolveResellerCustomerPaymentMethod(subject string) (*ResellerCustomerPaym
 	result := DB.Table("reseller_customers AS customer").
 		Select("reseller.name, reseller.bank_transfer_enabled, reseller.bank_account_name, reseller.bank_account_number, reseller.bank_name").
 		Joins("JOIN resellers AS reseller ON reseller.id = customer.reseller_id AND reseller.status = ?", ResellerStatusActive).
-		Where("customer.subject = ? AND customer.status = ? AND COALESCE(customer.use_reseller_payment, ?) = ?", subject, ResellerCustomerStatusActive, true, true).
+		Where("customer.subject = ? AND customer.status = ? AND COALESCE(customer.use_reseller_payment, ?) = ?", subject, ResellerCustomerStatusActive, false, true).
 		Limit(1).
 		Scan(&reseller)
 	if result.Error != nil {
@@ -1297,7 +1300,7 @@ func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {
 	if trueValue == "" {
 		trueValue, falseValue = "1", "0"
 	}
-	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, customers.subagent_member_id, COALESCE(subagent.name, '') AS subagent_name, customers.subagent_assigned_at, COALESCE(customers.use_reseller_payment, " + trueValue + ") AS use_reseller_payment, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
+	fields := "customers.id, customers.subject, customers.status, customers.created_at AS joined_at, customers.matrix_name, customers.phone, customers.profile_synced_at, customers.subagent_member_id, COALESCE(subagent.name, '') AS subagent_name, customers.subagent_assigned_at, COALESCE(customers.use_reseller_payment, " + falseValue + ") AS use_reseller_payment, COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AS user_id, COALESCE(customer_sso_user.username, customer_oidc_user.username, '') AS username, COALESCE(customer_sso_user.display_name, customer_oidc_user.display_name, '') AS display_name, CASE WHEN COALESCE(" + resellerUserGroupColumn("customer_sso_user") + ", " + resellerUserGroupColumn("customer_oidc_user") + ", '" + resellerCustomerDefaultGroup + "') = '" + resellerCustomerExtGroup + "' THEN " + trueValue + " ELSE " + falseValue + " END AS overseas_model_access, COALESCE(customer_sso_user.quota, customer_oidc_user.quota, 0) AS balance_quota, COALESCE((SELECT SUM(customer_gift.balance) FROM mozia_wallet_balances AS customer_gift WHERE customer_gift.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_gift.source = 'gift'), 0) AS gift_balance_quota, COALESCE((SELECT SUM(customer_paid.balance) FROM mozia_wallet_balances AS customer_paid WHERE customer_paid.user_id = COALESCE(customer_sso_user.id, customer_oidc_user.id, 0) AND customer_paid.source = 'paid'), 0) AS paid_balance_quota, COALESCE(customer_sso_user.request_count, customer_oidc_user.request_count, 0) AS request_count"
 	if includeRemark {
 		fields += ", customers.remark"
 	}

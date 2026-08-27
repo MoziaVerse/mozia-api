@@ -302,6 +302,10 @@ func UpdateResellerManagementSubagentCapabilities(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
+	if *request.CanManageCustomerPayment && !resellerContext.PaymentConfigEnabled {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "custom payment configuration is not enabled")
+		return
+	}
 	record, err := model.UpdateResellerSubagentCapabilities(
 		resellerContext.ResellerId,
 		memberId,
@@ -533,7 +537,7 @@ func UpdateResellerManagementCustomerPaymentPreference(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !resellerManagementWriteAllowed(resellerContext.Role) && !(resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerPayment) {
+	if !resellerContext.PaymentConfigEnabled || (!resellerManagementWriteAllowed(resellerContext.Role) && !(resellerContext.Role == model.ResellerRoleSubagent && resellerContext.CanManageCustomerPayment)) {
 		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller write forbidden")
 		return
 	}

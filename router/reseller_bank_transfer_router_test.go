@@ -21,6 +21,17 @@ func TestResellerBankTransferContract(t *testing.T) {
 	headers := func(subject string) map[string]string {
 		return map[string]string{"X-Reseller-Subject": subject, "X-Reseller-Host": "bank.example.com"}
 	}
+	subagent := model.ResellerMember{ResellerId: reseller.Id, Subject: "bank-subagent", Role: model.ResellerRoleSubagent, Status: model.ResellerMemberStatusActive, CanManageCustomerPayment: true}
+	require.NoError(t, db.Create(&subagent).Error)
+
+	contextRecorder := request(http.MethodPost, "/api/internal/v1/reseller/context", `{"subject":"bank-subagent","host":"bank.example.com"}`, "matrix-reseller-test-token", "bank-subagent-context-disabled_123", nil)
+	contextResponse := decodeM2Envelope(t, contextRecorder)
+	var contextData resellerM2Profile
+	require.NoError(t, common.Unmarshal(contextResponse.RawData, &contextData))
+	assert.NotContains(t, contextData.Permissions, "reseller:customer_payment:write")
+
+	capabilities := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/members/subagents/%d/capabilities", subagent.Id), `{"can_manage_pricing":false,"can_create_invitations":false,"can_manage_customer_access":false,"can_manage_customer_payment":true}`, "matrix-reseller-management-test-token", "bank-subagent-capability-disabled_123", headers("bank-owner"))
+	require.Equal(t, http.StatusForbidden, capabilities.Code)
 
 	for _, subject := range []string{"bank-owner", "bank-admin", "bank-viewer"} {
 		recorder := request(http.MethodPut, "/api/internal/v1/reseller/management/payment/bank-transfer", `{"account_name":"A","account_number":"1","bank_name":"B"}`, "matrix-reseller-management-test-token", "bank-disabled_123", headers(subject))
@@ -32,10 +43,24 @@ func TestResellerBankTransferContract(t *testing.T) {
 	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/payment/bank-transfer", reseller.Id), `{"payment_config_enabled":true,"account_name":"","account_number":"","bank_name":""}`, "mozia-mega-test-token", "bank-enable_123", nil)
 	require.Equal(t, http.StatusOK, recorder.Code)
 
+	defaultPreference := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d", customer.Id), "", "matrix-reseller-management-test-token", "bank-preference-default_123", headers("bank-admin"))
+	response := decodeM2Envelope(t, defaultPreference)
+	require.Equal(t, http.StatusOK, defaultPreference.Code)
+	var defaultCustomer resellerM2Customer
+	require.NoError(t, common.Unmarshal(response.RawData, &defaultCustomer))
+	assert.False(t, defaultCustomer.UseResellerPayment)
+
 	recorder = request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/payment-method", `{"subject":"bank-customer"}`, "matrix-reseller-registration-test-token", "bank-pending_123", nil)
-	response := decodeM2Envelope(t, recorder)
+	response = decodeM2Envelope(t, recorder)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var pending model.ResellerCustomerPaymentMethod
+	require.NoError(t, common.Unmarshal(response.RawData, &pending))
+	assert.Equal(t, "platform", pending.Mode)
+
+	recorder = request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customer.Id), `{"enabled":true}`, "matrix-reseller-management-test-token", "bank-preference-enable-default_123", headers("bank-owner"))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	recorder = request(http.MethodPost, "/api/internal/v1/reseller/registration/customers/payment-method", `{"subject":"bank-customer"}`, "matrix-reseller-registration-test-token", "bank-pending-enabled_123", nil)
+	response = decodeM2Envelope(t, recorder)
 	require.NoError(t, common.Unmarshal(response.RawData, &pending))
 	assert.Equal(t, "bank_transfer", pending.Mode)
 	require.NotNil(t, pending.BankTransfer)
@@ -70,12 +95,11 @@ func TestResellerBankTransferContract(t *testing.T) {
 	assert.False(t, megaConfigured.BankTransfer.Allowed)
 	assert.True(t, megaConfigured.BankTransfer.Configured)
 
-	defaultPreference := request(http.MethodGet, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d", customer.Id), "", "matrix-reseller-management-test-token", "bank-preference-default_123", headers("bank-admin"))
-	response = decodeM2Envelope(t, defaultPreference)
-	require.Equal(t, http.StatusOK, defaultPreference.Code)
-	var defaultCustomer resellerM2Customer
-	require.NoError(t, common.Unmarshal(response.RawData, &defaultCustomer))
-	assert.True(t, defaultCustomer.UseResellerPayment)
+	blockedPreference := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customer.Id), `{"enabled":false}`, "matrix-reseller-management-test-token", "bank-preference-globally-disabled_123", headers("bank-owner"))
+	require.Equal(t, http.StatusForbidden, blockedPreference.Code)
+
+	recorder = request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/payment/bank-transfer", reseller.Id), `{"payment_config_enabled":true,"account_name":"杭州量棱文化有限公司","account_number":"57192390001","bank_name":"招商银行杭州支行"}`, "mozia-mega-test-token", "bank-reenable_123", nil)
+	require.Equal(t, http.StatusOK, recorder.Code)
 
 	viewerPreference := request(http.MethodPatch, fmt.Sprintf("/api/internal/v1/reseller/management/customers/%d/reseller-payment", customer.Id), `{"enabled":false}`, "matrix-reseller-management-test-token", "bank-preference-viewer_123", headers("bank-viewer"))
 	require.Equal(t, http.StatusForbidden, viewerPreference.Code)
