@@ -25,6 +25,9 @@ type resellerAdminItem struct {
 	Host                  string  `json:"host"`
 	Logo                  string  `json:"logo"`
 	Favicon               string  `json:"favicon"`
+	BrandName             string  `json:"brand_name"`
+	IcpFilingNumber       string  `json:"icp_filing_number"`
+	CopyrightText         string  `json:"copyright_text"`
 	OwnerSubject          string  `json:"owner_subject"`
 	OwnerUserId           int     `json:"owner_user_id"`
 	OwnerUsername         string  `json:"owner_username"`
@@ -38,51 +41,33 @@ type resellerAdminItem struct {
 	MemberCount           int     `json:"member_count"`
 }
 
-func TestResellerAdminLogoContract(t *testing.T) {
+func TestResellerAdminPresentationContract(t *testing.T) {
 	_, db, request := setupResellerAdminTest(t)
-	reseller := seedReseller(t, db, "Logo Agency", model.ResellerStatusActive, "logo.example.com", "logo-owner", "logo-viewer")
+	reseller := seedReseller(t, db, "Portal Agency", model.ResellerStatusActive, "portal.example.com", "portal-owner", "portal-viewer")
 	logo := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-
-	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/logo", reseller.Id), fmt.Sprintf(`{"logo":%q}`, logo), "mozia-mega-test-token", "admin-logo_123")
-	require.Equal(t, http.StatusOK, recorder.Code)
-
-	list := request(http.MethodGet, "/api/internal/v1/platform/resellers", "", "mozia-mega-test-token", "admin-logo-list_123")
-	var response resellerAdminListResponse
-	require.NoError(t, common.Unmarshal(list.Body.Bytes(), &response))
-	require.Len(t, response.Data, 1)
-	assert.Equal(t, logo, response.Data[0].Logo)
-
-	presentationRecorder := request(http.MethodPost, "/api/internal/v1/reseller/presentation", `{"host":"logo.example.com"}`, "matrix-reseller-test-token", "presentation_123")
-	var presentationEnvelope resellerM2Envelope
-	require.NoError(t, common.Unmarshal(presentationRecorder.Body.Bytes(), &presentationEnvelope))
-	require.Equal(t, http.StatusOK, presentationRecorder.Code)
-	var presentation model.ResellerPresentation
-	require.NoError(t, common.Unmarshal(presentationEnvelope.RawData, &presentation))
-	assert.Equal(t, reseller.Id, presentation.ResellerId)
-	assert.Equal(t, logo, presentation.Logo)
-}
-
-func TestResellerAdminFaviconContract(t *testing.T) {
-	_, db, request := setupResellerAdminTest(t)
-	reseller := seedReseller(t, db, "Favicon Agency", model.ResellerStatusActive, "favicon.example.com", "favicon-owner", "favicon-viewer")
 	favicon := "data:image/x-icon;base64,AAABAAEAEAAAAQAgAA=="
+	body := fmt.Sprintf(`{"brand_name":"杭电智算平台","logo":%q,"favicon":%q,"icp_filing_number":"浙ICP备12345678号-1","copyright_text":"© 杭州电子科技大学"}`, logo, favicon)
 
-	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/favicon", reseller.Id), fmt.Sprintf(`{"favicon":%q}`, favicon), "mozia-mega-test-token", "admin-favicon_123")
+	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/presentation", reseller.Id), body, "mozia-mega-test-token", "admin-presentation_123")
 	require.Equal(t, http.StatusOK, recorder.Code)
 
-	list := request(http.MethodGet, "/api/internal/v1/platform/resellers", "", "mozia-mega-test-token", "admin-favicon-list_123")
+	list := request(http.MethodGet, "/api/internal/v1/platform/resellers", "", "mozia-mega-test-token", "admin-presentation-list_123")
 	var response resellerAdminListResponse
 	require.NoError(t, common.Unmarshal(list.Body.Bytes(), &response))
 	require.Len(t, response.Data, 1)
-	assert.Equal(t, favicon, response.Data[0].Favicon)
+	assert.Equal(t, "杭电智算平台", response.Data[0].BrandName)
+	assert.Equal(t, "浙ICP备12345678号-1", response.Data[0].IcpFilingNumber)
+	assert.Equal(t, "© 杭州电子科技大学", response.Data[0].CopyrightText)
 
-	presentationRecorder := request(http.MethodPost, "/api/internal/v1/reseller/presentation", `{"host":"favicon.example.com"}`, "matrix-reseller-test-token", "favicon-presentation_123")
+	presentationRecorder := request(http.MethodPost, "/api/internal/v1/reseller/presentation", `{"host":"portal.example.com"}`, "matrix-reseller-test-token", "admin-presentation-resolve_123")
+	require.Equal(t, http.StatusOK, presentationRecorder.Code)
 	var presentationEnvelope resellerM2Envelope
 	require.NoError(t, common.Unmarshal(presentationRecorder.Body.Bytes(), &presentationEnvelope))
-	require.Equal(t, http.StatusOK, presentationRecorder.Code)
 	var presentation model.ResellerPresentation
 	require.NoError(t, common.Unmarshal(presentationEnvelope.RawData, &presentation))
-	assert.Equal(t, favicon, presentation.Favicon)
+	assert.Equal(t, "杭电智算平台", presentation.BrandName)
+	assert.Equal(t, "浙ICP备12345678号-1", presentation.IcpFilingNumber)
+	assert.Equal(t, "© 杭州电子科技大学", presentation.CopyrightText)
 }
 
 type resellerAdminListResponse struct {

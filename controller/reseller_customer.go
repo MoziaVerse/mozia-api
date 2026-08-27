@@ -130,15 +130,18 @@ func GetResellerManagementProfile(c *gin.Context) {
 		return
 	}
 	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
-		"reseller_id":   resellerContext.ResellerId,
-		"reseller_name": resellerContext.ResellerName,
-		"host":          resellerContext.Host,
-		"subject":       resellerContext.Subject,
-		"role":          resellerContext.Role,
-		"permissions":   permissions,
-		"logo":          branding.Logo,
-		"favicon":       branding.Favicon,
-		"bank_transfer": bankTransfer,
+		"reseller_id":       resellerContext.ResellerId,
+		"reseller_name":     resellerContext.ResellerName,
+		"host":              resellerContext.Host,
+		"subject":           resellerContext.Subject,
+		"role":              resellerContext.Role,
+		"permissions":       permissions,
+		"logo":              branding.Logo,
+		"favicon":           branding.Favicon,
+		"brand_name":        branding.BrandName,
+		"icp_filing_number": branding.IcpFilingNumber,
+		"copyright_text":    branding.CopyrightText,
+		"bank_transfer":     bankTransfer,
 	})
 }
 
