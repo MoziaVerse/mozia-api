@@ -4,6 +4,7 @@ import (
 	crand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"net/http"
 	"os"
@@ -201,9 +202,10 @@ const resellerLogoMaxBytes = 256 << 10
 
 func NormalizeResellerLogo(raw string) (string, error) {
 	return normalizeResellerImage(raw, map[string]string{
-		"data:image/jpeg;base64,": "image/jpeg",
-		"data:image/png;base64,":  "image/png",
-		"data:image/webp;base64,": "image/webp",
+		"data:image/jpeg;base64,":    "image/jpeg",
+		"data:image/png;base64,":     "image/png",
+		"data:image/svg+xml;base64,": "image/svg+xml",
+		"data:image/webp;base64,":    "image/webp",
 	}, ErrInvalidResellerLogo)
 }
 
@@ -224,13 +226,27 @@ func normalizeResellerImage(raw string, prefixes map[string]string, invalid erro
 			continue
 		}
 		data, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(raw, prefix))
-		if err != nil || len(data) == 0 || len(data) > resellerLogoMaxBytes || http.DetectContentType(data) != mediaType {
+		if err != nil || len(data) == 0 || len(data) > resellerLogoMaxBytes {
+			return "", invalid
+		}
+		if mediaType == "image/svg+xml" {
+			if !isSafeResellerSVG(data) {
+				return "", invalid
+			}
+		} else if http.DetectContentType(data) != mediaType {
 			return "", invalid
 		}
 		// ponytail: inline brand assets keep deployment storage-free; move to object storage when list payload size matters.
 		return prefix + base64.StdEncoding.EncodeToString(data), nil
 	}
 	return "", invalid
+}
+
+func isSafeResellerSVG(data []byte) bool {
+	var document struct {
+		XMLName xml.Name
+	}
+	return xml.Unmarshal(data, &document) == nil && strings.EqualFold(document.XMLName.Local, "svg")
 }
 
 type ResellerMemberRecord struct {
