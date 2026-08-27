@@ -62,6 +62,12 @@ func TestGetPricingCanIncludeInaccessibleMoziaWalletModels(t *testing.T) {
 		ChannelId: 1,
 		Enabled:   true,
 	}).Error)
+	require.NoError(t, db.Create(&model.Model{
+		ModelName: "paid-only-catalog-model",
+		Tags:      "category:video,视频",
+		Status:    1,
+		NameRule:  model.NameRuleExact,
+	}).Error)
 	require.NoError(t, model.CreateMoziaModelQuotaPolicy(&model.MoziaModelQuotaPolicy{
 		ModelPattern:   "paid-only-catalog-model",
 		MatchType:      model.MoziaQuotaPolicyMatchExact,
@@ -90,6 +96,7 @@ func TestGetPricingCanIncludeInaccessibleMoziaWalletModels(t *testing.T) {
 	pricingByName := pricingByModelName(decodePricingResponse(t, catalogRecorder))
 	item, ok := pricingByName["paid-only-catalog-model"]
 	require.True(t, ok)
+	assert.Equal(t, "video", item.ModelCategory)
 	require.NotNil(t, item.Access)
 	assert.False(t, item.Access.Available)
 	assert.Equal(t, model.MoziaPricingAccessReasonRequiresPaidQuota, item.Access.Reason)

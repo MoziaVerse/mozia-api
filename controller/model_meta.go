@@ -88,6 +88,11 @@ func CreateModelMeta(c *gin.Context) {
 		common.ApiErrorMsg(c, "模型名称不能为空")
 		return
 	}
+	_, err := model.RequiredModelCategoryFromTags(m.Tags)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	// 名称冲突检查
 	if dup, err := model.IsModelNameDuplicated(0, m.ModelName); err != nil {
 		common.ApiError(c, err)
@@ -126,6 +131,11 @@ func UpdateModelMeta(c *gin.Context) {
 			return
 		}
 	} else {
+		_, err := model.RequiredModelCategoryFromTags(m.Tags)
+		if err != nil {
+			common.ApiErrorMsg(c, err.Error())
+			return
+		}
 		// 名称冲突检查
 		if dup, err := model.IsModelNameDuplicated(m.Id, m.ModelName); err != nil {
 			common.ApiError(c, err)
