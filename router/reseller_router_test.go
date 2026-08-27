@@ -26,6 +26,7 @@ type resellerContextTestResponse struct {
 		Role         string   `json:"role"`
 		Permissions  []string `json:"permissions"`
 		Logo         string   `json:"logo"`
+		Favicon      string   `json:"favicon"`
 	} `json:"data"`
 	Error struct {
 		Code    string `json:"code"`
@@ -65,8 +66,9 @@ func TestResellerContextContract(t *testing.T) {
 		{ResellerId: resellerB.Id, Subject: "oidc-owner-b", Role: model.ResellerRoleOwner, Status: model.ResellerMemberStatusActive},
 	}).Error)
 	resellerA.Logo = "data:image/png;base64,aGR1"
+	resellerA.Favicon = "data:image/x-icon;base64,aGR1"
 	matrixHost := "matrix.hdu.edu.cn"
-	require.NoError(t, db.Model(&resellerA).Updates(map[string]any{"logo": resellerA.Logo, "matrix_host": matrixHost}).Error)
+	require.NoError(t, db.Model(&resellerA).Updates(map[string]any{"logo": resellerA.Logo, "favicon": resellerA.Favicon, "matrix_host": matrixHost}).Error)
 
 	engine := gin.New()
 	engine.Use(middleware.RequestId())
@@ -119,6 +121,7 @@ func TestResellerContextContract(t *testing.T) {
 		assert.Equal(t, "Agency A", response.Data.ResellerName)
 		assert.Equal(t, "matrix.hdu.edu.cn", response.Data.Host)
 		assert.Equal(t, resellerA.Logo, response.Data.Logo)
+		assert.Equal(t, resellerA.Favicon, response.Data.Favicon)
 	})
 
 	t.Run("rejects forged reseller id", func(t *testing.T) {

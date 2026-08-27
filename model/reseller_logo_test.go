@@ -21,3 +21,17 @@ func TestNormalizeResellerLogo(t *testing.T) {
 	_, err = NormalizeResellerLogo("data:image/png;base64," + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x89}, resellerLogoMaxBytes+1)))
 	assert.ErrorIs(t, err, ErrInvalidResellerLogo)
 }
+
+func TestNormalizeResellerFavicon(t *testing.T) {
+	ico := []byte{0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0}
+	favicon := "data:image/x-icon;base64," + base64.StdEncoding.EncodeToString(ico)
+	normalized, err := NormalizeResellerFavicon(favicon)
+	require.NoError(t, err)
+	assert.Equal(t, favicon, normalized)
+
+	_, err = NormalizeResellerFavicon("data:image/x-icon;base64," + base64.StdEncoding.EncodeToString([]byte("not an icon")))
+	assert.ErrorIs(t, err, ErrInvalidResellerFavicon)
+
+	_, err = NormalizeResellerFavicon("data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte("<svg/>")))
+	assert.ErrorIs(t, err, ErrInvalidResellerFavicon)
+}

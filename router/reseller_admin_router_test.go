@@ -24,6 +24,7 @@ type resellerAdminItem struct {
 	Status                string  `json:"status"`
 	Host                  string  `json:"host"`
 	Logo                  string  `json:"logo"`
+	Favicon               string  `json:"favicon"`
 	OwnerSubject          string  `json:"owner_subject"`
 	OwnerUserId           int     `json:"owner_user_id"`
 	OwnerUsername         string  `json:"owner_username"`
@@ -59,6 +60,29 @@ func TestResellerAdminLogoContract(t *testing.T) {
 	require.NoError(t, common.Unmarshal(presentationEnvelope.RawData, &presentation))
 	assert.Equal(t, reseller.Id, presentation.ResellerId)
 	assert.Equal(t, logo, presentation.Logo)
+}
+
+func TestResellerAdminFaviconContract(t *testing.T) {
+	_, db, request := setupResellerAdminTest(t)
+	reseller := seedReseller(t, db, "Favicon Agency", model.ResellerStatusActive, "favicon.example.com", "favicon-owner", "favicon-viewer")
+	favicon := "data:image/x-icon;base64,AAABAAEAEAAAAQAgAA=="
+
+	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/favicon", reseller.Id), fmt.Sprintf(`{"favicon":%q}`, favicon), "mozia-mega-test-token", "admin-favicon_123")
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	list := request(http.MethodGet, "/api/internal/v1/platform/resellers", "", "mozia-mega-test-token", "admin-favicon-list_123")
+	var response resellerAdminListResponse
+	require.NoError(t, common.Unmarshal(list.Body.Bytes(), &response))
+	require.Len(t, response.Data, 1)
+	assert.Equal(t, favicon, response.Data[0].Favicon)
+
+	presentationRecorder := request(http.MethodPost, "/api/internal/v1/reseller/presentation", `{"host":"favicon.example.com"}`, "matrix-reseller-test-token", "favicon-presentation_123")
+	var presentationEnvelope resellerM2Envelope
+	require.NoError(t, common.Unmarshal(presentationRecorder.Body.Bytes(), &presentationEnvelope))
+	require.Equal(t, http.StatusOK, presentationRecorder.Code)
+	var presentation model.ResellerPresentation
+	require.NoError(t, common.Unmarshal(presentationEnvelope.RawData, &presentation))
+	assert.Equal(t, favicon, presentation.Favicon)
 }
 
 type resellerAdminListResponse struct {

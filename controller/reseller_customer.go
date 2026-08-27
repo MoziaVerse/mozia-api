@@ -53,6 +53,10 @@ type resellerLogoRequest struct {
 	Logo *string `json:"logo"`
 }
 
+type resellerFaviconRequest struct {
+	Favicon *string `json:"favicon"`
+}
+
 func resellerBooleanField(body []byte, field string) (bool, bool) {
 	var fields map[string]json.RawMessage
 	if common.Unmarshal(body, &fields) != nil || len(fields) != 1 {
@@ -133,6 +137,7 @@ func GetResellerManagementProfile(c *gin.Context) {
 		"role":          resellerContext.Role,
 		"permissions":   permissions,
 		"logo":          branding.Logo,
+		"favicon":       branding.Favicon,
 		"bank_transfer": bankTransfer,
 	})
 }
@@ -222,6 +227,36 @@ func UpdateResellerManagementLogo(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid reseller logo")
 	default:
 		logger.LogError(c.Request.Context(), "UpdateResellerLogo database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func UpdateResellerManagementFavicon(c *gin.Context) {
+	resellerContext, ok := resellerManagementContext(c)
+	if !ok {
+		return
+	}
+	if resellerContext.Role != model.ResellerRoleOwner {
+		middleware.AbortResellerRequest(c, http.StatusForbidden, middleware.ResellerErrorForbidden, "reseller owner access required")
+		return
+	}
+	body, ok := resellerRequestBody(c, resellerLogoBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerFaviconRequest
+	if common.Unmarshal(body, &request) != nil || request.Favicon == nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	branding, err := model.UpdateResellerFavicon(resellerContext.ResellerId, *request.Favicon)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, branding)
+	case errors.Is(err, model.ErrInvalidResellerFavicon):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid reseller favicon")
+	default:
+		logger.LogError(c.Request.Context(), "UpdateResellerFavicon database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }
