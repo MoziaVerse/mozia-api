@@ -161,6 +161,11 @@ func TestGetPricingProjectsRetailWithoutLeakingResellerMetadataOrMutatingCache(t
 	assert.InDelta(t, 3.0, projected["m3-tiered-model"].ModelRatio, 0.000001)
 	assert.True(t, strings.HasPrefix(projected["m3-tiered-model"].BillingExpr, "v1:"))
 	assert.True(t, strings.Contains(projected["m3-tiered-model"].BillingExpr, ") * 1.5|||"))
+	require.NotNil(t, projected["m3-ratio-model"].DisplayPricing)
+	require.NotEmpty(t, projected["m3-ratio-model"].DisplayPricing.Rows)
+	assert.InDelta(t, 6, *projected["m3-ratio-model"].DisplayPricing.Rows[0].AmountUSD, 0.000001)
+	require.NotNil(t, projected["m3-tiered-model"].DisplayPricing)
+	assert.Equal(t, "dynamic", projected["m3-tiered-model"].DisplayPricing.Rows[0].Kind)
 
 	body := recorder.Body.String()
 	for _, forbidden := range []string{`"wholesale`, `"retail_multiplier"`, `"reseller_id"`, `"customer_id"`, `"rule_id"`, `"settlement"`} {
@@ -170,4 +175,5 @@ func TestGetPricingProjectsRetailWithoutLeakingResellerMetadataOrMutatingCache(t
 	assert.Equal(t, globalBefore["m3-ratio-model"].ModelRatio, globalAfter["m3-ratio-model"].ModelRatio)
 	assert.Equal(t, globalBefore["m3-price-model"].ModelPrice, globalAfter["m3-price-model"].ModelPrice)
 	assert.Equal(t, globalBefore["m3-tiered-model"].BillingExpr, globalAfter["m3-tiered-model"].BillingExpr)
+	assert.Nil(t, globalAfter["m3-ratio-model"].DisplayPricing)
 }

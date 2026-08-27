@@ -541,10 +541,14 @@ func ProjectResellerCustomerPricing(userId int, pricing []Pricing) ([]Pricing, b
 		} else if rule := latest[scopeKey{modelName: projected[i].ModelName, customerId: 0}]; rule != nil {
 			multiplierPPM = rule.MultiplierPPM
 		}
+		multiplier := float64(multiplierPPM) / float64(ResellerDefaultMultiplierPPM)
+		if projected[i].customerPriceMultiplier <= 0 {
+			projected[i].customerPriceMultiplier = 1
+		}
+		projected[i].customerPriceMultiplier *= multiplier
 		if multiplierPPM == ResellerDefaultMultiplierPPM {
 			continue
 		}
-		multiplier := float64(multiplierPPM) / float64(ResellerDefaultMultiplierPPM)
 		if projected[i].QuotaType == 1 {
 			projected[i].ModelPrice *= multiplier
 		} else {
