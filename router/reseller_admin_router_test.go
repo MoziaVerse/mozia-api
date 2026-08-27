@@ -19,26 +19,27 @@ import (
 )
 
 type resellerAdminItem struct {
-	Id                    int     `json:"id"`
-	Name                  string  `json:"name"`
-	Status                string  `json:"status"`
-	Host                  string  `json:"host"`
-	Logo                  string  `json:"logo"`
-	Favicon               string  `json:"favicon"`
-	BrandName             string  `json:"brand_name"`
-	IcpFilingNumber       string  `json:"icp_filing_number"`
-	CopyrightText         string  `json:"copyright_text"`
-	OwnerSubject          string  `json:"owner_subject"`
-	OwnerUserId           int     `json:"owner_user_id"`
-	OwnerUsername         string  `json:"owner_username"`
-	OwnerDisplayName      string  `json:"owner_display_name"`
-	OwnerBalance          float64 `json:"owner_balance"`
-	OwnerGiftBalance      float64 `json:"owner_gift_balance"`
-	OwnerPaidBalance      float64 `json:"owner_paid_balance"`
-	OwnerRequestCount     int     `json:"owner_request_count"`
-	BalanceDisplayType    string  `json:"balance_display_type"`
-	BalanceCurrencySymbol string  `json:"balance_currency_symbol"`
-	MemberCount           int     `json:"member_count"`
+	Id                         int     `json:"id"`
+	Name                       string  `json:"name"`
+	Status                     string  `json:"status"`
+	Host                       string  `json:"host"`
+	Logo                       string  `json:"logo"`
+	Favicon                    string  `json:"favicon"`
+	BrandName                  string  `json:"brand_name"`
+	IcpFilingNumber            string  `json:"icp_filing_number"`
+	PublicSecurityFilingNumber string  `json:"public_security_filing_number"`
+	CopyrightText              string  `json:"copyright_text"`
+	OwnerSubject               string  `json:"owner_subject"`
+	OwnerUserId                int     `json:"owner_user_id"`
+	OwnerUsername              string  `json:"owner_username"`
+	OwnerDisplayName           string  `json:"owner_display_name"`
+	OwnerBalance               float64 `json:"owner_balance"`
+	OwnerGiftBalance           float64 `json:"owner_gift_balance"`
+	OwnerPaidBalance           float64 `json:"owner_paid_balance"`
+	OwnerRequestCount          int     `json:"owner_request_count"`
+	BalanceDisplayType         string  `json:"balance_display_type"`
+	BalanceCurrencySymbol      string  `json:"balance_currency_symbol"`
+	MemberCount                int     `json:"member_count"`
 }
 
 func TestResellerAdminPresentationContract(t *testing.T) {
@@ -46,7 +47,7 @@ func TestResellerAdminPresentationContract(t *testing.T) {
 	reseller := seedReseller(t, db, "Portal Agency", model.ResellerStatusActive, "portal.example.com", "portal-owner", "portal-viewer")
 	logo := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 	favicon := "data:image/x-icon;base64,AAABAAEAEAAAAQAgAA=="
-	body := fmt.Sprintf(`{"brand_name":"杭电智算平台","logo":%q,"favicon":%q,"icp_filing_number":"浙ICP备12345678号-1","copyright_text":"© 杭州电子科技大学"}`, logo, favicon)
+	body := fmt.Sprintf(`{"brand_name":"杭电智算平台","logo":%q,"favicon":%q,"icp_filing_number":"浙ICP备12345678号-1","public_security_filing_number":"浙公网安备33010000000001号","copyright_text":"© 杭州电子科技大学"}`, logo, favicon)
 
 	recorder := request(http.MethodPut, fmt.Sprintf("/api/internal/v1/platform/resellers/%d/presentation", reseller.Id), body, "mozia-mega-test-token", "admin-presentation_123")
 	require.Equal(t, http.StatusOK, recorder.Code)
@@ -57,6 +58,7 @@ func TestResellerAdminPresentationContract(t *testing.T) {
 	require.Len(t, response.Data, 1)
 	assert.Equal(t, "杭电智算平台", response.Data[0].BrandName)
 	assert.Equal(t, "浙ICP备12345678号-1", response.Data[0].IcpFilingNumber)
+	assert.Equal(t, "浙公网安备33010000000001号", response.Data[0].PublicSecurityFilingNumber)
 	assert.Equal(t, "© 杭州电子科技大学", response.Data[0].CopyrightText)
 
 	presentationRecorder := request(http.MethodPost, "/api/internal/v1/reseller/presentation", `{"host":"portal.example.com"}`, "matrix-reseller-test-token", "admin-presentation-resolve_123")
@@ -67,6 +69,7 @@ func TestResellerAdminPresentationContract(t *testing.T) {
 	require.NoError(t, common.Unmarshal(presentationEnvelope.RawData, &presentation))
 	assert.Equal(t, "杭电智算平台", presentation.BrandName)
 	assert.Equal(t, "浙ICP备12345678号-1", presentation.IcpFilingNumber)
+	assert.Equal(t, "浙公网安备33010000000001号", presentation.PublicSecurityFilingNumber)
 	assert.Equal(t, "© 杭州电子科技大学", presentation.CopyrightText)
 }
 
