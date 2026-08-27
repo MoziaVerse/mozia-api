@@ -1038,6 +1038,7 @@
     "启用请求透传": "Activer la transmission de la requête",
     "启用违规扣费": "Activer la déduction de violation",
     "启用额度消费日志记录": "Activer la journalisation de la consommation de quota",
+    "请求体": "Corps de la requête",
     "启用验证": "Activer l'authentification",
     "周": "semaine",
     "命中判定：usage 中存在 cached tokens（例如 cached_tokens/prompt_cache_hit_tokens）即视为命中。": "Détermination de hit : La présence de cached tokens dans usage (ex. cached_tokens/prompt_cache_hit_tokens) est considérée comme un hit.",

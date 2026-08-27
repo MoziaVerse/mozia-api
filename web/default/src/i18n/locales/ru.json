@@ -3776,6 +3776,7 @@
     "Request Body Disk Cache": "Дисковый кэш тела запроса",
     "Request Body Field": "Поле тела запроса",
     "Request Body Memory Cache": "Кэш памяти тела запроса",
+    "Request Body": "Тело запроса",
     "Request body pass-through is enabled. The request body will be sent directly to the upstream without any conversion.": "Проброс тела запроса включён. Тело запроса будет отправлено напрямую без конвертации.",
     "Request conversion": "Преобразование запроса",
     "Request Conversion": "Конвертация запроса",

@@ -3776,6 +3776,7 @@
     "Request Body Disk Cache": "リクエストボディのディスクキャッシュ",
     "Request Body Field": "リクエストボディフィールド",
     "Request Body Memory Cache": "リクエストボディのメモリキャッシュ",
+    "Request Body": "リクエストボディ",
     "Request body pass-through is enabled. The request body will be sent directly to the upstream without any conversion.": "リクエストボディのパススルーが有効です。リクエストボディは変換なしで直接アップストリームに送信されます。",
     "Request conversion": "リクエスト変換",
     "Request Conversion": "リクエスト変換",

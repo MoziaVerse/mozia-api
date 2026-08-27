@@ -1015,6 +1015,7 @@
     "启用请求透传": "启用请求透传",
     "启用违规扣费": "启用违规扣费",
     "启用额度消费日志记录": "启用额度消费日志记录",
+    "请求体": "请求体",
     "启用验证": "启用验证",
     "周": "周",
     "命中判定：usage 中存在 cached tokens（例如 cached_tokens/prompt_cache_hit_tokens）即视为命中。": "命中判定：usage 中存在 cached tokens（例如 cached_tokens/prompt_cache_hit_tokens）即视为命中。",
