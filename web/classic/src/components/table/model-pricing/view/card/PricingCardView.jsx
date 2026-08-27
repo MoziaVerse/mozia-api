@@ -177,7 +177,11 @@ const PricingCardView = ({
     // 自定义标签（右边）
     const customTags = [];
     if (record.tags) {
-      const tagArr = record.tags.split(',').filter(Boolean);
+      const tagArr = record.tags
+        .split(',')
+        .filter(
+          (tag) => tag && !tag.trim().toLowerCase().startsWith('category:'),
+        );
       tagArr.forEach((tg, idx) => {
         customTags.push(
           <Tag

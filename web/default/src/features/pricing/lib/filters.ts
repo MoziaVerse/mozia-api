@@ -165,7 +165,7 @@ export function parseTags(tagsString?: string): string[] {
   return tagsString
     .split(/[,;|\s]+/)
     .map((t) => t.trim())
-    .filter(Boolean)
+    .filter((tag) => tag && !tag.toLowerCase().startsWith('category:'))
 }
 
 /**
@@ -183,7 +183,7 @@ export function extractAllTags(models: PricingModel[]): string[] {
     }
   })
 
-  return Array.from(tagSet).sort((a, b) => a.localeCompare(b))
+  return [...tagSet].sort((a, b) => a.localeCompare(b))
 }
 
 /**

@@ -47,7 +47,12 @@ const ModelBasicInfo = ({ modelData, vendorsMap = {}, t }) => {
     const tags = [];
 
     if (modelData?.tags) {
-      const customTags = modelData.tags.split(',').filter((tag) => tag.trim());
+      const customTags = modelData.tags
+        .split(',')
+        .filter(
+          (tag) =>
+            tag.trim() && !tag.trim().toLowerCase().startsWith('category:'),
+        );
       customTags.forEach((tag) => {
         const tagText = tag.trim();
         tags.push({ text: tagText, color: stringToColor(tagText) });
