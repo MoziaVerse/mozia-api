@@ -1,32 +1,65 @@
-version: '3.4'
+x-mozia-api-environment: &mozia-api-environment
+  SQL_DSN: ${SQL_DSN:?set SQL_DSN in .env; never commit real database credentials}
+  REDIS_CONN_STRING: redis://redis
+  SQL_MAX_OPEN_CONNS: ${SQL_MAX_OPEN_CONNS:-35}
+  SQL_MAX_IDLE_CONNS: ${SQL_MAX_IDLE_CONNS:-20}
+  SQL_MAX_LIFETIME: ${SQL_MAX_LIFETIME:-300}
+  REDIS_POOL_SIZE: ${REDIS_POOL_SIZE:-100}
+  TZ: Asia/Shanghai
+  ERROR_LOG_ENABLED: "true"
+
+x-mozia-api-service: &mozia-api-service
+  image: mozia-api
+  build: .
+  restart: always
+  command: --log-dir /app/logs
+  env_file:
+    - .env
+  ulimits:
+    nofile:
+      soft: 524288
+      hard: 524288
+  depends_on:
+    - redis
+  networks:
+    - mozia-api-network
+    - postgres_db_internal
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  healthcheck:
+    test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/status"]
+    interval: 10s
+    timeout: 3s
+    retries: 3
+    start_period: 30s
 
 services:
   mozia-api:
-    image: mozia-api
+    <<: *mozia-api-service
     container_name: mozia-api
-    build: .
-    restart: always
-    command: --log-dir /app/logs
     ports:
       - "${MOZIA_API_BIND_LOCAL:-127.0.0.1:3369}:3000"
       - "${MOZIA_API_BIND_INTERNAL:?set MOZIA_API_BIND_INTERNAL in .env, for example 172.16.x.x:3369}:3000"
     volumes:
       - ./data:/data
       - ./logs:/app/logs
-    env_file:
-      - .env
     environment:
-      - SQL_DSN=${SQL_DSN:?set SQL_DSN in .env; never commit real database credentials}
-      - REDIS_CONN_STRING=redis://redis
-      - TZ=Asia/Shanghai
-      - ERROR_LOG_ENABLED=true
-    depends_on:
-      - redis
-    networks:
-      - mozia-api-network
-      - postgres_db_internal
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      <<: *mozia-api-environment
+      NODE_NAME: mozia-api-primary
+
+  mozia-api-replica:
+    <<: *mozia-api-service
+    container_name: mozia-api-replica
+    ports:
+      - "${MOZIA_API_REPLICA_BIND_LOCAL:-127.0.0.1:3371}:3000"
+      - "${MOZIA_API_REPLICA_BIND_INTERNAL:?set MOZIA_API_REPLICA_BIND_INTERNAL in .env, for example 172.16.x.x:3371}:3000"
+    volumes:
+      - ./data:/data
+      - ./logs/replica:/app/logs
+    environment:
+      <<: *mozia-api-environment
+      NODE_NAME: mozia-api-replica
+      NODE_TYPE: slave
 
   redis:
     image: redis:latest

@@ -10,6 +10,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -244,12 +245,12 @@ func ensureMoziaWalletBalanceTx(tx *gorm.DB, userId int, source string) error {
 }
 
 func getMoziaWalletBalanceTx(tx *gorm.DB, userId int, source string) (int, error) {
-	var balance int
-	err := tx.Model(&MoziaWalletBalance{}).
+	var balance MoziaWalletBalance
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 		Where("user_id = ? AND source = ?", userId, source).
 		Select("balance").
-		Scan(&balance).Error
-	return balance, err
+		Take(&balance).Error
+	return balance.Balance, err
 }
 
 func createMoziaWalletTransactionTx(tx *gorm.DB, input MoziaWalletGrantInput, delta int, balanceAfter int) error {
@@ -291,6 +292,10 @@ func grantMoziaWalletQuotaTx(tx *gorm.DB, input MoziaWalletGrantInput, mirrorUse
 	if err := ensureMoziaWalletBalanceTx(tx, input.UserId, source); err != nil {
 		return 0, err
 	}
+	balanceBefore, err := getMoziaWalletBalanceTx(tx, input.UserId, source)
+	if err != nil {
+		return 0, err
+	}
 	now := common.GetTimestamp()
 	if err := tx.Model(&MoziaWalletBalance{}).
 		Where("user_id = ? AND source = ?", input.UserId, source).
@@ -300,10 +305,7 @@ func grantMoziaWalletQuotaTx(tx *gorm.DB, input MoziaWalletGrantInput, mirrorUse
 		}).Error; err != nil {
 		return 0, err
 	}
-	balanceAfter, err := getMoziaWalletBalanceTx(tx, input.UserId, source)
-	if err != nil {
-		return 0, err
-	}
+	balanceAfter := balanceBefore + input.Amount
 	if err := createMoziaWalletTransactionTx(tx, input, input.Amount, balanceAfter); err != nil {
 		return 0, err
 	}
@@ -533,10 +535,7 @@ func AdjustMoziaWalletBalance(input MoziaWalletAdjustInput) (*MoziaWalletView, e
 		if res.RowsAffected == 0 {
 			return ErrMoziaWalletInsufficient
 		}
-		balanceAfter, err := getMoziaWalletBalanceTx(tx, input.UserId, source)
-		if err != nil {
-			return err
-		}
+		balanceAfter := currentBalance + delta
 		amount := delta
 		if amount < 0 {
 			amount = -amount
@@ -911,7 +910,9 @@ func RefundMoziaWalletReservation(requestId string, userId int) error {
 	var refundTotal int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var reservation MoziaWalletReservation
-		if err := tx.Where("request_id = ? AND user_id = ?", requestId, userId).First(&reservation).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("request_id = ? AND user_id = ?", requestId, userId).
+			First(&reservation).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return nil
 			}
@@ -949,7 +950,9 @@ func settleMoziaWalletReservationWithDeltaTx(tx *gorm.DB, requestId string, user
 		return 0, 0, errors.New("request id is empty")
 	}
 	var existing MoziaWalletReservation
-	err := tx.Where("request_id = ? AND user_id = ?", requestId, userId).First(&existing).Error
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("request_id = ? AND user_id = ?", requestId, userId).
+		First(&existing).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if actualQuota <= 0 {
@@ -1070,10 +1073,7 @@ func allocateMoziaWalletSourcesTx(tx *gorm.DB, reservation *MoziaWalletReservati
 		if res.RowsAffected == 0 {
 			return fmt.Errorf("%w: concurrent balance update", ErrMoziaWalletInsufficient)
 		}
-		balanceAfter, err := getMoziaWalletBalanceTx(tx, reservation.UserId, source)
-		if err != nil {
-			return err
-		}
+		balanceAfter := balance - use
 		if err := createMoziaWalletTransactionTx(tx, MoziaWalletGrantInput{
 			UserId:        reservation.UserId,
 			Source:        source,
@@ -1123,6 +1123,10 @@ func refundMoziaWalletSourcesTx(tx *gorm.DB, reservation *MoziaWalletReservation
 		if err := ensureMoziaWalletBalanceTx(tx, reservation.UserId, source); err != nil {
 			return err
 		}
+		balance, err := getMoziaWalletBalanceTx(tx, reservation.UserId, source)
+		if err != nil {
+			return err
+		}
 		if err := tx.Model(&MoziaWalletBalance{}).
 			Where("user_id = ? AND source = ?", reservation.UserId, source).
 			Updates(map[string]interface{}{
@@ -1131,10 +1135,7 @@ func refundMoziaWalletSourcesTx(tx *gorm.DB, reservation *MoziaWalletReservation
 			}).Error; err != nil {
 			return err
 		}
-		balanceAfter, err := getMoziaWalletBalanceTx(tx, reservation.UserId, source)
-		if err != nil {
-			return err
-		}
+		balanceAfter := balance + use
 		if err := createMoziaWalletTransactionTx(tx, MoziaWalletGrantInput{
 			UserId:        reservation.UserId,
 			Source:        source,
