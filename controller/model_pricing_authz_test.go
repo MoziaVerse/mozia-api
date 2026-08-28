@@ -40,6 +40,8 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 		"ModelPrice":                   `{ "gpt-test": 1 }`,
 		"VideoInputRatio":              `{ "video-test": 0.6 }`,
 		"ReferenceVideoPrice":          `{ "video-test": 0.08 }`,
+		"billing_setting.billing_mode": `{ "tiered-test": "tiered_expr" }`,
+		"billing_setting.billing_expr": `{ "tiered-test": "tier(\"base\", p * 1.5 + c * 6)" }`,
 		"billing_setting.task_billing": `{ "video-test": { "version": 1, "mode": "per_request" } }`,
 		"SMTPToken":                    "must-not-leak",
 	}
@@ -65,6 +67,8 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 	foundTaskBilling := false
 	foundVideoInputRatio := false
 	foundReferenceVideoPrice := false
+	foundBillingMode := false
+	foundBillingExpr := false
 	for _, option := range response.Data {
 		assert.NotEqual(t, "SMTPToken", option.Key)
 		assert.NotEqual(t, "must-not-leak", option.Value)
@@ -80,8 +84,40 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 			foundReferenceVideoPrice = true
 			assert.JSONEq(t, `{ "video-test": 0.08 }`, option.Value)
 		}
+		if option.Key == "billing_setting.billing_mode" {
+			foundBillingMode = true
+			assert.JSONEq(t, `{ "tiered-test": "tiered_expr" }`, option.Value)
+		}
+		if option.Key == "billing_setting.billing_expr" {
+			foundBillingExpr = true
+			assert.JSONEq(t, `{ "tiered-test": "tier(\"base\", p * 1.5 + c * 6)" }`, option.Value)
+		}
 	}
 	assert.True(t, foundTaskBilling)
 	assert.True(t, foundVideoInputRatio)
 	assert.True(t, foundReferenceVideoPrice)
+	assert.True(t, foundBillingMode)
+	assert.True(t, foundBillingExpr)
+}
+
+func TestUpdateModelPricingOptionRejectsInvalidBillingExpression(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPut,
+		"/api/mozia/model-pricing/",
+		bytes.NewBufferString(`{"key":"billing_setting.billing_expr","value":"{\"m3\":\"p *\"}"}`),
+	)
+
+	UpdateModelPricingOption(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.False(t, response.Success)
+	assert.Contains(t, response.Message, "模型计费表达式配置失败")
 }

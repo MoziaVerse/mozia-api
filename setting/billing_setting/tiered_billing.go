@@ -16,6 +16,8 @@ const (
 	BillingModeTieredExpr = "tiered_expr"
 	BillingModeField      = "billing_mode"
 	BillingExprField      = "billing_expr"
+	BillingModeOptionKey  = "billing_setting.billing_mode"
+	BillingExprOptionKey  = "billing_setting.billing_expr"
 	TaskBillingField      = "task_billing"
 	TaskBillingOptionKey  = "billing_setting.task_billing"
 )
@@ -100,6 +102,41 @@ func ValidateTaskBillingJSONString(raw string) error {
 		}
 		if err := taskbilling.Validate(config); err != nil {
 			return fmt.Errorf("task billing for model %q: %w", model, err)
+		}
+	}
+	return nil
+}
+
+func ValidateBillingModeJSONString(raw string) error {
+	modes := make(map[string]string)
+	if err := common.UnmarshalJsonStr(raw, &modes); err != nil {
+		return fmt.Errorf("invalid billing mode JSON: %w", err)
+	}
+	for model, mode := range modes {
+		if strings.TrimSpace(model) == "" {
+			return fmt.Errorf("billing mode model name is required")
+		}
+		if mode != BillingModeRatio && mode != BillingModeTieredExpr {
+			return fmt.Errorf("billing mode for model %q is invalid: %q", model, mode)
+		}
+	}
+	return nil
+}
+
+func ValidateBillingExprJSONString(raw string) error {
+	expressions := make(map[string]string)
+	if err := common.UnmarshalJsonStr(raw, &expressions); err != nil {
+		return fmt.Errorf("invalid billing expression JSON: %w", err)
+	}
+	for model, expression := range expressions {
+		if strings.TrimSpace(model) == "" {
+			return fmt.Errorf("billing expression model name is required")
+		}
+		if strings.TrimSpace(expression) == "" {
+			return fmt.Errorf("billing expression for model %q is required", model)
+		}
+		if err := SmokeTestExpr(expression); err != nil {
+			return fmt.Errorf("billing expression for model %q: %w", model, err)
 		}
 	}
 	return nil

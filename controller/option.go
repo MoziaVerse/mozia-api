@@ -31,6 +31,8 @@ var completionRatioMetaOptionKeys = []string{
 	"AudioCompletionRatio",
 	"VideoInputRatio",
 	"ReferenceVideoPrice",
+	billing_setting.BillingModeOptionKey,
+	billing_setting.BillingExprOptionKey,
 	billing_setting.TaskBillingOptionKey,
 }
 
@@ -327,6 +329,24 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "任务参数计费配置失败: " + err.Error(),
+			})
+			return
+		}
+	case billing_setting.BillingModeOptionKey:
+		err = billing_setting.ValidateBillingModeJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "模型计费模式配置失败: " + err.Error(),
+			})
+			return
+		}
+	case billing_setting.BillingExprOptionKey:
+		err = billing_setting.ValidateBillingExprJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "模型计费表达式配置失败: " + err.Error(),
 			})
 			return
 		}
