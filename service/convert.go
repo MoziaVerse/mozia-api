@@ -91,14 +91,53 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	// Convert messages
 	openAIMessages := make([]dto.Message, 0)
 
+	// 渠道级兼容开关，默认关闭。Claude Code 在带工具的请求里会把运行时上下文（它自己
+	// 生成的可用 agent 类型清单）作为 role="system" 的消息放进 messages —— Anthropic 的
+	// messages 规范里并没有这个角色。
+	//
+	// 默认原样透传：对接受中途 system 的上游，把它提前会把「自此生效」变成「全程生效」，
+	// 改变提示词作用范围。只有强制 system 必须在首条的上游（自建 Qwen 推理服务等）才
+	// 需要开启，否则它们会直接回 400 "System message must be at the beginning."。
+	mergeInlineSystem := info.ChannelOtherSettings.MergeInlineSystemMessage
+	inlineSystem := ""
+	if mergeInlineSystem {
+		inlineParts := make([]string, 0, len(claudeRequest.Messages))
+		for _, m := range claudeRequest.Messages {
+			if m.Role != "system" {
+				continue
+			}
+			if m.IsStringContent() {
+				if text := m.GetStringContent(); text != "" {
+					inlineParts = append(inlineParts, text)
+				}
+				continue
+			}
+			// 与下方消息循环同样的处理：解析失败是请求本身有问题，不能吞掉
+			contents, err := m.ParseContent()
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range contents {
+				if c.Type != "text" && c.Type != "input_text" {
+					continue
+				}
+				if text := c.GetText(); text != "" {
+					inlineParts = append(inlineParts, text)
+				}
+			}
+		}
+		inlineSystem = strings.Join(inlineParts, "\n")
+	}
+
 	// Add system message if present
 	if claudeRequest.System != nil {
 		if claudeRequest.IsStringSystem() && claudeRequest.GetStringSystem() != "" {
 			openAIMessage := dto.Message{
 				Role: "system",
 			}
-			openAIMessage.SetStringContent(claudeRequest.GetStringSystem())
+			openAIMessage.SetStringContent(joinSystemText(claudeRequest.GetStringSystem(), inlineSystem))
 			openAIMessages = append(openAIMessages, openAIMessage)
+			inlineSystem = ""
 		} else {
 			systems := claudeRequest.ParseSystem()
 			if len(systems) > 0 {
@@ -116,6 +155,12 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 						}
 						systemMediaMessages = append(systemMediaMessages, message)
 					}
+					if inlineSystem != "" {
+						systemMediaMessages = append(systemMediaMessages, dto.MediaContent{
+							Type: "text",
+							Text: inlineSystem,
+						})
+					}
 					openAIMessage.SetMediaContent(systemMediaMessages)
 				} else {
 					systemStr := ""
@@ -124,13 +169,26 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 							systemStr += *system.Text
 						}
 					}
-					openAIMessage.SetStringContent(systemStr)
+					openAIMessage.SetStringContent(joinSystemText(systemStr, inlineSystem))
 				}
 				openAIMessages = append(openAIMessages, openAIMessage)
+				inlineSystem = ""
 			}
 		}
 	}
+
+	// System 缺省、或非空却解析不出任何内容时，上面两条装配路径都不会执行；
+	// 此时中途 system 仍要落到首条，否则内容会被静默丢弃。
+	if inlineSystem != "" {
+		sysMsg := dto.Message{Role: "system"}
+		sysMsg.SetStringContent(inlineSystem)
+		openAIMessages = append(openAIMessages, sysMsg)
+	}
 	for _, claudeMessage := range claudeRequest.Messages {
+		// 已并入首条，跳过；开关关闭时保持原样透传
+		if mergeInlineSystem && claudeMessage.Role == "system" {
+			continue
+		}
 		openAIMessage := dto.Message{
 			Role: claudeMessage.Role,
 		}
@@ -214,6 +272,17 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	openAIRequest.Messages = openAIMessages
 
 	return &openAIRequest, nil
+}
+
+// joinSystemText 拼接两段 system 文本，任一为空时不引入多余分隔符。
+func joinSystemText(base, extra string) string {
+	if base == "" {
+		return extra
+	}
+	if extra == "" {
+		return base
+	}
+	return base + "\n" + extra
 }
 
 func generateStopBlock(index int) *dto.ClaudeResponse {
