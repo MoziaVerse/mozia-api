@@ -288,6 +288,7 @@ const SENSITIVE_FORM_FIELDS = [
   'allow_speed',
   'claude_beta_query',
   'disable_task_polling_sleep',
+  'merge_inline_system_message',
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
   'upstream_model_update_ignored_models',
@@ -4014,6 +4015,31 @@ export function ChannelMutateDrawer({
                                       <FormDescription>
                                         {t(
                                           'Do not wait one second between polling async tasks for this channel'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <FormControl>
+                                      <Switch
+                                        checked={field.value}
+                                        onCheckedChange={field.onChange}
+                                      />
+                                    </FormControl>
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='merge_inline_system_message'
+                                render={({ field }) => (
+                                  <FormItem className='flex items-center justify-between px-4 py-3'>
+                                    <div className='space-y-0.5'>
+                                      <FormLabel>
+                                        {t('Merge mid-conversation system messages')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Merge role=system messages inside messages into the leading system message. Enable only for upstreams that require system to be the first message.'
                                         )}
                                       </FormDescription>
                                     </div>
