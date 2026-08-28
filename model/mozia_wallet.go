@@ -232,6 +232,18 @@ func updateMoziaUserQuotaCache(userId int, delta int) {
 	})
 }
 
+// lockMoziaWalletUserTx gives every wallet mutation the same lock order:
+// user -> reservation -> source balances. Exact per-user balance accounting is
+// necessarily serialized, but keeping the critical section deterministic avoids
+// deadlocks and stale balance decisions across multiple API instances.
+func lockMoziaWalletUserTx(tx *gorm.DB, userId int) error {
+	var user User
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").
+		Where("id = ?", userId).
+		Take(&user).Error
+}
+
 func ensureMoziaWalletBalanceTx(tx *gorm.DB, userId int, source string) error {
 	now := common.GetTimestamp()
 	balance := MoziaWalletBalance{
@@ -289,6 +301,9 @@ func grantMoziaWalletQuotaTx(tx *gorm.DB, input MoziaWalletGrantInput, mirrorUse
 		return 0, err
 	}
 	input.Source = source
+	if err := lockMoziaWalletUserTx(tx, input.UserId); err != nil {
+		return 0, err
+	}
 	if err := ensureMoziaWalletBalanceTx(tx, input.UserId, source); err != nil {
 		return 0, err
 	}
@@ -351,6 +366,9 @@ func RecordMoziaInitialGiftQuota(userId int, amount int, referenceType string, r
 func syncMoziaLegacyBalanceForUserTx(tx *gorm.DB, userId int) error {
 	if userId == 0 {
 		return errors.New("user id is empty")
+	}
+	if err := lockMoziaWalletUserTx(tx, userId); err != nil {
+		return err
 	}
 	var userQuota int
 	if err := tx.Model(&User{}).Where("id = ?", userId).Select("quota").Scan(&userQuota).Error; err != nil {
@@ -893,6 +911,9 @@ func SettleMoziaWalletReservation(requestId string, userId int, modelName string
 	}
 	var cacheDelta int
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockMoziaWalletUserTx(tx, userId); err != nil {
+			return err
+		}
 		before, after, err := settleMoziaWalletReservationWithDeltaTx(tx, requestId, userId, modelName, actualQuota, true)
 		cacheDelta = after - before
 		return err
@@ -909,6 +930,9 @@ func RefundMoziaWalletReservation(requestId string, userId int) error {
 	}
 	var refundTotal int
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockMoziaWalletUserTx(tx, userId); err != nil {
+			return err
+		}
 		var reservation MoziaWalletReservation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("request_id = ? AND user_id = ?", requestId, userId).
