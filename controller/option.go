@@ -144,6 +144,65 @@ func UpdateModelPricingOption(c *gin.Context) {
 	UpdateOption(c)
 }
 
+func UpsertOfficialPricing(c *gin.Context) {
+	var request struct {
+		ModelName string                          `json:"model_name"`
+		Pricing   billing_setting.OfficialPricing `json:"pricing"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	request.ModelName = strings.TrimSpace(request.ModelName)
+	if request.ModelName == "" || len(request.ModelName) > 191 {
+		common.ApiErrorMsg(c, "模型名称无效")
+		return
+	}
+	value, err := common.Marshal(map[string]billing_setting.OfficialPricing{request.ModelName: request.Pricing})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := billing_setting.ValidateOfficialPricingJSONString(string(value)); err != nil {
+		common.ApiErrorMsg(c, "官方价格配置失败: "+err.Error())
+		return
+	}
+	if err := model.UpsertOfficialPricing(request.ModelName, request.Pricing); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "model_pricing.official_pricing.update", map[string]interface{}{
+		"model_name": request.ModelName,
+	})
+	common.ApiSuccess(c, gin.H{"model_name": request.ModelName})
+}
+
+func DeleteOfficialPricing(c *gin.Context) {
+	var request struct {
+		ModelName string `json:"model_name"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	request.ModelName = strings.TrimSpace(request.ModelName)
+	if request.ModelName == "" || len(request.ModelName) > 191 {
+		common.ApiErrorMsg(c, "模型名称无效")
+		return
+	}
+
+	deleted, err := model.DeleteOfficialPricing(request.ModelName)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "model_pricing.official_pricing.delete", map[string]interface{}{
+		"model_name": request.ModelName,
+		"deleted":    deleted,
+	})
+	common.ApiSuccess(c, gin.H{"model_name": request.ModelName, "deleted": deleted})
+}
+
 type OptionUpdateRequest struct {
 	Key   string `json:"key"`
 	Value any    `json:"value"`

@@ -1,12 +1,16 @@
 package model
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/performance_setting"
@@ -220,6 +224,69 @@ func UpdateOption(key string, value string) error {
 	DB.Save(&option)
 	// Update OptionMap
 	return updateOptionMap(key, value)
+}
+
+func mutateOfficialPricing(modelName string, value json.RawMessage) (bool, error) {
+	for range 5 {
+		var option Option
+		if err := DB.Where("key = ?", billing_setting.OfficialPricingOptionKey).First(&option).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if value == nil {
+					return false, nil
+				}
+				if err := DB.Create(&Option{Key: billing_setting.OfficialPricingOptionKey, Value: `{}`}).Error; err != nil {
+					return false, err
+				}
+				continue
+			}
+			return false, err
+		}
+
+		var pricing map[string]json.RawMessage
+		if err := common.UnmarshalJsonStr(option.Value, &pricing); err != nil {
+			return false, fmt.Errorf("invalid official pricing configuration: %w", err)
+		}
+		if value == nil {
+			if _, ok := pricing[modelName]; !ok {
+				return false, nil
+			}
+			delete(pricing, modelName)
+		} else {
+			pricing[modelName] = value
+		}
+		next, err := common.Marshal(pricing)
+		if err != nil {
+			return false, err
+		}
+
+		result := DB.Model(&Option{}).
+			Where("key = ? AND value = ?", billing_setting.OfficialPricingOptionKey, option.Value).
+			Update("value", string(next))
+		if result.Error != nil {
+			return false, result.Error
+		}
+		if result.RowsAffected == 0 {
+			continue
+		}
+		if err := updateOptionMap(billing_setting.OfficialPricingOptionKey, string(next)); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, fmt.Errorf("official pricing changed concurrently; retry")
+}
+
+func UpsertOfficialPricing(modelName string, pricing billing_setting.OfficialPricing) error {
+	value, err := common.Marshal(pricing)
+	if err != nil {
+		return err
+	}
+	_, err = mutateOfficialPricing(modelName, value)
+	return err
+}
+
+func DeleteOfficialPricing(modelName string) (bool, error) {
+	return mutateOfficialPricing(modelName, nil)
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
