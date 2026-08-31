@@ -5287,6 +5287,27 @@
     "Per second": "Per second",
     "Additional": "Additional",
     "/ second": "/ second",
-    "/ item": "/ item"
+    "/ item": "/ item",
+    "Channel Cost References": "Channel Cost References",
+    "Channel cost saved": "Channel cost saved",
+    "Channel cost deleted": "Channel cost deleted",
+    "Channel costs are internal pricing references only and never affect routing, billing, or settlement.": "Channel costs are internal pricing references only and never affect routing, billing, or settlement.",
+    "Search model or channel": "Search model or channel",
+    "Add channel cost": "Add channel cost",
+    "Per token": "Per token",
+    "Parametric": "Parametric",
+    "Tiered expression": "Tiered expression",
+    "Delete this channel cost?": "Delete this channel cost?",
+    "No channel costs configured": "No channel costs configured",
+    "Edit channel cost": "Edit channel cost",
+    "This information is used only as an internal pricing reference.": "This information is used only as an internal pricing reference.",
+    "Channel and model are required": "Channel and model are required",
+    "Select channel": "Select channel",
+    "Platform model": "Platform model",
+    "Search or enter a model": "Search or enter a model",
+    "Optional source or contract note": "Optional source or contract note",
+    "Visual configuration": "Visual configuration",
+    "per 1M tokens": "per 1M tokens",
+    "Prices must be non-negative numbers.": "Prices must be non-negative numbers."
   }
 }

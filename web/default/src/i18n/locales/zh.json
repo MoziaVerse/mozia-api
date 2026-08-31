@@ -5287,6 +5287,27 @@
     "Per second": "每秒",
     "Additional": "附加",
     "/ second": "/ 秒",
-    "/ item": "/ 个"
+    "/ item": "/ 个",
+    "Channel Cost References": "渠道成本参考",
+    "Channel cost saved": "渠道成本已保存",
+    "Channel cost deleted": "渠道成本已删除",
+    "Channel costs are internal pricing references only and never affect routing, billing, or settlement.": "渠道成本仅供内部定价参考，不会影响路由、扣费或结算。",
+    "Search model or channel": "搜索模型或渠道",
+    "Add channel cost": "新增渠道成本",
+    "Per token": "按 Token",
+    "Parametric": "参数计费",
+    "Tiered expression": "阶梯表达式",
+    "Delete this channel cost?": "删除这条渠道成本？",
+    "No channel costs configured": "尚未配置渠道成本",
+    "Edit channel cost": "编辑渠道成本",
+    "This information is used only as an internal pricing reference.": "此信息仅用作内部定价参考。",
+    "Channel and model are required": "请选择渠道并填写模型",
+    "Select channel": "选择渠道",
+    "Platform model": "平台模型",
+    "Search or enter a model": "搜索或输入模型",
+    "Optional source or contract note": "可选：价格来源或合同备注",
+    "Visual configuration": "可视化配置",
+    "per 1M tokens": "每百万 Token",
+    "Prices must be non-negative numbers.": "价格必须是非负数。"
   }
 }
