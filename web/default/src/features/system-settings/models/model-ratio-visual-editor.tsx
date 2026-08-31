@@ -80,6 +80,7 @@ type ModelRatioVisualEditorProps = {
   savedBillingMode: string
   savedBillingExpr: string
   savedTaskBilling: string
+  savedOfficialPricing: string
   modelPrice: string
   modelRatio: string
   cacheRatio: string
@@ -93,6 +94,7 @@ type ModelRatioVisualEditorProps = {
   billingMode: string
   billingExpr: string
   taskBilling: string
+  officialPricing: string
   onChange: (field: string, value: string) => void
   onSave: () => void | Promise<void>
   isSaving: boolean
@@ -122,6 +124,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedBillingMode,
     savedBillingExpr,
     savedTaskBilling,
+    savedOfficialPricing,
     modelPrice,
     modelRatio,
     cacheRatio,
@@ -135,6 +138,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     billingMode,
     billingExpr,
     taskBilling,
+    officialPricing,
     onChange,
     onSave,
     isSaving,
@@ -209,6 +213,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       billingMode: savedBillingMode,
       billingExpr: savedBillingExpr,
       taskBilling: savedTaskBilling,
+      officialPricing: savedOfficialPricing,
     })
     const draftRows = buildModelSnapshots({
       modelPrice,
@@ -224,6 +229,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       billingMode,
       billingExpr,
       taskBilling,
+      officialPricing,
     })
 
     const savedByName = new Map(savedRows.map((row) => [row.name, row]))
@@ -263,6 +269,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedBillingMode,
     savedBillingExpr,
     savedTaskBilling,
+    savedOfficialPricing,
     modelPrice,
     modelRatio,
     cacheRatio,
@@ -276,6 +283,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     billingMode,
     billingExpr,
     taskBilling,
+    officialPricing,
   ])
 
   const modeCounts = useMemo(
@@ -332,6 +340,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         billingExpr: editableModel.billingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
         taskBilling: editableModel.taskBilling,
+        officialPricing: editableModel.officialPricing,
       })
       setEditorOpen(true)
       if (isMobile) setSheetOpen(true)
@@ -414,6 +423,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         taskBilling,
         { fallback: {}, silent: true }
       )
+      const officialPricingMap = safeJsonParse<Record<string, unknown>>(
+        officialPricing,
+        { fallback: {}, silent: true }
+      )
 
       delete priceMap[name]
       delete ratioMap[name]
@@ -428,6 +441,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       delete billingModeMap[name]
       delete billingExprMap[name]
       delete taskBillingMap[name]
+      delete officialPricingMap[name]
 
       onChange('ModelPrice', JSON.stringify(priceMap, null, 2))
       onChange('ModelRatio', JSON.stringify(ratioMap, null, 2))
@@ -457,6 +471,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         'billing_setting.task_billing',
         JSON.stringify(taskBillingMap, null, 2)
       )
+      onChange(
+        'billing_setting.official_pricing',
+        JSON.stringify(officialPricingMap, null, 2)
+      )
 
       if (editData?.name === name) {
         setEditData(null)
@@ -478,6 +496,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       billingMode,
       billingExpr,
       taskBilling,
+      officialPricing,
       onChange,
       editData,
     ]
@@ -570,6 +589,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         taskBilling,
         { fallback: {}, silent: true }
       )
+      const officialPricingMap = safeJsonParse<Record<string, unknown>>(
+        officialPricing,
+        { fallback: {}, silent: true }
+      )
 
       const setIfPresent = (
         target: Record<string, number>,
@@ -595,6 +618,11 @@ const ModelRatioVisualEditorComponent = forwardRef<
         delete billingModeMap[name]
         delete billingExprMap[name]
         delete taskBillingMap[name]
+        delete officialPricingMap[name]
+
+        if (data.officialPricing) {
+          officialPricingMap[name] = JSON.parse(data.officialPricing)
+        }
 
         if (
           data.billingMode === 'per_second' ||
@@ -668,6 +696,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         'billing_setting.task_billing',
         JSON.stringify(taskBillingMap, null, 2)
       )
+      onChange(
+        'billing_setting.official_pricing',
+        JSON.stringify(officialPricingMap, null, 2)
+      )
     },
     [
       modelPrice,
@@ -683,6 +715,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       billingMode,
       billingExpr,
       taskBilling,
+      officialPricing,
       onChange,
     ]
   )

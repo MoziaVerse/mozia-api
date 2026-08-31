@@ -80,6 +80,15 @@ import {
   type PricingMode,
 } from './model-pricing-core'
 import { PriceInput, PriceLane } from './model-pricing-inputs'
+import {
+  buildOfficialPriceOptions,
+  buildOfficialPricingConfig,
+  createOfficialPricingDraft,
+  parseOfficialPricingDraft,
+  validateOfficialPricingDraft,
+  type OfficialPricingDraft,
+} from './official-pricing-config'
+import { OfficialPricingEditor } from './official-pricing-editor'
 import { formatPricingNumber } from './pricing-format'
 import {
   buildTaskBillingConfig,
@@ -211,6 +220,8 @@ export const ModelPricingEditorPanel = forwardRef<
   const [taskBillingDraft, setTaskBillingDraft] = useState<TaskBillingDraft>(
     createTaskBillingDraft
   )
+  const [officialPricingDraft, setOfficialPricingDraft] =
+    useState<OfficialPricingDraft>(createOfficialPricingDraft)
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const isEditMode = !!editData
 
@@ -265,6 +276,9 @@ export const ModelPricingEditorPanel = forwardRef<
       setBillingExpr(editData.billingExpr || '')
       setRequestRuleExpr(editData.requestRuleExpr || '')
       setTaskBillingDraft(nextTaskBillingDraft)
+      setOfficialPricingDraft(
+        parseOfficialPricingDraft(editData.officialPricing)
+      )
     } else {
       form.reset({
         name: '',
@@ -283,6 +297,7 @@ export const ModelPricingEditorPanel = forwardRef<
       setBillingExpr('')
       setRequestRuleExpr('')
       setTaskBillingDraft(createTaskBillingDraft())
+      setOfficialPricingDraft(createOfficialPricingDraft())
     }
 
     setPromptPrice(nextLaneState.promptPrice)
@@ -438,6 +453,25 @@ export const ModelPricingEditorPanel = forwardRef<
       watchedValues,
     ]
   )
+  const officialPriceOptions = useMemo(
+    () =>
+      buildOfficialPriceOptions({
+        pricingMode,
+        laneEnabled,
+        referenceVideoPrice: watchedValues.referenceVideoPrice || '',
+        taskBilling: taskBillingDraft,
+      }),
+    [
+      laneEnabled,
+      pricingMode,
+      taskBillingDraft,
+      watchedValues.referenceVideoPrice,
+    ]
+  )
+  const officialPricingError = useMemo(
+    () => validateOfficialPricingDraft(officialPricingDraft),
+    [officialPricingDraft]
+  )
 
   const warnings = useMemo(() => {
     const nextWarnings: string[] = []
@@ -486,6 +520,7 @@ export const ModelPricingEditorPanel = forwardRef<
   }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const validatePricingValues = useCallback(() => {
+    if (officialPricingError) return false
     if (pricingMode === 'per_second' || pricingMode === 'parametric') {
       if (toNumberOrNull(form.getValues('price')) === null) {
         form.setError('price', { message: t('Fixed price is required') })
@@ -531,6 +566,7 @@ export const ModelPricingEditorPanel = forwardRef<
     pricingMode,
     promptPrice,
     taskBillingDraft,
+    officialPricingError,
     t,
   ])
 
@@ -560,10 +596,17 @@ export const ModelPricingEditorPanel = forwardRef<
           buildTaskBillingConfig(taskBillingDraft)
         )
       }
+      data.officialPricing = buildOfficialPricingConfig(officialPricingDraft)
 
       return data
     },
-    [billingExpr, pricingMode, requestRuleExpr, taskBillingDraft]
+    [
+      billingExpr,
+      officialPricingDraft,
+      pricingMode,
+      requestRuleExpr,
+      taskBillingDraft,
+    ]
   )
 
   useImperativeHandle(
@@ -811,6 +854,13 @@ export const ModelPricingEditorPanel = forwardRef<
                     </TabsContent>
                   )}
                 </Tabs>
+
+                <OfficialPricingEditor
+                  draft={officialPricingDraft}
+                  options={officialPriceOptions}
+                  error={officialPricingError}
+                  onChange={setOfficialPricingDraft}
+                />
               </FieldGroup>
 
               <aside className='bg-muted/20 sticky top-0 rounded-lg border'>

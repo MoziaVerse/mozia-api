@@ -35,6 +35,7 @@ export type ModelPricingSnapshotInput = {
   billingMode: string
   billingExpr: string
   taskBilling: string
+  officialPricing?: string
 }
 
 export type ModelPricingSnapshot = {
@@ -53,6 +54,7 @@ export type ModelPricingSnapshot = {
   billingExpr?: string
   requestRuleExpr?: string
   taskBilling?: string
+  officialPricing?: string
   hasConflict: boolean
 }
 
@@ -224,6 +226,7 @@ export const buildModelSnapshots = ({
   billingMode,
   billingExpr,
   taskBilling,
+  officialPricing,
 }: ModelPricingSnapshotInput): ModelPricingSnapshot[] => {
   const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
     fallback: {},
@@ -280,6 +283,13 @@ export const buildModelSnapshots = ({
       context: 'task parameter billing',
     }
   )
+  const officialPricingMap = safeJsonParse<Record<string, unknown>>(
+    officialPricing,
+    {
+      fallback: {},
+      context: 'official pricing display',
+    }
+  )
 
   const modelNames = new Set([
     ...Object.keys(priceMap),
@@ -295,6 +305,7 @@ export const buildModelSnapshots = ({
     ...Object.keys(billingModeMap),
     ...Object.keys(billingExprMap),
     ...Object.keys(taskBillingMap),
+    ...Object.keys(officialPricingMap),
   ])
 
   return [...modelNames].map((name) => {
@@ -308,6 +319,9 @@ export const buildModelSnapshots = ({
     const audioCompletion = audioCompletionMap[name]?.toString() || ''
     const videoInput = videoInputMap[name]?.toString() || ''
     const referenceVideo = referenceVideoPriceMap[name]?.toString() || ''
+    const officialPricingForModel = officialPricingMap[name]
+      ? JSON.stringify(officialPricingMap[name], null, 2)
+      : ''
 
     const modeForModel = billingModeMap[name]
     const taskBillingRule = taskBillingMap[name]
@@ -327,6 +341,7 @@ export const buildModelSnapshots = ({
         audioCompletionRatio: audioCompletion,
         videoInputRatio: videoInput,
         referenceVideoPrice: referenceVideo,
+        officialPricing: officialPricingForModel,
         hasConflict: false,
       }
     }
@@ -349,6 +364,7 @@ export const buildModelSnapshots = ({
         audioCompletionRatio: audioCompletion,
         videoInputRatio: videoInput,
         referenceVideoPrice: referenceVideo,
+        officialPricing: officialPricingForModel,
         hasConflict: false,
       }
     }
@@ -365,6 +381,7 @@ export const buildModelSnapshots = ({
       audioCompletionRatio: audioCompletion,
       videoInputRatio: videoInput,
       referenceVideoPrice: referenceVideo,
+      officialPricing: officialPricingForModel,
       billingMode: price !== '' ? 'per-request' : 'per-token',
       hasConflict:
         price !== '' &&
@@ -397,5 +414,6 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     billingExpr: snapshot.billingExpr || '',
     requestRuleExpr: snapshot.requestRuleExpr || '',
     taskBilling: snapshot.taskBilling || '',
+    officialPricing: snapshot.officialPricing || '',
   })
 }

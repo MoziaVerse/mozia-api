@@ -39,6 +39,7 @@ type Pricing struct {
 	BillingExpr             string                  `json:"billing_expr,omitempty"`
 	TaskBilling             *taskbilling.Config     `json:"task_billing,omitempty"`
 	Access                  *PricingAccess          `json:"access,omitempty"`
+	DisplayPricing          *PricingDisplay         `json:"display_pricing,omitempty"`
 	customerPriceMultiplier float64
 }
 

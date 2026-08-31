@@ -219,6 +219,7 @@ export type ModelSettings = {
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
   'billing_setting.task_billing': string
+  'billing_setting.official_pricing': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
@@ -276,6 +277,7 @@ export type BillingSettings = {
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
   'billing_setting.task_billing': string
+  'billing_setting.official_pricing': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string

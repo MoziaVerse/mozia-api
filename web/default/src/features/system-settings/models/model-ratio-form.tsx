@@ -59,6 +59,7 @@ type ModelFormValues = {
   BillingMode: string
   BillingExpr: string
   TaskBilling: string
+  OfficialPricing: string
 }
 
 type ModelRatioFormProps = {
@@ -82,6 +83,7 @@ type ModelJsonFieldName =
   | 'VideoInputRatio'
   | 'ReferenceVideoPrice'
   | 'TaskBilling'
+  | 'OfficialPricing'
 
 const modelJsonFields: Array<{
   name: ModelJsonFieldName
@@ -149,6 +151,12 @@ const modelJsonFields: Array<{
     labelKey: 'Task parameter billing',
     descriptionKey:
       'JSON map of model → versioned task billing rule. Explicit rules use per_request, per_second, or parametric pricing and otherwise preserve channel defaults.',
+  },
+  {
+    name: 'OfficialPricing',
+    labelKey: 'Official pricing display',
+    descriptionKey:
+      'Display-only official prices keyed by comparable pricing item. This configuration never affects billing.',
   },
 ]
 
@@ -273,6 +281,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               savedBillingMode={savedValues.BillingMode}
               savedBillingExpr={savedValues.BillingExpr}
               savedTaskBilling={savedValues.TaskBilling}
+              savedOfficialPricing={savedValues.OfficialPricing}
               modelPrice={form.watch('ModelPrice')}
               modelRatio={form.watch('ModelRatio')}
               cacheRatio={form.watch('CacheRatio')}
@@ -286,6 +295,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               billingMode={form.watch('BillingMode')}
               billingExpr={form.watch('BillingExpr')}
               taskBilling={form.watch('TaskBilling')}
+              officialPricing={form.watch('OfficialPricing')}
               onSave={handleSave}
               isSaving={isSaving}
               onChange={(field, value) => {
@@ -293,6 +303,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
                   'billing_setting.billing_mode': 'BillingMode',
                   'billing_setting.billing_expr': 'BillingExpr',
                   'billing_setting.task_billing': 'TaskBilling',
+                  'billing_setting.official_pricing': 'OfficialPricing',
                 }
                 const formField =
                   fieldMap[field] || (field as keyof ModelFormValues)

@@ -1,13 +1,39 @@
 package controller
 
 import (
+	"math"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/mozia_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 )
+
+func attachPricingDisplay(pricing []model.Pricing, groupRatio map[string]float64, userId int) []model.Pricing {
+	result := make([]model.Pricing, len(pricing))
+	copy(result, pricing)
+	for i := range result {
+		customerRatio := math.Inf(1)
+		for _, group := range result[i].EnableGroup {
+			if ratio, ok := groupRatio[group]; ok && ratio >= 0 && ratio < customerRatio {
+				customerRatio = ratio
+			}
+		}
+		if math.IsInf(customerRatio, 1) {
+			customerRatio = 1
+		}
+		if userId > 0 {
+			if ratio, ok := mozia_setting.GetUserModelRatio(userId, result[i].ModelName); ok {
+				customerRatio *= ratio
+			}
+		}
+		result[i].DisplayPricing = model.BuildPricingDisplay(result[i], customerRatio)
+	}
+	return result
+}
 
 func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string]string) []model.Pricing {
 	if len(pricing) == 0 {
@@ -79,6 +105,12 @@ func GetPricing(c *gin.Context) {
 			delete(groupRatio, group)
 		}
 	}
+	displayUserId := 0
+	if id, ok := userId.(int); ok {
+		displayUserId = id
+	}
+	pricing = attachPricingDisplay(pricing, groupRatio, displayUserId)
+
 	c.JSON(200, gin.H{
 		"success":            true,
 		"data":               pricing,
@@ -87,6 +119,7 @@ func GetPricing(c *gin.Context) {
 		"usable_group":       usableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),
 		"auto_groups":        service.GetUserAutoGroup(group),
+		"pricing_version":    model.PricingDisplayVersion,
 	})
 }
 

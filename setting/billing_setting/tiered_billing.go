@@ -12,29 +12,33 @@ import (
 )
 
 const (
-	BillingModeRatio      = "ratio"
-	BillingModeTieredExpr = "tiered_expr"
-	BillingModeField      = "billing_mode"
-	BillingExprField      = "billing_expr"
-	BillingModeOptionKey  = "billing_setting.billing_mode"
-	BillingExprOptionKey  = "billing_setting.billing_expr"
-	TaskBillingField      = "task_billing"
-	TaskBillingOptionKey  = "billing_setting.task_billing"
+	BillingModeRatio         = "ratio"
+	BillingModeTieredExpr    = "tiered_expr"
+	BillingModeField         = "billing_mode"
+	BillingExprField         = "billing_expr"
+	BillingModeOptionKey     = "billing_setting.billing_mode"
+	BillingExprOptionKey     = "billing_setting.billing_expr"
+	TaskBillingField         = "task_billing"
+	TaskBillingOptionKey     = "billing_setting.task_billing"
+	OfficialPricingField     = "official_pricing"
+	OfficialPricingOptionKey = "billing_setting.official_pricing"
 )
 
 // BillingSetting is managed by config.GlobalConfig.Register.
 // DB keys: billing_setting.billing_mode, billing_setting.billing_expr,
-// billing_setting.task_billing.
+// billing_setting.task_billing, billing_setting.official_pricing.
 type BillingSetting struct {
-	BillingMode map[string]string             `json:"billing_mode"`
-	BillingExpr map[string]string             `json:"billing_expr"`
-	TaskBilling map[string]taskbilling.Config `json:"task_billing"`
+	BillingMode     map[string]string             `json:"billing_mode"`
+	BillingExpr     map[string]string             `json:"billing_expr"`
+	TaskBilling     map[string]taskbilling.Config `json:"task_billing"`
+	OfficialPricing map[string]OfficialPricing    `json:"official_pricing"`
 }
 
 var billingSetting = BillingSetting{
-	BillingMode: make(map[string]string),
-	BillingExpr: make(map[string]string),
-	TaskBilling: make(map[string]taskbilling.Config),
+	BillingMode:     make(map[string]string),
+	BillingExpr:     make(map[string]string),
+	TaskBilling:     make(map[string]taskbilling.Config),
+	OfficialPricing: make(map[string]OfficialPricing),
 }
 
 func init() {
@@ -75,7 +79,7 @@ func GetTaskBillingCopy() map[string]taskbilling.Config {
 }
 
 func GetPricingSyncData(base map[string]any) map[string]any {
-	extra := make(map[string]any, 3)
+	extra := make(map[string]any, 4)
 	if modes := GetBillingModeCopy(); len(modes) > 0 {
 		extra[BillingModeField] = modes
 	}
@@ -84,6 +88,9 @@ func GetPricingSyncData(base map[string]any) map[string]any {
 	}
 	if configs := GetTaskBillingCopy(); len(configs) > 0 {
 		extra[TaskBillingField] = configs
+	}
+	if configs := GetOfficialPricingCopy(); len(configs) > 0 {
+		extra[OfficialPricingField] = configs
 	}
 	return lo.Assign(base, extra)
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -37,9 +38,17 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 	common.OptionMapRWMutex.Lock()
 	original := common.OptionMap
 	common.OptionMap = map[string]string{
-		"ModelPrice":                   `{ "gpt-test": 1 }`,
-		"VideoInputRatio":              `{ "video-test": 0.6 }`,
-		"ReferenceVideoPrice":          `{ "video-test": 0.08 }`,
+		"ModelPrice":          `{ "gpt-test": 1 }`,
+		"VideoInputRatio":     `{ "video-test": 0.6 }`,
+		"ReferenceVideoPrice": `{ "video-test": 0.08 }`,
+		billing_setting.OfficialPricingOptionKey: `{
+			"video-test": {
+				"currency": "USD",
+				"source_url": "https://example.com/pricing",
+				"verified_at": "2026-08-31",
+				"items": {"task:second": 0.12}
+			}
+		}`,
 		"billing_setting.billing_mode": `{ "tiered-test": "tiered_expr" }`,
 		"billing_setting.billing_expr": `{ "tiered-test": "tier(\"base\", p * 1.5 + c * 6)" }`,
 		"billing_setting.task_billing": `{ "video-test": { "version": 1, "mode": "per_request" } }`,
@@ -69,6 +78,7 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 	foundReferenceVideoPrice := false
 	foundBillingMode := false
 	foundBillingExpr := false
+	foundOfficialPricing := false
 	for _, option := range response.Data {
 		assert.NotEqual(t, "SMTPToken", option.Key)
 		assert.NotEqual(t, "must-not-leak", option.Value)
@@ -92,12 +102,16 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 			foundBillingExpr = true
 			assert.JSONEq(t, `{ "tiered-test": "tier(\"base\", p * 1.5 + c * 6)" }`, option.Value)
 		}
+		if option.Key == billing_setting.OfficialPricingOptionKey {
+			foundOfficialPricing = true
+		}
 	}
 	assert.True(t, foundTaskBilling)
 	assert.True(t, foundVideoInputRatio)
 	assert.True(t, foundReferenceVideoPrice)
 	assert.True(t, foundBillingMode)
 	assert.True(t, foundBillingExpr)
+	assert.True(t, foundOfficialPricing)
 }
 
 func TestUpdateModelPricingOptionRejectsInvalidBillingExpression(t *testing.T) {

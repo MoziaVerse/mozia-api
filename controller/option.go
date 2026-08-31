@@ -34,6 +34,7 @@ var completionRatioMetaOptionKeys = []string{
 	billing_setting.BillingModeOptionKey,
 	billing_setting.BillingExprOptionKey,
 	billing_setting.TaskBillingOptionKey,
+	billing_setting.OfficialPricingOptionKey,
 }
 
 const contextKeyModelPricingOptionOnly = "model_pricing_option_only"
@@ -329,6 +330,15 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "任务参数计费配置失败: " + err.Error(),
+			})
+			return
+		}
+	case billing_setting.OfficialPricingOptionKey:
+		err = billing_setting.ValidateOfficialPricingJSONString(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "官方价格配置失败: " + err.Error(),
 			})
 			return
 		}

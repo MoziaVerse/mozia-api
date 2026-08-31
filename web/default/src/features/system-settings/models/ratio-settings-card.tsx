@@ -113,6 +113,7 @@ const createModelSchema = (t: Translate) =>
     BillingMode: createJsonStringField(t),
     BillingExpr: createJsonStringField(t),
     TaskBilling: createJsonStringField(t),
+    OfficialPricing: createJsonStringField(t),
   })
 
 const createGroupSchema = (t: Translate) =>
@@ -188,6 +189,7 @@ export function RatioSettingsCard({
     BillingMode: normalizeJsonString(modelDefaults.BillingMode),
     BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
     TaskBilling: normalizeJsonString(modelDefaults.TaskBilling),
+    OfficialPricing: normalizeJsonString(modelDefaults.OfficialPricing),
   })
   const [savedModelValues, setSavedModelValues] = useState(
     modelNormalizedDefaults.current
@@ -229,6 +231,7 @@ export function RatioSettingsCard({
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
       TaskBilling: formatJsonForTextarea(modelDefaults.TaskBilling),
+      OfficialPricing: formatJsonForTextarea(modelDefaults.OfficialPricing),
     },
   })
 
@@ -268,6 +271,7 @@ export function RatioSettingsCard({
       BillingMode: normalizeJsonString(modelDefaults.BillingMode),
       BillingExpr: normalizeJsonString(modelDefaults.BillingExpr),
       TaskBilling: normalizeJsonString(modelDefaults.TaskBilling),
+      OfficialPricing: normalizeJsonString(modelDefaults.OfficialPricing),
     }
     setSavedModelValues(modelNormalizedDefaults.current)
 
@@ -290,6 +294,7 @@ export function RatioSettingsCard({
       BillingMode: formatJsonForTextarea(modelDefaults.BillingMode),
       BillingExpr: formatJsonForTextarea(modelDefaults.BillingExpr),
       TaskBilling: formatJsonForTextarea(modelDefaults.TaskBilling),
+      OfficialPricing: formatJsonForTextarea(modelDefaults.OfficialPricing),
     })
   }, [modelDefaults, modelForm])
 
@@ -336,12 +341,14 @@ export function RatioSettingsCard({
         BillingMode: normalizeJsonString(values.BillingMode),
         BillingExpr: normalizeJsonString(values.BillingExpr),
         TaskBilling: normalizeJsonString(values.TaskBilling),
+        OfficialPricing: normalizeJsonString(values.OfficialPricing),
       }
 
       const apiKeyMap: Record<string, string> = {
         BillingMode: 'billing_setting.billing_mode',
         BillingExpr: 'billing_setting.billing_expr',
         TaskBilling: 'billing_setting.task_billing',
+        OfficialPricing: 'billing_setting.official_pricing',
       }
 
       const updates = (
