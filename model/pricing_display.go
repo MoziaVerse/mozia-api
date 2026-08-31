@@ -39,12 +39,9 @@ type PricingDisplayItem struct {
 }
 
 type PricingOfficialDiscount struct {
-	Editable     bool   `json:"editable"`
-	BaseMin      string `json:"base_min"`
-	BaseMax      string `json:"base_max"`
-	EffectiveMin string `json:"effective_min"`
-	EffectiveMax string `json:"effective_max"`
-	Reason       string `json:"reason,omitempty"`
+	Editable bool   `json:"editable"`
+	BaseMin  string `json:"base_min"`
+	BaseMax  string `json:"base_max"`
 }
 
 type pricingBaseVariant struct {
@@ -74,7 +71,7 @@ func BuildPricingDisplay(pricing Pricing, customerRatio float64) *PricingDisplay
 	return display
 }
 
-func pricingOfficialDiscount(pricing Pricing, multiplierPPM int64) (*PricingOfficialDiscount, float64) {
+func pricingOfficialDiscount(pricing Pricing) (*PricingOfficialDiscount, float64) {
 	display := BuildPricingDisplay(pricing, 1)
 	if display.Official == nil {
 		return nil, 0
@@ -96,31 +93,20 @@ func pricingOfficialDiscount(pricing Pricing, multiplierPPM int64) (*PricingOffi
 		}
 	}
 	if math.IsInf(minRate, 1) {
-		return &PricingOfficialDiscount{Reason: "incomplete"}, 0
+		return nil, 0
 	}
-	multiplier := float64(multiplierPPM) / float64(ResellerDefaultMultiplierPPM)
 	reference := &PricingOfficialDiscount{
-		Editable:     complete && maxRate-minRate < 0.000001,
-		BaseMin:      formatOfficialDiscount(minRate),
-		BaseMax:      formatOfficialDiscount(maxRate),
-		EffectiveMin: formatOfficialDiscount(minRate * multiplier),
-		EffectiveMax: formatOfficialDiscount(maxRate * multiplier),
-	}
-	if !complete {
-		reference.Reason = "incomplete"
-	} else if !reference.Editable {
-		reference.Reason = "non_uniform"
+		Editable: complete && maxRate-minRate < 0.000001,
+		BaseMin:  formatOfficialDiscount(minRate),
+		BaseMax:  formatOfficialDiscount(maxRate),
 	}
 	return reference, minRate
 }
 
-func GetPricingOfficialDiscount(modelName string, multiplierPPM int64) *PricingOfficialDiscount {
+func GetPricingOfficialDiscount(modelName string) *PricingOfficialDiscount {
 	for _, pricing := range GetPricing() {
 		if pricing.ModelName == modelName {
-			reference, _ := pricingOfficialDiscount(pricing, multiplierPPM)
-			if reference != nil && reference.BaseMin == "" {
-				return nil
-			}
+			reference, _ := pricingOfficialDiscount(pricing)
 			return reference
 		}
 	}
@@ -138,7 +124,7 @@ func ResellerMultiplierFromOfficialDiscount(modelName string, discount string) (
 }
 
 func resellerMultiplierFromOfficialDiscount(pricing Pricing, discount string) (int64, error) {
-	reference, baseRate := pricingOfficialDiscount(pricing, ResellerDefaultMultiplierPPM)
+	reference, baseRate := pricingOfficialDiscount(pricing)
 	if reference == nil || !reference.Editable || baseRate <= 0 {
 		return 0, ErrInvalidResellerPriceRule
 	}

@@ -122,11 +122,10 @@ func TestPricingOfficialDiscountRequiresOneUniformCompleteRate(t *testing.T) {
 	}))
 	pricing := Pricing{ModelName: "discount-model", QuotaType: 0, ModelRatio: 0.5, CompletionRatio: 2}
 
-	reference, baseRate := pricingOfficialDiscount(pricing, 800_000)
+	reference, baseRate := pricingOfficialDiscount(pricing)
 	require.NotNil(t, reference)
 	assert.True(t, reference.Editable)
 	assert.Equal(t, "5", reference.BaseMin)
-	assert.Equal(t, "4", reference.EffectiveMin)
 	assert.InDelta(t, 5, baseRate, 0.000001)
 	multiplier, err := resellerMultiplierFromOfficialDiscount(pricing, "7.5")
 	require.NoError(t, err)
@@ -142,7 +141,6 @@ func TestPricingOfficialDiscountRequiresOneUniformCompleteRate(t *testing.T) {
 			}
 		}`,
 	}))
-	reference, _ = pricingOfficialDiscount(pricing, ResellerDefaultMultiplierPPM)
+	reference, _ = pricingOfficialDiscount(pricing)
 	assert.False(t, reference.Editable)
-	assert.Equal(t, "non_uniform", reference.Reason)
 }

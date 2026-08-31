@@ -25,41 +25,37 @@ type resellerPriceRuleRequest struct {
 }
 
 type resellerPricingPreviewRequest struct {
-	Model            string          `json:"model"`
-	BaseQuota        json.RawMessage `json:"base_quota"`
-	Multiplier       *string         `json:"multiplier"`
-	OfficialDiscount *string         `json:"official_discount"`
-	CustomerId       *int            `json:"customer_id"`
-	ResellerId       json.RawMessage `json:"reseller_id"`
+	Model      string          `json:"model"`
+	BaseQuota  json.RawMessage `json:"base_quota"`
+	Multiplier *string         `json:"multiplier"`
+	CustomerId *int            `json:"customer_id"`
+	ResellerId json.RawMessage `json:"reseller_id"`
 }
 
 type resellerPlatformPreviewResponse struct {
-	Model            string                         `json:"model"`
-	BaseQuota        string                         `json:"base_quota"`
-	Multiplier       string                         `json:"multiplier"`
-	EffectiveQuota   string                         `json:"effective_quota"`
-	Source           string                         `json:"source"`
-	RuleId           int64                          `json:"rule_id,omitempty"`
-	RuleVersion      int                            `json:"rule_version,omitempty"`
-	OfficialDiscount *model.PricingOfficialDiscount `json:"official_discount,omitempty"`
+	Model          string `json:"model"`
+	BaseQuota      string `json:"base_quota"`
+	Multiplier     string `json:"multiplier"`
+	EffectiveQuota string `json:"effective_quota"`
+	Source         string `json:"source"`
+	RuleId         int64  `json:"rule_id,omitempty"`
+	RuleVersion    int    `json:"rule_version,omitempty"`
 }
 
 type resellerManagementPreviewResponse struct {
-	Model                     string                         `json:"model"`
-	BaseQuota                 string                         `json:"base_quota"`
-	CustomerId                *int                           `json:"customer_id"`
-	RetailMultiplier          string                         `json:"retail_multiplier"`
-	RetailQuota               string                         `json:"retail_quota"`
-	RetailSource              string                         `json:"retail_source"`
-	RetailRuleId              int64                          `json:"retail_rule_id,omitempty"`
-	RetailRuleVersion         int                            `json:"retail_rule_version,omitempty"`
-	WholesaleMultiplier       string                         `json:"wholesale_multiplier"`
-	WholesaleQuota            string                         `json:"wholesale_quota"`
-	WholesaleSource           string                         `json:"wholesale_source"`
-	WholesaleRuleId           int64                          `json:"wholesale_rule_id,omitempty"`
-	WholesaleRuleVersion      int                            `json:"wholesale_rule_version,omitempty"`
-	RetailOfficialDiscount    *model.PricingOfficialDiscount `json:"retail_official_discount,omitempty"`
-	WholesaleOfficialDiscount *model.PricingOfficialDiscount `json:"wholesale_official_discount,omitempty"`
+	Model                string `json:"model"`
+	BaseQuota            string `json:"base_quota"`
+	CustomerId           *int   `json:"customer_id"`
+	RetailMultiplier     string `json:"retail_multiplier"`
+	RetailQuota          string `json:"retail_quota"`
+	RetailSource         string `json:"retail_source"`
+	RetailRuleId         int64  `json:"retail_rule_id,omitempty"`
+	RetailRuleVersion    int    `json:"retail_rule_version,omitempty"`
+	WholesaleMultiplier  string `json:"wholesale_multiplier"`
+	WholesaleQuota       string `json:"wholesale_quota"`
+	WholesaleSource      string `json:"wholesale_source"`
+	WholesaleRuleId      int64  `json:"wholesale_rule_id,omitempty"`
+	WholesaleRuleVersion int    `json:"wholesale_rule_version,omitempty"`
 }
 
 func GetResellerPlatformPricing(c *gin.Context) {
@@ -125,16 +121,13 @@ func PreviewResellerPlatformPricing(c *gin.Context) {
 		handleResellerPricingError(c, err)
 		return
 	}
-	if multiplier, override, parseErr := resellerPriceOverride(request.Model, request.Multiplier, request.OfficialDiscount); parseErr != nil {
-		handleResellerPricingError(c, parseErr)
-		return
-	} else if override {
-		effective.MultiplierPPM = multiplier
-		if request.OfficialDiscount != nil {
-			effective.Source = "official_discount"
-		} else {
-			effective.Source = "override"
+	if request.Multiplier != nil {
+		effective.MultiplierPPM, err = model.ParseResellerMultiplier(*request.Multiplier)
+		if err != nil {
+			handleResellerPricingError(c, err)
+			return
 		}
+		effective.Source = "override"
 		effective.RuleId = 0
 		effective.RuleVersion = 0
 	}
@@ -147,7 +140,6 @@ func PreviewResellerPlatformPricing(c *gin.Context) {
 		Model: strings.TrimSpace(request.Model), BaseQuota: strconv.FormatInt(baseQuota, 10),
 		Multiplier: model.FormatResellerMultiplier(effective.MultiplierPPM), EffectiveQuota: strconv.FormatInt(quota, 10),
 		Source: effective.Source, RuleId: effective.RuleId, RuleVersion: effective.RuleVersion,
-		OfficialDiscount: model.GetPricingOfficialDiscount(strings.TrimSpace(request.Model), effective.MultiplierPPM),
 	})
 }
 
@@ -274,18 +266,15 @@ func PreviewResellerManagementPricing(c *gin.Context) {
 		handleResellerPricingError(c, err)
 		return
 	}
-	if multiplier, override, parseErr := resellerPriceOverride(request.Model, request.Multiplier, request.OfficialDiscount); parseErr != nil {
-		handleResellerPricingError(c, parseErr)
-		return
-	} else if override {
-		retail.MultiplierPPM = multiplier
+	if request.Multiplier != nil {
+		retail.MultiplierPPM, err = model.ParseResellerMultiplier(*request.Multiplier)
+		if err != nil {
+			handleResellerPricingError(c, err)
+			return
+		}
 		retail.RuleId = 0
 		retail.RuleVersion = 0
-		if request.OfficialDiscount != nil {
-			retail.Source = "official_discount"
-		} else {
-			retail.Source = "override"
-		}
+		retail.Source = "override"
 	}
 	if retail.MultiplierPPM < wholesale.MultiplierPPM {
 		handleResellerPricingError(c, model.ErrResellerPriceMarginConflict)
@@ -307,8 +296,6 @@ func PreviewResellerManagementPricing(c *gin.Context) {
 		RetailSource: retail.Source, RetailRuleId: retail.RuleId, RetailRuleVersion: retail.RuleVersion,
 		WholesaleMultiplier: model.FormatResellerMultiplier(wholesale.MultiplierPPM), WholesaleQuota: strconv.FormatInt(wholesaleQuota, 10),
 		WholesaleSource: wholesale.Source, WholesaleRuleId: wholesale.RuleId, WholesaleRuleVersion: wholesale.RuleVersion,
-		RetailOfficialDiscount:    model.GetPricingOfficialDiscount(modelName, retail.MultiplierPPM),
-		WholesaleOfficialDiscount: model.GetPricingOfficialDiscount(modelName, wholesale.MultiplierPPM),
 	})
 }
 
@@ -327,11 +314,8 @@ func resellerPriceRuleBody(c *gin.Context, allowCustomer bool) (resellerPriceRul
 }
 
 func createResellerPriceRule(resellerId int, kind string, request resellerPriceRuleRequest, createdBy string, requiredSubagentMemberId *int) (*model.ResellerPriceRule, error) {
-	multiplierPPM, override, err := resellerPriceOverride(request.Model, request.Multiplier, request.OfficialDiscount)
-	if err != nil || !override {
-		if err == nil {
-			err = model.ErrInvalidResellerPriceRule
-		}
+	multiplierPPM, err := resellerPriceMultiplier(request.Model, request.Multiplier, request.OfficialDiscount)
+	if err != nil {
 		return nil, err
 	}
 	customerId := 0
@@ -354,7 +338,7 @@ func resellerPricingPreviewBody(c *gin.Context, allowCustomer bool) (resellerPri
 	var request resellerPricingPreviewRequest
 	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 || strings.TrimSpace(request.Model) == "" ||
 		len(request.BaseQuota) == 0 || (!allowCustomer && request.CustomerId != nil) ||
-		request.CustomerId != nil && *request.CustomerId < 1 || request.Multiplier != nil && request.OfficialDiscount != nil {
+		request.CustomerId != nil && *request.CustomerId < 1 {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return resellerPricingPreviewRequest{}, 0, false
 	}
@@ -366,25 +350,23 @@ func resellerPricingPreviewBody(c *gin.Context, allowCustomer bool) (resellerPri
 	return request, baseQuota, true
 }
 
-func resellerPriceOverride(modelName string, multiplier *string, officialDiscount *string) (int64, bool, error) {
+func resellerPriceMultiplier(modelName string, multiplier *string, officialDiscount *string) (int64, error) {
 	if multiplier != nil && officialDiscount != nil {
-		return 0, false, model.ErrInvalidResellerPriceRule
+		return 0, model.ErrInvalidResellerPriceRule
 	}
 	if officialDiscount != nil {
-		value, err := model.ResellerMultiplierFromOfficialDiscount(strings.TrimSpace(modelName), *officialDiscount)
-		return value, true, err
+		return model.ResellerMultiplierFromOfficialDiscount(strings.TrimSpace(modelName), *officialDiscount)
 	}
 	if multiplier != nil {
-		value, err := model.ParseResellerMultiplier(*multiplier)
-		return value, true, err
+		return model.ParseResellerMultiplier(*multiplier)
 	}
-	return 0, false, nil
+	return 0, model.ErrInvalidResellerPriceRule
 }
 
 func resellerPricingOfficialDiscounts(models []string) map[string]*model.PricingOfficialDiscount {
 	references := make(map[string]*model.PricingOfficialDiscount)
 	for _, modelName := range models {
-		if reference := model.GetPricingOfficialDiscount(modelName, model.ResellerDefaultMultiplierPPM); reference != nil {
+		if reference := model.GetPricingOfficialDiscount(modelName); reference != nil {
 			references[modelName] = reference
 		}
 	}
