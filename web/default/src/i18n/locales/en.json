@@ -5307,6 +5307,8 @@
     "Search or enter a model": "Search or enter a model",
     "Optional source or contract note": "Optional source or contract note",
     "per 1M tokens": "per 1M tokens",
-    "Prices must be non-negative numbers.": "Prices must be non-negative numbers."
+    "Prices must be non-negative numbers.": "Prices must be non-negative numbers.",
+    "Search or select a channel": "Search or select a channel",
+    "No channels found": "No channels found"
   }
 }

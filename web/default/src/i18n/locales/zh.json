@@ -5307,6 +5307,8 @@
     "Search or enter a model": "搜索或输入模型",
     "Optional source or contract note": "可选：价格来源或合同备注",
     "per 1M tokens": "每百万 Token",
-    "Prices must be non-negative numbers.": "价格必须是非负数。"
+    "Prices must be non-negative numbers.": "价格必须是非负数。",
+    "Search or select a channel": "搜索或选择渠道",
+    "No channels found": "未找到渠道"
   }
 }

@@ -395,26 +395,36 @@ export function ChannelCostPricingSection() {
           {draft && (
             <div className='grid gap-5'>
               <div className='grid gap-4 sm:grid-cols-2'>
-                <div className='grid gap-2'>
+                <div className='grid min-w-0 gap-2'>
                   <Label htmlFor='channel-cost-channel'>{t('Channel')}</Label>
-                  <select
-                    id='channel-cost-channel'
-                    className='border-input bg-background h-9 rounded-md border px-3 text-sm'
-                    value={draft.channelId}
-                    disabled={draft.id !== undefined}
-                    onChange={(event) =>
-                      setDraft({ ...draft, channelId: event.target.value })
-                    }
-                  >
-                    <option value=''>{t('Select channel')}</option>
-                    {(query.data?.channels ?? []).map((channel) => (
-                      <option key={channel.id} value={channel.id}>
-                        {channel.name} (#{channel.id})
-                      </option>
-                    ))}
-                  </select>
+                  {draft.id !== undefined ? (
+                    <Input
+                      id='channel-cost-channel'
+                      value={
+                        channelsById.get(Number(draft.channelId))?.name ??
+                        `#${draft.channelId}`
+                      }
+                      className='truncate'
+                      disabled
+                    />
+                  ) : (
+                    <ComboboxInput
+                      id='channel-cost-channel'
+                      options={(query.data?.channels ?? []).map((channel) => ({
+                        value: String(channel.id),
+                        label: `${channel.name} (#${channel.id})`,
+                      }))}
+                      value={draft.channelId}
+                      className='truncate'
+                      placeholder={t('Search or select a channel')}
+                      emptyText={t('No channels found')}
+                      onValueChange={(channelId) =>
+                        setDraft({ ...draft, channelId })
+                      }
+                    />
+                  )}
                 </div>
-                <div className='grid gap-2'>
+                <div className='grid min-w-0 gap-2'>
                   <Label htmlFor='channel-cost-model'>
                     {t('Platform model')}
                   </Label>
@@ -422,6 +432,7 @@ export function ChannelCostPricingSection() {
                     <Input
                       id='channel-cost-model'
                       value={draft.modelName}
+                      className='truncate'
                       disabled
                     />
                   ) : (
@@ -429,6 +440,7 @@ export function ChannelCostPricingSection() {
                       id='channel-cost-model'
                       options={modelOptions}
                       value={draft.modelName}
+                      className='truncate'
                       allowCustomValue
                       placeholder={t('Search or enter a model')}
                       onValueChange={(modelName) =>
