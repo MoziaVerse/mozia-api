@@ -486,6 +486,7 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 	{
 		modelPricingRoute.GET("/", middleware.RequirePermission(authz.ModelPricingRead), controller.GetModelPricingOptions)
 		modelPricingRoute.PUT("/", middleware.RequirePermission(authz.ModelPricingWrite), controller.UpdateModelPricingOption)
+		modelPricingRoute.PUT("/bulk", middleware.RequirePermission(authz.ModelPricingWrite), controller.UpdateModelPricingOptionsBulk)
 		modelPricingRoute.PUT("/official-pricing", middleware.RequirePermission(authz.ModelPricingWrite), controller.UpsertOfficialPricing)
 		modelPricingRoute.DELETE("/official-pricing", middleware.RequirePermission(authz.ModelPricingWrite), controller.DeleteOfficialPricing)
 		modelPricingRoute.GET("/channel-costs", middleware.RequirePermission(authz.ModelPricingRead), controller.GetChannelCostPricing)
