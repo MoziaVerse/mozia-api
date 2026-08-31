@@ -40,7 +40,6 @@ export type ChannelCostRecord = {
   currency: 'CNY' | 'USD'
   mode: ChannelCostMode
   note: string
-  updated_at: number
   config: ChannelCostConfig
 }
 
@@ -49,7 +48,6 @@ export type ChannelCostData = {
   channels: Array<{
     id: number
     name: string
-    status: number
     models: string
   }>
   models: string[]
@@ -70,7 +68,7 @@ export async function getChannelCosts(): Promise<ChannelCostData> {
 }
 
 export async function saveChannelCost(
-  cost: Omit<ChannelCostRecord, 'id' | 'updated_at'>
+  cost: Omit<ChannelCostRecord, 'id'>
 ): Promise<ChannelCostRecord> {
   const response = await api.put<ApiResponse<ChannelCostRecord>>(
     '/api/mozia/model-pricing/channel-costs',

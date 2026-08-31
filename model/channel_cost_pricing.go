@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/taskbilling"
@@ -37,9 +36,6 @@ type ChannelCostPricing struct {
 	Mode       string            `json:"mode" gorm:"type:varchar(32);not null"`
 	ConfigJson string            `json:"-" gorm:"type:text;not null"`
 	Note       string            `json:"note" gorm:"type:text;not null"`
-	UpdatedBy  int               `json:"updated_by" gorm:"not null"`
-	CreatedAt  int64             `json:"created_at" gorm:"bigint;not null"`
-	UpdatedAt  int64             `json:"updated_at" gorm:"bigint;not null"`
 	Config     ChannelCostConfig `json:"config" gorm:"-"`
 }
 
@@ -145,20 +141,13 @@ func UpsertChannelCostPricing(cost *ChannelCostPricing) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now().Unix()
 	cost.ConfigJson = string(config)
-	cost.UpdatedAt = now
-	if cost.CreatedAt == 0 {
-		cost.CreatedAt = now
-	}
 	return DB.Where("channel_id = ? AND model_name = ?", cost.ChannelId, cost.ModelName).
 		Assign(map[string]any{
 			"currency":    cost.Currency,
 			"mode":        cost.Mode,
 			"config_json": cost.ConfigJson,
 			"note":        cost.Note,
-			"updated_by":  cost.UpdatedBy,
-			"updated_at":  cost.UpdatedAt,
 		}).FirstOrCreate(cost).Error
 }
 

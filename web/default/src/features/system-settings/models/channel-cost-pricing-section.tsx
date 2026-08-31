@@ -22,7 +22,6 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { JsonCodeEditor } from '@/components/json-code-editor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ComboboxInput } from '@/components/ui/combobox-input'
@@ -189,8 +188,6 @@ export function ChannelCostPricingSection() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<Draft | null>(null)
-  const [showJson, setShowJson] = useState(false)
-  const [rawConfig, setRawConfig] = useState('{}')
   const [search, setSearch] = useState('')
   const query = useQuery({
     queryKey: ['channel-cost-pricing'],
@@ -242,8 +239,6 @@ export function ChannelCostPricingSection() {
   const openEditor = (record?: ChannelCostRecord) => {
     const next = record ? recordToDraft(record) : emptyDraft()
     setDraft(next)
-    setRawConfig(JSON.stringify(buildConfig(next), null, 2))
-    setShowJson(false)
   }
 
   const changeMode = (mode: ChannelCostMode) => {
@@ -253,39 +248,13 @@ export function ChannelCostPricingSection() {
     setDraft({ ...draft, mode, taskBilling })
   }
 
-  const toggleJson = () => {
-    if (!draft) return
-    if (!showJson) {
-      setRawConfig(JSON.stringify(buildConfig(draft), null, 2))
-      setShowJson(true)
-      return
-    }
-    try {
-      const config = JSON.parse(rawConfig) as ChannelCostConfig
-      const record: ChannelCostRecord = {
-        id: draft.id ?? 0,
-        channel_id: Number(draft.channelId),
-        model_name: draft.modelName,
-        currency: draft.currency,
-        mode: draft.mode,
-        note: draft.note,
-        updated_at: 0,
-        config,
-      }
-      setDraft(recordToDraft(record))
-      setShowJson(false)
-    } catch {
-      toast.error(t('Invalid JSON'))
-    }
-  }
-
   const save = () => {
     if (!draft) return
     if (!draft.channelId || !draft.modelName.trim()) {
       toast.error(t('Channel and model are required'))
       return
     }
-    if (!showJson && draft.mode === 'per_token') {
+    if (draft.mode === 'per_token') {
       const prices = Object.values(draft.prices).filter((value) => value.trim())
       if (
         prices.length === 0 ||
@@ -296,26 +265,13 @@ export function ChannelCostPricingSection() {
       }
     }
     if (
-      !showJson &&
       draft.referenceVideoPrice.trim() &&
       parsePrice(draft.referenceVideoPrice) === null
     ) {
       toast.error(t('Prices must be non-negative numbers.'))
       return
     }
-    let config = buildConfig(draft)
-    if (showJson) {
-      try {
-        config = JSON.parse(rawConfig) as ChannelCostConfig
-      } catch {
-        toast.error(t('Invalid JSON'))
-        return
-      }
-    }
-    if (
-      (draft.mode === 'per_second' || draft.mode === 'parametric') &&
-      !showJson
-    ) {
+    if (draft.mode === 'per_second' || draft.mode === 'parametric') {
       const error = validateTaskBillingDraft(draft.taskBilling)
       if (error) {
         toast.error(t(error))
@@ -328,7 +284,7 @@ export function ChannelCostPricingSection() {
       currency: draft.currency,
       mode: draft.mode,
       note: draft.note.trim(),
-      config,
+      config: buildConfig(draft),
     })
   }
 
@@ -524,136 +480,118 @@ export function ChannelCostPricingSection() {
                   ))}
                 </TabsList>
               </Tabs>
-              <div className='flex justify-end'>
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  onClick={toggleJson}
-                >
-                  {t(showJson ? 'Visual configuration' : 'View JSON')}
-                </Button>
-              </div>
-              {showJson ? (
-                <JsonCodeEditor
-                  value={rawConfig}
-                  onChange={setRawConfig}
-                  heightClassName='h-80'
-                />
-              ) : (
-                <div className='grid gap-4'>
-                  {draft.mode === 'per_token' && (
-                    <div className='grid gap-4 sm:grid-cols-2'>
-                      {TOKEN_ITEMS.map((item) => (
-                        <div key={item} className='grid gap-2'>
-                          <Label htmlFor={`channel-cost-${item}`}>
-                            {t(item)}
-                          </Label>
-                          <div className='relative'>
-                            <span className='text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2'>
-                              {currencySymbol}
-                            </span>
-                            <Input
-                              id={`channel-cost-${item}`}
-                              className='pl-8'
-                              inputMode='decimal'
-                              placeholder={t('per 1M tokens')}
-                              value={draft.prices[item] ?? ''}
-                              onChange={(event) =>
-                                setDraft({
-                                  ...draft,
-                                  prices: {
-                                    ...draft.prices,
-                                    [item]: event.target.value,
-                                  },
-                                })
-                              }
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {(draft.mode === 'per_request' ||
-                    draft.mode === 'per_second' ||
-                    draft.mode === 'parametric') && (
-                    <div className='grid gap-4 sm:grid-cols-2'>
-                      <div className='grid gap-2'>
-                        <Label htmlFor='channel-cost-base-price'>
-                          {t('Base price')}
+              <div className='grid gap-4'>
+                {draft.mode === 'per_token' && (
+                  <div className='grid gap-4 sm:grid-cols-2'>
+                    {TOKEN_ITEMS.map((item) => (
+                      <div key={item} className='grid gap-2'>
+                        <Label htmlFor={`channel-cost-${item}`}>
+                          {t(item)}
                         </Label>
                         <div className='relative'>
                           <span className='text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2'>
                             {currencySymbol}
                           </span>
                           <Input
-                            id='channel-cost-base-price'
+                            id={`channel-cost-${item}`}
                             className='pl-8'
                             inputMode='decimal'
-                            value={draft.basePrice}
+                            placeholder={t('per 1M tokens')}
+                            value={draft.prices[item] ?? ''}
                             onChange={(event) =>
                               setDraft({
                                 ...draft,
-                                basePrice: event.target.value,
+                                prices: {
+                                  ...draft.prices,
+                                  [item]: event.target.value,
+                                },
                               })
                             }
                           />
                         </div>
                       </div>
-                      <div className='grid gap-2'>
-                        <Label htmlFor='channel-cost-reference-video'>
-                          {t('Reference video price')}
-                        </Label>
-                        <div className='relative'>
-                          <span className='text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2'>
-                            {currencySymbol}
-                          </span>
-                          <Input
-                            id='channel-cost-reference-video'
-                            className='pl-8'
-                            inputMode='decimal'
-                            value={draft.referenceVideoPrice}
-                            placeholder={t('Optional')}
-                            onChange={(event) =>
-                              setDraft({
-                                ...draft,
-                                referenceVideoPrice: event.target.value,
-                              })
-                            }
-                          />
-                        </div>
+                    ))}
+                  </div>
+                )}
+                {(draft.mode === 'per_request' ||
+                  draft.mode === 'per_second' ||
+                  draft.mode === 'parametric') && (
+                  <div className='grid gap-4 sm:grid-cols-2'>
+                    <div className='grid gap-2'>
+                      <Label htmlFor='channel-cost-base-price'>
+                        {t('Base price')}
+                      </Label>
+                      <div className='relative'>
+                        <span className='text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2'>
+                          {currencySymbol}
+                        </span>
+                        <Input
+                          id='channel-cost-base-price'
+                          className='pl-8'
+                          inputMode='decimal'
+                          value={draft.basePrice}
+                          onChange={(event) =>
+                            setDraft({
+                              ...draft,
+                              basePrice: event.target.value,
+                            })
+                          }
+                        />
                       </div>
                     </div>
-                  )}
-                  {(draft.mode === 'per_second' ||
-                    draft.mode === 'parametric') && (
-                    <TaskBillingEditor
-                      draft={draft.taskBilling}
-                      onChange={(taskBilling) =>
-                        setDraft({ ...draft, taskBilling })
+                    <div className='grid gap-2'>
+                      <Label htmlFor='channel-cost-reference-video'>
+                        {t('Reference video price')}
+                      </Label>
+                      <div className='relative'>
+                        <span className='text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2'>
+                          {currencySymbol}
+                        </span>
+                        <Input
+                          id='channel-cost-reference-video'
+                          className='pl-8'
+                          inputMode='decimal'
+                          value={draft.referenceVideoPrice}
+                          placeholder={t('Optional')}
+                          onChange={(event) =>
+                            setDraft({
+                              ...draft,
+                              referenceVideoPrice: event.target.value,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {(draft.mode === 'per_second' ||
+                  draft.mode === 'parametric') && (
+                  <TaskBillingEditor
+                    draft={draft.taskBilling}
+                    onChange={(taskBilling) =>
+                      setDraft({ ...draft, taskBilling })
+                    }
+                  />
+                )}
+                {draft.mode === 'tiered_expr' && (
+                  <div className='grid gap-2'>
+                    <Label htmlFor='channel-cost-expression'>
+                      {t('Billing expression')}
+                    </Label>
+                    <Textarea
+                      id='channel-cost-expression'
+                      className='min-h-56 font-mono text-xs'
+                      value={draft.billingExpr}
+                      onChange={(event) =>
+                        setDraft({
+                          ...draft,
+                          billingExpr: event.target.value,
+                        })
                       }
                     />
-                  )}
-                  {draft.mode === 'tiered_expr' && (
-                    <div className='grid gap-2'>
-                      <Label htmlFor='channel-cost-expression'>
-                        {t('Billing expression')}
-                      </Label>
-                      <Textarea
-                        id='channel-cost-expression'
-                        className='min-h-56 font-mono text-xs'
-                        value={draft.billingExpr}
-                        onChange={(event) =>
-                          setDraft({
-                            ...draft,
-                            billingExpr: event.target.value,
-                          })
-                        }
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
           <DialogFooter>
