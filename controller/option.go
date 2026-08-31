@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -142,6 +144,84 @@ func GetModelPricingOptions(c *gin.Context) {
 func UpdateModelPricingOption(c *gin.Context) {
 	c.Set(contextKeyModelPricingOptionOnly, true)
 	UpdateOption(c)
+}
+
+func validateModelPricingOptionValue(key, value string) error {
+	switch key {
+	case billing_setting.TaskBillingOptionKey:
+		return billing_setting.ValidateTaskBillingJSONString(value)
+	case billing_setting.BillingModeOptionKey:
+		return billing_setting.ValidateBillingModeJSONString(value)
+	case billing_setting.BillingExprOptionKey:
+		return billing_setting.ValidateBillingExprJSONString(value)
+	case billing_setting.OfficialPricingOptionKey:
+		return fmt.Errorf("official pricing must use the dedicated endpoint")
+	}
+
+	var values map[string]float64
+	if err := common.UnmarshalJsonStr(value, &values); err != nil {
+		return err
+	}
+	for modelName, number := range values {
+		if strings.TrimSpace(modelName) == "" {
+			return fmt.Errorf("model name is required")
+		}
+		if math.IsNaN(number) || math.IsInf(number, 0) || number < 0 {
+			return fmt.Errorf("price or ratio for model %q must be non-negative", modelName)
+		}
+		if key == "VideoInputRatio" && number == 0 {
+			return fmt.Errorf("reference video ratio for model %q must be positive", modelName)
+		}
+	}
+	return nil
+}
+
+func UpdateModelPricingOptionsBulk(c *gin.Context) {
+	var request struct {
+		ModelName string                     `json:"model_name"`
+		Values    map[string]json.RawMessage `json:"values"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil || len(request.Values) == 0 {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	request.ModelName = strings.TrimSpace(request.ModelName)
+	if request.ModelName == "" || len(request.ModelName) > 191 {
+		common.ApiErrorMsg(c, "模型名称无效")
+		return
+	}
+	if len(request.Values) > len(completionRatioMetaOptionKeys) {
+		common.ApiErrorMsg(c, "模型定价配置项过多")
+		return
+	}
+	keys := make([]string, 0, len(request.Values))
+	for key, value := range request.Values {
+		if !slices.Contains(completionRatioMetaOptionKeys, key) {
+			common.ApiErrorMsg(c, "该接口只允许修改模型定价配置")
+			return
+		}
+		if string(value) == "null" {
+			keys = append(keys, key)
+			continue
+		}
+		wrapped, err := common.Marshal(map[string]json.RawMessage{request.ModelName: value})
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if err := validateModelPricingOptionValue(key, string(wrapped)); err != nil {
+			common.ApiErrorMsg(c, fmt.Sprintf("模型定价配置 %s 失败: %v", key, err))
+			return
+		}
+		keys = append(keys, key)
+	}
+	if err := model.UpdateModelPricingOptions(request.ModelName, request.Values); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "model_pricing.bulk_update", map[string]interface{}{"model_name": request.ModelName, "keys": keys})
+	model.InvalidatePricingCache()
+	common.ApiSuccess(c, gin.H{"updated": len(request.Values)})
 }
 
 func UpsertOfficialPricing(c *gin.Context) {

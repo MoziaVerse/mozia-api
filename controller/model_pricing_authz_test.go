@@ -135,3 +135,12 @@ func TestUpdateModelPricingOptionRejectsInvalidBillingExpression(t *testing.T) {
 	assert.False(t, response.Success)
 	assert.Contains(t, response.Message, "模型计费表达式配置失败")
 }
+
+func TestValidateModelPricingOptionValue(t *testing.T) {
+	assert.NoError(t, validateModelPricingOptionValue("ModelPrice", `{"video-model":0.9}`))
+	assert.NoError(t, validateModelPricingOptionValue("VideoInputRatio", `{"video-model":1.5}`))
+	assert.Error(t, validateModelPricingOptionValue("VideoInputRatio", `{"video-model":0}`))
+	assert.Error(t, validateModelPricingOptionValue("ModelRatio", `{"video-model":-1}`))
+	assert.Error(t, validateModelPricingOptionValue(billing_setting.BillingExprOptionKey, `{"video-model":"p *"}`))
+	assert.Error(t, validateModelPricingOptionValue(billing_setting.OfficialPricingOptionKey, `{}`))
+}

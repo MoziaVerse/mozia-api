@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Option struct {
@@ -287,6 +289,68 @@ func UpsertOfficialPricing(modelName string, pricing billing_setting.OfficialPri
 
 func DeleteOfficialPricing(modelName string) (bool, error) {
 	return mutateOfficialPricing(modelName, nil)
+}
+
+func UpdateModelPricingOptions(modelName string, patches map[string]json.RawMessage) error {
+	keys := make([]string, 0, len(patches))
+	currentValues := make(map[string]string, len(patches))
+	common.OptionMapRWMutex.RLock()
+	for key := range patches {
+		keys = append(keys, key)
+		currentValues[key] = common.OptionMap[key]
+	}
+	common.OptionMapRWMutex.RUnlock()
+	sort.Strings(keys)
+
+	nextValues := make(map[string]string, len(patches))
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		for _, key := range keys {
+			patch := patches[key]
+			var option Option
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("key = ?", key).First(&option).Error; err != nil {
+				if !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				initialValue := currentValues[key]
+				if strings.TrimSpace(initialValue) == "" {
+					initialValue = `{}`
+				}
+				option = Option{Key: key, Value: initialValue}
+				if err := tx.Create(&option).Error; err != nil {
+					return err
+				}
+			}
+
+			values := make(map[string]json.RawMessage)
+			if err := common.UnmarshalJsonStr(option.Value, &values); err != nil {
+				return fmt.Errorf("invalid model pricing option %q: %w", key, err)
+			}
+			if string(patch) == "null" {
+				delete(values, modelName)
+			} else {
+				values[modelName] = patch
+			}
+			next, err := common.Marshal(values)
+			if err != nil {
+				return err
+			}
+			option.Value = string(next)
+			if err := tx.Save(&option).Error; err != nil {
+				return err
+			}
+			nextValues[key] = option.Value
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for key, value := range nextValues {
+		if err := updateOptionMap(key, value); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
