@@ -35,7 +35,6 @@ type PricingDisplayItem struct {
 	FreeCount         *int     `json:"free_count,omitempty"`
 	OurAmountUSD      *float64 `json:"our_amount_usd,omitempty"`
 	OfficialAmountUSD *float64 `json:"official_amount_usd,omitempty"`
-	DiscountPercent   *float64 `json:"discount_percent,omitempty"`
 }
 
 type pricingBaseVariant struct {
@@ -226,10 +225,6 @@ func attachOfficialPricing(display *PricingDisplay, modelName string) {
 			continue
 		}
 		item.OfficialAmountUSD = &officialUSD
-		if officialUSD > 0 {
-			discount := (officialUSD - *item.OurAmountUSD) / officialUSD * 100
-			item.DiscountPercent = &discount
-		}
 	}
 }
 

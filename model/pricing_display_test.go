@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildPricingDisplayShowsFinalPerSecondPricesAndOfficialDiscounts(t *testing.T) {
+func TestBuildPricingDisplayShowsFinalPerSecondAndOfficialPrices(t *testing.T) {
 	originalOfficial, err := common.Marshal(billing_setting.GetOfficialPricingCopy())
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -57,7 +57,6 @@ func TestBuildPricingDisplayShowsFinalPerSecondPricesAndOfficialDiscounts(t *tes
 	assert.Equal(t, "task:second:resolution=480p", display.Items[0].Key)
 	assert.InDelta(t, 0.462, *display.Items[0].OurAmountUSD, 0.000001)
 	assert.InDelta(t, 0.6, *display.Items[0].OfficialAmountUSD, 0.000001)
-	assert.InDelta(t, 23, *display.Items[0].DiscountPercent, 0.000001)
 	assert.Equal(t, "task:second:resolution=720p", display.Items[1].Key)
 	assert.InDelta(t, 0.994, *display.Items[1].OurAmountUSD, 0.000001)
 }

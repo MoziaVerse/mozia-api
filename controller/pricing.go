@@ -119,7 +119,6 @@ func GetPricing(c *gin.Context) {
 		"usable_group":       usableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),
 		"auto_groups":        service.GetUserAutoGroup(group),
-		"pricing_version":    model.PricingDisplayVersion,
 	})
 }
 

@@ -2,6 +2,7 @@ package billing_setting
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"net/url"
 	"strings"
@@ -23,14 +24,14 @@ func GetOfficialPricing(model string) (OfficialPricing, bool) {
 	if !ok {
 		return OfficialPricing{}, false
 	}
-	pricing.Items = copyOfficialPriceItems(pricing.Items)
+	pricing.Items = maps.Clone(pricing.Items)
 	return pricing, true
 }
 
 func GetOfficialPricingCopy() map[string]OfficialPricing {
 	result := make(map[string]OfficialPricing, len(billingSetting.OfficialPricing))
 	for model, pricing := range billingSetting.OfficialPricing {
-		pricing.Items = copyOfficialPriceItems(pricing.Items)
+		pricing.Items = maps.Clone(pricing.Items)
 		result[model] = pricing
 	}
 	return result
@@ -72,12 +73,4 @@ func ValidateOfficialPricingJSONString(raw string) error {
 		}
 	}
 	return nil
-}
-
-func copyOfficialPriceItems(items map[string]float64) map[string]float64 {
-	result := make(map[string]float64, len(items))
-	for key, amount := range items {
-		result[key] = amount
-	}
-	return result
 }
