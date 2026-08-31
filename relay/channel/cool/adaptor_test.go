@@ -78,6 +78,11 @@ func TestConvertPayloadSeedanceRouting(t *testing.T) {
 	}
 }
 
+func TestEstimateBillingUsesBaseNoop(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	assert.Nil(t, adaptor.EstimateBilling(nil, nil))
+}
+
 // 非 Seedance 模型也要剥掉对外 cool: 前缀（cool 的 model key 不带前缀）。
 func TestConvertPayloadNonSeedanceStripsPrefix(t *testing.T) {
 	r := buildPayloadForBody(t, "cool:gpt_image_2", `{"model":"cool:gpt_image_2","prompt":"hi"}`)

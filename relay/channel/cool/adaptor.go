@@ -260,18 +260,18 @@ func (a *TaskAdaptor) convertToRequestPayload(c *gin.Context, req *relaycommon.T
 
 	// Seedance SKU：把对外模型名（cool:seedance_2_480p_video 等）还原成 cool 上游
 	// 真实 model key（seedance_2 / seedance_2_fast）+ 独立的 resolution 参数。
-	// cool 的 model 字段只认基础 key，分辨率/参考视频后缀只是 mozia 侧的计费 SKU。
+	// cool 的 model 字段只认基础 key，分辨率和参考视频后缀是 mozia 侧的公开别名。
 	if spec := parseSeedanceModel(modelName); spec.OK {
 		r.Model = spec.Base
 		if spec.Dynamic {
-			// 动态 SKU：分辨率取自请求参数，缺省回落 720p（与计费一致）。
+			// 动态 SKU：分辨率取自请求参数，缺省回落 720p。
 			resolution := resolveSeedanceResolution(c, req)
 			if resolution == "" {
 				resolution = seedanceDefaultResolution
 			}
 			r.Resolution = resolution
 		} else {
-			// 固定 SKU：分辨率后缀优先，忽略请求体（别名即 SKU，保证计费==转发）。
+			// 固定 SKU：分辨率后缀优先，忽略请求体。
 			r.Resolution = spec.Resolution
 		}
 		return r, nil

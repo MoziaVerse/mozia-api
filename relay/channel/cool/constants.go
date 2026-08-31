@@ -12,7 +12,7 @@ const (
 	defaultVideoModel = "seedance_2_fast"
 )
 
-// ImageModels 是按张计费的图片模型集合。
+// ImageModels 是 cool 支持的图片模型集合。
 var ImageModels = []string{
 	"gpt_image_2",
 	"seedream_4_5",
@@ -22,8 +22,8 @@ var ImageModels = []string{
 	"nano_banana_pro",
 }
 
-// VideoModels 是按次计费（单次定额）的视频模型集合。
-// Seedance 2.0 系列按「分辨率 × 时长」动态计费，单独放在 SeedanceSKUs。
+// VideoModels 是 cool 支持的普通视频模型集合。
+// Seedance 2.0 系列需要额外转换分辨率，单独放在 SeedanceSKUs。
 var VideoModels = []string{
 	"seedance_1_5_pro_audio",
 	"seedance_1_5_pro_silent",
@@ -38,10 +38,10 @@ var VideoModels = []string{
 	"r_sd2",
 }
 
-// SeedanceSKUs 是对外暴露的 Seedance 2.0 计费 SKU（带 cool: 前缀）。
+// SeedanceSKUs 是对外暴露的 Seedance 2.0 SKU（带 cool: 前缀）。
 //
 // 模型名编码了三要素：基础模型(seedance_2 / seedance_2_fast) + 分辨率 + 是否参考视频，
-// 由 billing.go 的 parseSeedanceModel 解析回 cool 上游真实 model key + resolution 参数：
+// 由 seedance.go 的 parseSeedanceModel 解析回 cool 上游真实 model key + resolution 参数：
 //
 //   - cool:seedance_2 / cool:seedance_2_fast        无分辨率后缀 → 动态路由，默认 720p
 //   - cool:seedance_2_480p / _720p / _1080p          固定分辨率（后缀优先，忽略请求体）
@@ -49,7 +49,7 @@ var VideoModels = []string{
 //
 // cool 官方 /v1/cool/generate 的 model 字段只认基础 key（seedance_2 / seedance_2_fast），
 // 分辨率走独立的 resolution 字段；参考视频不是单独模型，而是 files 里带 type:video 的素材。
-// 价格见 https://yuanman.mjapi.cc.cd/api/pricing（按秒计费）。fast 版本无 1080p。
+// fast 版本无 1080p。
 var SeedanceSKUs = []string{
 	"cool:seedance_2",
 	"cool:seedance_2_480p",
