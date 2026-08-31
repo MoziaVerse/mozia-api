@@ -38,9 +38,7 @@ type Pricing struct {
 	BillingMode             string                  `json:"billing_mode,omitempty"`
 	BillingExpr             string                  `json:"billing_expr,omitempty"`
 	TaskBilling             *taskbilling.Config     `json:"task_billing,omitempty"`
-	PricingVersion          string                  `json:"pricing_version,omitempty"`
 	Access                  *PricingAccess          `json:"access,omitempty"`
-	DisplayPricing          *PricingDisplay         `json:"display_pricing,omitempty"`
 	customerPriceMultiplier float64
 }
 
@@ -356,11 +354,6 @@ func updatePricing() {
 			pricing.TaskBilling = &taskBilling
 		}
 		pricingMap = append(pricingMap, pricing)
-	}
-
-	// 防止大更新后数据不通用
-	if len(pricingMap) > 0 {
-		pricingMap[0].PricingVersion = "structured-pricing-v1"
 	}
 
 	// 刷新缓存映射，供高并发快速查询
