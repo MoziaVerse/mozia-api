@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -37,6 +38,15 @@ type PricingDisplayItem struct {
 	OfficialAmountUSD *float64 `json:"official_amount_usd,omitempty"`
 }
 
+type PricingOfficialDiscount struct {
+	Editable     bool   `json:"editable"`
+	BaseMin      string `json:"base_min"`
+	BaseMax      string `json:"base_max"`
+	EffectiveMin string `json:"effective_min"`
+	EffectiveMax string `json:"effective_max"`
+	Reason       string `json:"reason,omitempty"`
+}
+
 type pricingBaseVariant struct {
 	price     float64
 	suffix    string
@@ -62,6 +72,89 @@ func BuildPricingDisplay(pricing Pricing, customerRatio float64) *PricingDisplay
 	display := &PricingDisplay{Version: PricingDisplayVersion, Items: items}
 	attachOfficialPricing(display, pricing.ModelName)
 	return display
+}
+
+func pricingOfficialDiscount(pricing Pricing, multiplierPPM int64) (*PricingOfficialDiscount, float64) {
+	display := BuildPricingDisplay(pricing, 1)
+	if display.Official == nil {
+		return nil, 0
+	}
+	minRate := math.Inf(1)
+	maxRate := 0.0
+	complete := len(display.Items) > 0
+	for _, item := range display.Items {
+		if item.OurAmountUSD == nil || *item.OurAmountUSD <= 0 || item.OfficialAmountUSD == nil || *item.OfficialAmountUSD <= 0 {
+			complete = false
+			continue
+		}
+		rate := *item.OurAmountUSD / *item.OfficialAmountUSD * 10
+		if rate < minRate {
+			minRate = rate
+		}
+		if rate > maxRate {
+			maxRate = rate
+		}
+	}
+	if math.IsInf(minRate, 1) {
+		return &PricingOfficialDiscount{Reason: "incomplete"}, 0
+	}
+	multiplier := float64(multiplierPPM) / float64(ResellerDefaultMultiplierPPM)
+	reference := &PricingOfficialDiscount{
+		Editable:     complete && maxRate-minRate < 0.000001,
+		BaseMin:      formatOfficialDiscount(minRate),
+		BaseMax:      formatOfficialDiscount(maxRate),
+		EffectiveMin: formatOfficialDiscount(minRate * multiplier),
+		EffectiveMax: formatOfficialDiscount(maxRate * multiplier),
+	}
+	if !complete {
+		reference.Reason = "incomplete"
+	} else if !reference.Editable {
+		reference.Reason = "non_uniform"
+	}
+	return reference, minRate
+}
+
+func GetPricingOfficialDiscount(modelName string, multiplierPPM int64) *PricingOfficialDiscount {
+	for _, pricing := range GetPricing() {
+		if pricing.ModelName == modelName {
+			reference, _ := pricingOfficialDiscount(pricing, multiplierPPM)
+			if reference != nil && reference.BaseMin == "" {
+				return nil
+			}
+			return reference
+		}
+	}
+	return nil
+}
+
+func ResellerMultiplierFromOfficialDiscount(modelName string, discount string) (int64, error) {
+	for _, pricing := range GetPricing() {
+		if pricing.ModelName != modelName {
+			continue
+		}
+		return resellerMultiplierFromOfficialDiscount(pricing, discount)
+	}
+	return 0, ErrInvalidResellerPriceRule
+}
+
+func resellerMultiplierFromOfficialDiscount(pricing Pricing, discount string) (int64, error) {
+	reference, baseRate := pricingOfficialDiscount(pricing, ResellerDefaultMultiplierPPM)
+	if reference == nil || !reference.Editable || baseRate <= 0 {
+		return 0, ErrInvalidResellerPriceRule
+	}
+	discountPPM, err := ParseResellerMultiplier(discount)
+	if err != nil || discountPPM > 10*ResellerDefaultMultiplierPPM {
+		return 0, ErrInvalidResellerPriceRule
+	}
+	multiplier := math.Round(float64(discountPPM) / baseRate)
+	if multiplier <= 0 || multiplier > math.MaxInt64 {
+		return 0, ErrInvalidResellerPriceRule
+	}
+	return int64(multiplier), nil
+}
+
+func formatOfficialDiscount(rate float64) string {
+	return FormatResellerMultiplier(int64(math.Round(rate * float64(ResellerDefaultMultiplierPPM))))
 }
 
 func buildTokenPricingItems(pricing Pricing, customerRatio float64) []PricingDisplayItem {

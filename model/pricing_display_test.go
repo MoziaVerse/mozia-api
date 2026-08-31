@@ -101,3 +101,48 @@ func TestBuildPricingDisplaySupportsTokenVideoAndSurchargeItems(t *testing.T) {
 	assert.Equal(t, 5, *surchargeDisplay.Items[1].FreeCount)
 	assert.InDelta(t, 0.2, *surchargeDisplay.Items[1].OurAmountUSD, 0.000001)
 }
+
+func TestPricingOfficialDiscountRequiresOneUniformCompleteRate(t *testing.T) {
+	originalOfficial, err := common.Marshal(billing_setting.GetOfficialPricingCopy())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), map[string]string{
+			"official_pricing": string(originalOfficial),
+		}))
+	})
+	require.NoError(t, config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), map[string]string{
+		"official_pricing": `{
+			"discount-model": {
+				"currency":"USD",
+				"source_url":"https://example.com/pricing",
+				"verified_at":"2026-08-31",
+				"items":{"token:input":2,"token:output":4}
+			}
+		}`,
+	}))
+	pricing := Pricing{ModelName: "discount-model", QuotaType: 0, ModelRatio: 0.5, CompletionRatio: 2}
+
+	reference, baseRate := pricingOfficialDiscount(pricing, 800_000)
+	require.NotNil(t, reference)
+	assert.True(t, reference.Editable)
+	assert.Equal(t, "5", reference.BaseMin)
+	assert.Equal(t, "4", reference.EffectiveMin)
+	assert.InDelta(t, 5, baseRate, 0.000001)
+	multiplier, err := resellerMultiplierFromOfficialDiscount(pricing, "7.5")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1_500_000), multiplier)
+
+	require.NoError(t, config.UpdateConfigFromMap(config.GlobalConfig.Get("billing_setting"), map[string]string{
+		"official_pricing": `{
+			"discount-model": {
+				"currency":"USD",
+				"source_url":"https://example.com/pricing",
+				"verified_at":"2026-08-31",
+				"items":{"token:input":2,"token:output":5}
+			}
+		}`,
+	}))
+	reference, _ = pricingOfficialDiscount(pricing, ResellerDefaultMultiplierPPM)
+	assert.False(t, reference.Editable)
+	assert.Equal(t, "non_uniform", reference.Reason)
+}
