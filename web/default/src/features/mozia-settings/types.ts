@@ -43,6 +43,15 @@ export type MoziaUserModelRatioPayload = MoziaUserModelRatio
 export type MoziaUserModelRedirect = {
   user_id: number
   username?: string
+  source_model: string
+  target_model: string
+}
+
+export type MoziaUserModelRedirectPayload = Omit<
+  MoziaUserModelRedirect,
+  'username'
+> & {
+  sso_sub?: string
 }
 
 export type ApiEnvelope<T> = {

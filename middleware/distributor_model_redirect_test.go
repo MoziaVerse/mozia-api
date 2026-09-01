@@ -28,15 +28,17 @@ func TestGetModelRequestPreservesThinkingType(t *testing.T) {
 }
 
 func TestApplyUserThinkingDisabledRedirect(t *testing.T) {
-	originallyEnabled := mozia_setting.IsUserThinkingDisabledRedirectEnabled(6218)
+	original := mozia_setting.UserThinkingDisabledRedirects2JSONString()
 	t.Cleanup(func() {
-		value, err := mozia_setting.BuildUserThinkingDisabledRedirectJSON(6218, originallyEnabled)
-		require.NoError(t, err)
-		require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(value))
+		require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(original))
 	})
-	value, err := mozia_setting.BuildUserThinkingDisabledRedirectJSON(6218, true)
-	require.NoError(t, err)
-	require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(value))
+	require.NoError(t, mozia_setting.UpdateUserThinkingDisabledRedirectsByJSONString(`{
+		"6218:vendor/source": {
+			"user_id": 6218,
+			"source_model": "vendor/source",
+			"target_model": "vendor/target"
+		}
+	}`))
 
 	tests := []struct {
 		name         string
@@ -47,11 +49,11 @@ func TestApplyUserThinkingDisabledRedirect(t *testing.T) {
 		wantModel    string
 		wantApplied  bool
 	}{
-		{"matching request", 6218, "/v1/chat/completions", "disabled", "moonshotai/kimi-k3", "moonshotai/kimi-k2.6", true},
-		{"other user", 6219, "/v1/chat/completions", "disabled", "moonshotai/kimi-k3", "moonshotai/kimi-k3", false},
-		{"thinking enabled", 6218, "/v1/chat/completions", "enabled", "moonshotai/kimi-k3", "moonshotai/kimi-k3", false},
-		{"different model", 6218, "/v1/chat/completions", "disabled", "moonshotai/kimi-k2.6", "moonshotai/kimi-k2.6", false},
-		{"different endpoint", 6218, "/v1/responses", "disabled", "moonshotai/kimi-k3", "moonshotai/kimi-k3", false},
+		{"matching request", 6218, "/v1/chat/completions", "disabled", "vendor/source", "vendor/target", true},
+		{"other user", 6219, "/v1/chat/completions", "disabled", "vendor/source", "vendor/source", false},
+		{"thinking enabled", 6218, "/v1/chat/completions", "enabled", "vendor/source", "vendor/source", false},
+		{"different model", 6218, "/v1/chat/completions", "disabled", "vendor/other", "vendor/other", false},
+		{"different endpoint", 6218, "/v1/responses", "disabled", "vendor/source", "vendor/source", false},
 	}
 
 	for _, tt := range tests {

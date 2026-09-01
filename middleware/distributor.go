@@ -253,13 +253,13 @@ func applyUserThinkingDisabledRedirect(c *gin.Context, request *ModelRequest) {
 		relayconstant.Path2RelayMode(c.Request.URL.Path) != relayconstant.RelayModeChatCompletions {
 		return
 	}
-	if request.Model != mozia_setting.ThinkingDisabledSourceModel ||
-		!mozia_setting.IsUserThinkingDisabledRedirectEnabled(c.GetInt("id")) {
+	rule, ok := mozia_setting.GetUserThinkingDisabledRedirect(c.GetInt("id"), request.Model)
+	if !ok {
 		return
 	}
 	common.SetContextKey(c, constant.ContextKeyRequestedModel, request.Model)
 	common.SetContextKey(c, constant.ContextKeyModelRedirectApplied, true)
-	request.Model = mozia_setting.ThinkingDisabledTargetModel
+	request.Model = rule.TargetModel
 }
 
 func getJSONStringValue(result gjson.Result, field string) (string, error) {

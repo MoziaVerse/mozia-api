@@ -2,80 +2,160 @@ package mozia_setting
 
 import (
 	"errors"
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/types"
 )
 
+const UserThinkingDisabledRedirectOptionKey = "mozia_setting.user_thinking_disabled_redirects"
+
+// These values are only used to migrate the previous {user_id: true} format.
 const (
-	UserThinkingDisabledRedirectOptionKey = "mozia_setting.user_thinking_disabled_redirects"
-	ThinkingDisabledSourceModel           = "moonshotai/kimi-k3"
-	ThinkingDisabledTargetModel           = "moonshotai/kimi-k2.6"
+	legacyThinkingDisabledSourceModel = "moonshotai/kimi-k3"
+	legacyThinkingDisabledTargetModel = "moonshotai/kimi-k2.6"
 )
 
-type userThinkingDisabledRedirectUsers struct {
-	*types.RWMap[int, bool]
+type UserThinkingDisabledRedirect struct {
+	UserId      int    `json:"user_id"`
+	SourceModel string `json:"source_model"`
+	TargetModel string `json:"target_model"`
 }
 
-func (users *userThinkingDisabledRedirectUsers) UnmarshalJSON(data []byte) error {
-	current := make(map[int]bool)
-	if err := common.Unmarshal(data, &current); err == nil {
-		users.Clear()
-		users.AddAll(current)
-		return nil
-	}
+type persistedUserThinkingDisabledRedirect struct {
+	UserId      int    `json:"user_id"`
+	SourceModel string `json:"source_model"`
+	TargetModel string `json:"target_model"`
+	Enabled     *bool  `json:"enabled,omitempty"`
+}
 
-	legacy := make(map[string]struct {
-		UserId  int  `json:"user_id"`
-		Enabled bool `json:"enabled"`
-	})
-	if err := common.Unmarshal(data, &legacy); err != nil {
-		return err
+type userThinkingDisabledRedirectRules struct {
+	*types.RWMap[string, UserThinkingDisabledRedirect]
+}
+
+func redirectKey(userId int, sourceModel string) string {
+	return fmt.Sprintf("%d:%s", userId, strings.TrimSpace(sourceModel))
+}
+
+func NormalizeUserThinkingDisabledRedirect(rule UserThinkingDisabledRedirect) UserThinkingDisabledRedirect {
+	rule.SourceModel = strings.TrimSpace(rule.SourceModel)
+	rule.TargetModel = strings.TrimSpace(rule.TargetModel)
+	return rule
+}
+
+func ValidateUserThinkingDisabledRedirect(rule UserThinkingDisabledRedirect) error {
+	rule = NormalizeUserThinkingDisabledRedirect(rule)
+	if rule.UserId <= 0 {
+		return errors.New("user_id must be greater than 0")
 	}
-	users.Clear()
-	for _, rule := range legacy {
-		if rule.UserId > 0 && rule.Enabled {
-			users.Set(rule.UserId, true)
-		}
+	if rule.SourceModel == "" {
+		return errors.New("source_model must not be empty")
+	}
+	if rule.TargetModel == "" {
+		return errors.New("target_model must not be empty")
+	}
+	if rule.SourceModel == rule.TargetModel {
+		return errors.New("source_model and target_model must be different")
 	}
 	return nil
 }
 
-var userThinkingDisabledRedirectMap = &userThinkingDisabledRedirectUsers{
-	RWMap: types.NewRWMap[int, bool](),
-}
-
-func IsUserThinkingDisabledRedirectEnabled(userId int) bool {
-	enabled, ok := userThinkingDisabledRedirectMap.Get(userId)
-	return ok && enabled
-}
-
-func GetUserThinkingDisabledRedirectUserIds() []int {
-	all := userThinkingDisabledRedirectMap.ReadAll()
-	userIds := make([]int, 0, len(all))
-	for userId, enabled := range all {
-		if enabled {
-			userIds = append(userIds, userId)
+func (rules *userThinkingDisabledRedirectRules) UnmarshalJSON(data []byte) error {
+	persisted := make(map[string]persistedUserThinkingDisabledRedirect)
+	if err := common.Unmarshal(data, &persisted); err == nil {
+		normalized := make(map[string]UserThinkingDisabledRedirect, len(persisted))
+		for _, stored := range persisted {
+			if stored.Enabled != nil && !*stored.Enabled {
+				continue
+			}
+			rule := UserThinkingDisabledRedirect{
+				UserId:      stored.UserId,
+				SourceModel: stored.SourceModel,
+				TargetModel: stored.TargetModel,
+			}
+			rule = NormalizeUserThinkingDisabledRedirect(rule)
+			if err := ValidateUserThinkingDisabledRedirect(rule); err != nil {
+				return err
+			}
+			normalized[redirectKey(rule.UserId, rule.SourceModel)] = rule
 		}
+		rules.Clear()
+		rules.AddAll(normalized)
+		return nil
 	}
-	sort.Ints(userIds)
-	return userIds
+
+	legacy := make(map[int]bool)
+	if err := common.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	configured := make(map[string]UserThinkingDisabledRedirect, len(legacy))
+	for userId, enabled := range legacy {
+		if userId <= 0 || !enabled {
+			continue
+		}
+		rule := UserThinkingDisabledRedirect{
+			UserId:      userId,
+			SourceModel: legacyThinkingDisabledSourceModel,
+			TargetModel: legacyThinkingDisabledTargetModel,
+		}
+		configured[redirectKey(userId, rule.SourceModel)] = rule
+	}
+	rules.Clear()
+	rules.AddAll(configured)
+	return nil
 }
 
-func BuildUserThinkingDisabledRedirectJSON(userId int, enabled bool) (string, error) {
-	if userId <= 0 {
-		return "", errors.New("user_id must be greater than 0")
+var userThinkingDisabledRedirectMap = &userThinkingDisabledRedirectRules{
+	RWMap: types.NewRWMap[string, UserThinkingDisabledRedirect](),
+}
+
+func GetUserThinkingDisabledRedirect(userId int, sourceModel string) (UserThinkingDisabledRedirect, bool) {
+	rule, ok := userThinkingDisabledRedirectMap.Get(redirectKey(userId, sourceModel))
+	return rule, ok
+}
+
+func GetUserThinkingDisabledRedirects() []UserThinkingDisabledRedirect {
+	all := userThinkingDisabledRedirectMap.ReadAll()
+	rules := make([]UserThinkingDisabledRedirect, 0, len(all))
+	for _, rule := range all {
+		rules = append(rules, rule)
+	}
+	sort.Slice(rules, func(i, j int) bool {
+		if rules[i].UserId != rules[j].UserId {
+			return rules[i].UserId < rules[j].UserId
+		}
+		return rules[i].SourceModel < rules[j].SourceModel
+	})
+	return rules
+}
+
+func UserThinkingDisabledRedirects2JSONString() string {
+	return userThinkingDisabledRedirectMap.MarshalJSONString()
+}
+
+func BuildUserThinkingDisabledRedirectUpsertJSON(rule UserThinkingDisabledRedirect) (string, error) {
+	rule = NormalizeUserThinkingDisabledRedirect(rule)
+	if err := ValidateUserThinkingDisabledRedirect(rule); err != nil {
+		return "", err
 	}
 	all := userThinkingDisabledRedirectMap.ReadAll()
-	if enabled {
-		all[userId] = true
-	} else {
-		if _, ok := all[userId]; !ok {
-			return "", errors.New("user thinking redirect not found")
-		}
-		delete(all, userId)
+	all[redirectKey(rule.UserId, rule.SourceModel)] = rule
+	data, err := common.Marshal(all)
+	if err != nil {
+		return "", err
 	}
+	return string(data), nil
+}
+
+func BuildUserThinkingDisabledRedirectDeleteJSON(userId int, sourceModel string) (string, error) {
+	key := redirectKey(userId, sourceModel)
+	all := userThinkingDisabledRedirectMap.ReadAll()
+	if _, ok := all[key]; !ok {
+		return "", errors.New("user thinking redirect not found")
+	}
+	delete(all, key)
 	data, err := common.Marshal(all)
 	if err != nil {
 		return "", err

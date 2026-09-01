@@ -18,8 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
-import { type FormEvent, useRef, useState } from 'react'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { type FormEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -52,11 +52,12 @@ import {
   getMoziaUserModelRedirects,
   saveMoziaUserModelRedirect,
 } from './api'
-import type { MoziaUserModelRedirect } from './types'
+import type {
+  MoziaUserModelRedirect,
+  MoziaUserModelRedirectPayload,
+} from './types'
 
 const queryKey = ['mozia', 'user-model-redirects'] as const
-const sourceModel = 'moonshotai/kimi-k3'
-const targetModel = 'moonshotai/kimi-k2.6'
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback
@@ -65,9 +66,12 @@ function errorMessage(error: unknown, fallback: string) {
 export function MoziaUserModelRedirectSection() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const formRef = useRef<HTMLFormElement>(null)
+  const [editing, setEditing] = useState<MoziaUserModelRedirect | null>(null)
   const [deleteTarget, setDeleteTarget] =
     useState<MoziaUserModelRedirect | null>(null)
+  const [ssoSub, setSsoSub] = useState('')
+  const [sourceModel, setSourceModel] = useState('')
+  const [targetModel, setTargetModel] = useState('')
 
   const rulesQuery = useQuery({
     queryKey,
@@ -77,7 +81,10 @@ export function MoziaUserModelRedirectSection() {
     mutationFn: saveMoziaUserModelRedirect,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey })
-      formRef.current?.reset()
+      setEditing(null)
+      setSsoSub('')
+      setSourceModel('')
+      setTargetModel('')
       toast.success(t('User model redirect saved'))
     },
     onError: (error: unknown) =>
@@ -88,6 +95,15 @@ export function MoziaUserModelRedirectSection() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey })
       toast.success(t('User model redirect deleted'))
+      if (
+        editing?.user_id === deleteTarget?.user_id &&
+        editing?.source_model === deleteTarget?.source_model
+      ) {
+        setEditing(null)
+        setSsoSub('')
+        setSourceModel('')
+        setTargetModel('')
+      }
       setDeleteTarget(null)
     },
     onError: (error: unknown) =>
@@ -98,11 +114,27 @@ export function MoziaUserModelRedirectSection() {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const ssoSub = String(
-      new FormData(event.currentTarget).get('sso_sub') ?? ''
-    ).trim()
-    if (!ssoSub) return
-    saveMutation.mutate(ssoSub)
+    const payload: MoziaUserModelRedirectPayload = {
+      user_id: editing?.user_id ?? 0,
+      source_model: sourceModel.trim(),
+      target_model: targetModel.trim(),
+    }
+    if (!editing) payload.sso_sub = ssoSub.trim()
+    if (
+      (!editing && !payload.sso_sub) ||
+      !payload.source_model ||
+      !payload.target_model
+    ) {
+      return
+    }
+    saveMutation.mutate(payload)
+  }
+
+  const cancelEdit = () => {
+    setEditing(null)
+    setSsoSub('')
+    setSourceModel('')
+    setTargetModel('')
   }
 
   const rules = rulesQuery.data ?? []
@@ -116,40 +148,72 @@ export function MoziaUserModelRedirectSection() {
         )}
       >
         <form
-          ref={formRef}
-          className='mb-4 flex flex-col gap-2 sm:flex-row'
+          className='mb-4 grid gap-2 lg:grid-cols-[minmax(12rem,1fr)_minmax(12rem,1fr)_minmax(12rem,1fr)_auto]'
           onSubmit={submit}
         >
           <Input
-            name='sso_sub'
             aria-label={t('SSO subject')}
             placeholder={t('SSO subject')}
+            value={
+              editing
+                ? `${editing.username || '-'} (#${editing.user_id})`
+                : ssoSub
+            }
+            onChange={(event) => setSsoSub(event.target.value)}
+            disabled={editing !== null || saveMutation.isPending}
+            required={!editing}
+          />
+          <Input
+            aria-label={t('Source model')}
+            placeholder={t('Source model')}
+            value={sourceModel}
+            onChange={(event) => setSourceModel(event.target.value)}
+            disabled={editing !== null || saveMutation.isPending}
+            required
+          />
+          <Input
+            aria-label={t('Target model')}
+            placeholder={t('Target model')}
+            value={targetModel}
+            onChange={(event) => setTargetModel(event.target.value)}
             disabled={saveMutation.isPending}
             required
           />
-          <Button type='submit' disabled={saveMutation.isPending}>
-            {saveMutation.isPending ? (
-              <Spinner data-icon='inline-start' />
-            ) : (
-              <Plus data-icon='inline-start' />
-            )}
-            {t('Add rule')}
-          </Button>
+          <div className='flex gap-2'>
+            <Button type='submit' disabled={saveMutation.isPending}>
+              {saveMutation.isPending && <Spinner data-icon='inline-start' />}
+              {!saveMutation.isPending && editing && (
+                <Pencil data-icon='inline-start' />
+              )}
+              {!saveMutation.isPending && !editing && (
+                <Plus data-icon='inline-start' />
+              )}
+              {editing ? t('Save') : t('Add rule')}
+            </Button>
+            {editing ? (
+              <Button type='button' variant='outline' onClick={cancelEdit}>
+                {t('Cancel')}
+              </Button>
+            ) : null}
+          </div>
         </form>
 
-        {rulesQuery.isLoading ? (
+        {rulesQuery.isLoading && (
           <div className='text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm'>
             <Spinner /> {t('Loading user model redirects...')}
           </div>
-        ) : rulesQuery.isError ? (
+        )}
+        {!rulesQuery.isLoading && rulesQuery.isError && (
           <div className='text-destructive py-8 text-center text-sm'>
             {errorMessage(rulesQuery.error, t('Request failed'))}
           </div>
-        ) : rules.length === 0 ? (
+        )}
+        {!rulesQuery.isLoading && !rulesQuery.isError && rules.length === 0 && (
           <div className='text-muted-foreground py-8 text-center text-sm'>
             {t('No user model redirects')}
           </div>
-        ) : (
+        )}
+        {!rulesQuery.isLoading && !rulesQuery.isError && rules.length > 0 && (
           <div className='overflow-x-auto'>
             <Table className='min-w-[680px]'>
               <TableHeader>
@@ -162,7 +226,7 @@ export function MoziaUserModelRedirectSection() {
               </TableHeader>
               <TableBody>
                 {rules.map((rule) => (
-                  <TableRow key={rule.user_id}>
+                  <TableRow key={`${rule.user_id}:${rule.source_model}`}>
                     <TableCell>
                       <div className='font-medium'>{rule.username || '-'}</div>
                       <div className='text-muted-foreground text-xs'>
@@ -170,20 +234,35 @@ export function MoziaUserModelRedirectSection() {
                       </div>
                     </TableCell>
                     <TableCell className='font-mono text-xs'>
-                      {sourceModel}
+                      {rule.source_model}
                     </TableCell>
                     <TableCell className='font-mono text-xs'>
-                      {targetModel}
+                      {rule.target_model}
                     </TableCell>
                     <TableCell className='text-right'>
-                      <Button
-                        size='icon'
-                        variant='ghost'
-                        title={t('Delete')}
-                        onClick={() => setDeleteTarget(rule)}
-                      >
-                        <Trash2 />
-                      </Button>
+                      <div className='flex justify-end gap-1'>
+                        <Button
+                          size='icon'
+                          variant='ghost'
+                          title={t('Edit')}
+                          onClick={() => {
+                            setEditing(rule)
+                            setSsoSub('')
+                            setSourceModel(rule.source_model)
+                            setTargetModel(rule.target_model)
+                          }}
+                        >
+                          <Pencil />
+                        </Button>
+                        <Button
+                          size='icon'
+                          variant='ghost'
+                          title={t('Delete')}
+                          onClick={() => setDeleteTarget(rule)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
