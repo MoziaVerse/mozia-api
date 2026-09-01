@@ -379,12 +379,9 @@ export const validateTaskBillingDraft = (
         return 'Enumeration options must be unique.'
       }
       resolutions.add(resolution)
-      if (!isPositiveNumber(price.standard)) {
-        return 'Enumeration multipliers must be greater than zero.'
-      }
       if (
-        price.referenceVideo.trim() &&
-        !isPositiveNumber(price.referenceVideo)
+        !isPositiveNumber(price.standard) ||
+        (price.referenceVideo.trim() && !isPositiveNumber(price.referenceVideo))
       ) {
         return 'Enumeration multipliers must be greater than zero.'
       }

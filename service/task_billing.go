@@ -490,13 +490,11 @@ func RecalculateTaskQuotaByTokenPrice(ctx context.Context, task *model.Task, tot
 		return
 	}
 	bc := task.PrivateData.BillingContext
-	if bc.TaskTokenPrice == nil || bc.TaskTokenPrice.UnitPrice <= 0 || bc.GroupRatio <= 0 {
+	if bc.TaskTokenPrice == nil || bc.TaskTokenPrice.UnitPrice <= 0 || bc.TaskTokenQuotaPerUnit <= 0 || bc.GroupRatio <= 0 {
+		logger.LogWarn(ctx, fmt.Sprintf("任务 %s 缺少完整的参数化 token 计费快照，保留预扣额度", task.TaskID))
 		return
 	}
 	quotaPerUnit := bc.TaskTokenQuotaPerUnit
-	if quotaPerUnit <= 0 {
-		quotaPerUnit = common.QuotaPerUnit
-	}
 	actualQuota := max(1, billingexpr.QuotaRound(float64(totalTokens)/1_000_000*bc.TaskTokenPrice.UnitPrice*quotaPerUnit*bc.GroupRatio))
 	reason := fmt.Sprintf(
 		"参数化 token 重算：tokens=%d, resolution=%s, referenceVideo=%t, unitPrice=%.6f, groupRatio=%.4f",

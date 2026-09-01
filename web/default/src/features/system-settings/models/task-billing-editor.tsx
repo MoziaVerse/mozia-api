@@ -40,6 +40,7 @@ import {
   type TaskDimensionDraft,
   type TaskSurchargeDraft,
   type TaskTokenPriceDraft,
+  type TaskTokenPricingDraft,
 } from './task-billing-config'
 
 type TaskBillingEditorProps = {
@@ -79,20 +80,19 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
     })
   }
 
-  const updateTokenPrice = (
-    id: string,
-    patch: Partial<TaskTokenPriceDraft>
-  ) => {
+  const updateTokenPrices = (patch: Partial<TaskTokenPricingDraft>) => {
     props.onChange({
       ...props.draft,
-      tokenPrices: {
-        ...props.draft.tokenPrices,
-        values: props.draft.tokenPrices.values.map((price) =>
-          price.id === id ? { ...price, ...patch } : price
-        ),
-      },
+      tokenPrices: { ...props.draft.tokenPrices, ...patch },
     })
   }
+
+  const updateTokenPrice = (id: string, patch: Partial<TaskTokenPriceDraft>) =>
+    updateTokenPrices({
+      values: props.draft.tokenPrices.values.map((price) =>
+        price.id === id ? { ...price, ...patch } : price
+      ),
+    })
 
   const renderNumericFields = (
     dimension: TaskDimensionDraft,
@@ -247,13 +247,7 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
               <Input
                 value={props.draft.tokenPrices.paths}
                 onChange={(event) =>
-                  props.onChange({
-                    ...props.draft,
-                    tokenPrices: {
-                      ...props.draft.tokenPrices,
-                      paths: event.target.value,
-                    },
-                  })
+                  updateTokenPrices({ paths: event.target.value })
                 }
               />
             </Field>
@@ -263,13 +257,7 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
                 placeholder='720p'
                 value={props.draft.tokenPrices.defaultValue}
                 onChange={(event) =>
-                  props.onChange({
-                    ...props.draft,
-                    tokenPrices: {
-                      ...props.draft.tokenPrices,
-                      defaultValue: event.target.value,
-                    },
-                  })
+                  updateTokenPrices({ defaultValue: event.target.value })
                 }
               />
             </Field>
@@ -282,15 +270,11 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
                 variant='outline'
                 size='sm'
                 onClick={() =>
-                  props.onChange({
-                    ...props.draft,
-                    tokenPrices: {
-                      ...props.draft.tokenPrices,
-                      values: [
-                        ...props.draft.tokenPrices.values,
-                        createTaskTokenPriceDraft(),
-                      ],
-                    },
+                  updateTokenPrices({
+                    values: [
+                      ...props.draft.tokenPrices.values,
+                      createTaskTokenPriceDraft(),
+                    ],
                   })
                 }
               >
@@ -343,14 +327,10 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
                     size='icon'
                     aria-label={t('Remove option')}
                     onClick={() =>
-                      props.onChange({
-                        ...props.draft,
-                        tokenPrices: {
-                          ...props.draft.tokenPrices,
-                          values: props.draft.tokenPrices.values.filter(
-                            (candidate) => candidate.id !== price.id
-                          ),
-                        },
+                      updateTokenPrices({
+                        values: props.draft.tokenPrices.values.filter(
+                          (candidate) => candidate.id !== price.id
+                        ),
                       })
                     }
                   >
