@@ -269,6 +269,9 @@ func HasModelBillingConfig(modelName string) bool {
 	if _, ok, _ := ratio_setting.GetModelRatio(modelName); ok {
 		return true
 	}
+	if _, ok := billing_setting.GetTaskBilling(modelName); ok {
+		return true
+	}
 	if billing_setting.GetBillingMode(modelName) != billing_setting.BillingModeTieredExpr {
 		return false
 	}

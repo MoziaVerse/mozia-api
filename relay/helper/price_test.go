@@ -140,6 +140,22 @@ func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	require.Equal(t, common.QuotaPerUnit, info.TieredBillingSnapshot.QuotaPerUnit)
 }
 
+func TestHasModelBillingConfigRecognizesTaskBilling(t *testing.T) {
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
+
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		billing_setting.TaskBillingOptionKey: `{"task-only-model":{"version":1,"mode":"per_request"}}`,
+	}))
+	assert.True(t, HasModelBillingConfig("task-only-model"))
+}
+
 func TestModelPriceHelpersApplyUserModelRatioToRatioAndFixedPricing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
