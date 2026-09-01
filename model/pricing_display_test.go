@@ -61,6 +61,30 @@ func TestBuildPricingDisplayShowsFinalPerSecondAndOfficialPrices(t *testing.T) {
 	assert.InDelta(t, 0.994, *display.Items[1].OurAmountUSD, 0.000001)
 }
 
+func TestBuildPricingDisplayShowsTokenParametricMatrix(t *testing.T) {
+	referencePrice := 21.0
+	display := BuildPricingDisplay(Pricing{
+		ModelName: "seedance-token-parametric-display-test",
+		TaskBilling: &taskbilling.Config{
+			Version: taskbilling.Version1,
+			Mode:    taskbilling.ModeTokenParametric,
+			TokenPrices: &taskbilling.TokenPriceTable{
+				Paths: []string{"resolution"},
+				Values: map[string]taskbilling.TokenUnitPrice{
+					"480p": {Standard: 34.5, ReferenceVideo: &referencePrice},
+				},
+			},
+		},
+	}, 0.5)
+
+	require.Equal(t, PricingDisplayVersion, display.Version)
+	require.Len(t, display.Items, 2)
+	assert.Equal(t, "task:tokens:resolution=480p:reference_video=false", display.Items[0].Key)
+	assert.InDelta(t, 17.25, *display.Items[0].OurAmountUSD, 0.000001)
+	assert.Equal(t, "task:tokens:resolution=480p:reference_video=true", display.Items[1].Key)
+	assert.InDelta(t, 10.5, *display.Items[1].OurAmountUSD, 0.000001)
+}
+
 func TestOfficialPriceToUSDUsesConfiguredExchangeRate(t *testing.T) {
 	originalRate := operation_setting.USDExchangeRate
 	operation_setting.USDExchangeRate = 7.2

@@ -294,7 +294,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
             model.billingMode === 'per-request' ||
             model.billingMode === 'tiered_expr' ||
             model.billingMode === 'per_second' ||
-            model.billingMode === 'parametric'
+            model.billingMode === 'parametric' ||
+            model.billingMode === 'token_parametric'
               ? model.billingMode
               : 'per-token'
           acc[mode] += 1
@@ -306,6 +307,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
           tiered_expr: 0,
           per_second: 0,
           parametric: 0,
+          token_parametric: 0,
         } as Record<PricingMode, number>
       ),
     [models]
@@ -318,7 +320,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
       if (
         editableModel.billingMode === 'tiered_expr' ||
         editableModel.billingMode === 'per_second' ||
-        editableModel.billingMode === 'parametric'
+        editableModel.billingMode === 'parametric' ||
+        editableModel.billingMode === 'token_parametric'
       ) {
         nextBillingMode = editableModel.billingMode
       } else if (editableModel.price && editableModel.price !== '') {
@@ -626,11 +629,14 @@ const ModelRatioVisualEditorComponent = forwardRef<
 
         if (
           data.billingMode === 'per_second' ||
-          data.billingMode === 'parametric'
+          data.billingMode === 'parametric' ||
+          data.billingMode === 'token_parametric'
         ) {
           taskBillingMap[name] = JSON.parse(data.taskBilling || '{}')
-          setIfPresent(priceMap, name, data.price)
-          setIfPresent(referenceVideoPriceMap, name, data.referenceVideoPrice)
+          if (data.billingMode !== 'token_parametric') {
+            setIfPresent(priceMap, name, data.price)
+            setIfPresent(referenceVideoPriceMap, name, data.referenceVideoPrice)
+          }
         } else if (data.billingMode === 'tiered_expr') {
           const combined = combineBillingExpr(
             data.billingExpr || '',
@@ -798,6 +804,11 @@ const ModelRatioVisualEditorComponent = forwardRef<
                     label: 'Multi-parameter',
                     value: 'parametric',
                     count: modeCounts.parametric,
+                  },
+                  {
+                    label: t('Multi-parameter Token'),
+                    value: 'token_parametric',
+                    count: modeCounts.token_parametric,
                   },
                 ],
               },

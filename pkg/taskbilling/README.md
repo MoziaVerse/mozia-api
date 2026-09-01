@@ -4,9 +4,9 @@
 It is opt-in: models without a rule continue to use their channel adaptor's
 existing `EstimateBilling` implementation.
 
-`ModelPrice` remains the required base price. The rule produces one or more
-positive multipliers from the request body after channel `param_override` has
-run.
+Most modes use `ModelPrice` as the base price and produce request-derived
+multipliers after channel `param_override` has run. `token_parametric` instead
+stores direct USD prices per million provider tokens.
 
 ## Modes
 
@@ -66,9 +66,31 @@ Each enum dimension contributes its configured multiplier. The final task price
 is the base `ModelPrice` multiplied by every dimension, then by the usual group
 and user multipliers.
 
+### Token price matrix
+
+```json
+{
+  "version": 1,
+  "mode": "token_parametric",
+  "token_prices": {
+    "paths": ["resolution", "metadata.resolution"],
+    "values": {
+      "720p": {"standard": 34.5, "reference_video": 21},
+      "1080p": {"standard": 38.25, "reference_video": 23.25}
+    }
+  }
+}
+```
+
+The relay selects a price from the effective request resolution and its own
+reference-video detection. It reserves the equivalent of 250,000 tokens, then
+settles against the provider's actual `total_tokens`. The selected unit price,
+group ratio, and quota conversion are stored with the task so later setting
+changes cannot alter an in-flight bill.
+
 ## Additive surcharges
 
-Any mode can add a fixed per-item surcharge after a free allowance:
+Fixed-price modes can add a per-item surcharge after a free allowance:
 
 ```json
 {

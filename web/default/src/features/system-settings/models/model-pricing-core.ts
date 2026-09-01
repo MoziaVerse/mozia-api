@@ -47,6 +47,7 @@ export type PricingMode =
   | 'tiered_expr'
   | 'per_second'
   | 'parametric'
+  | 'token_parametric'
 
 export type LaneKey =
   | 'completion'
@@ -285,6 +286,16 @@ export function buildPreviewRows(
         key: 'referenceVideoPrice',
         label: t('Reference video price'),
         value: values.referenceVideoPrice || t('Empty'),
+      },
+    ]
+  }
+
+  if (mode === 'token_parametric') {
+    return [
+      {
+        key: 'rule',
+        label: t('Multi-parameter Token'),
+        value: t('Configured'),
       },
     ]
   }

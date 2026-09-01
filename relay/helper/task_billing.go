@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/taskbilling"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 
 	"github.com/gin-gonic/gin"
@@ -34,7 +35,12 @@ func TaskBillingEvaluation(c *gin.Context, model string) (taskbilling.Evaluation
 	if err != nil {
 		return taskbilling.Evaluation{}, config, true, fmt.Errorf("read task billing request body: %w", err)
 	}
-	evaluation, err := taskbilling.EvaluatePricing(config, body)
+	var evaluation taskbilling.Evaluation
+	if config.Mode == taskbilling.ModeTokenParametric {
+		evaluation, err = taskbilling.EvaluateTokenPricing(config, body, relaycommon.TaskRequestHasReferenceVideo(c))
+	} else {
+		evaluation, err = taskbilling.EvaluatePricing(config, body)
+	}
 	if err != nil {
 		return taskbilling.Evaluation{}, config, true, err
 	}

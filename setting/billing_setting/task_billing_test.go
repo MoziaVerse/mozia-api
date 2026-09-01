@@ -22,6 +22,18 @@ func TestValidateTaskBillingJSONString(t *testing.T) {
 	require.NoError(t, err)
 
 	err = ValidateTaskBillingJSONString(`{
+		"doubao/seedance-2.0-pro": {
+			"version": 1,
+			"mode": "token_parametric",
+			"token_prices": {
+				"paths": ["resolution", "metadata.resolution"],
+				"values": {"720p": {"standard": 34.5, "reference_video": 21}}
+			}
+		}
+	}`)
+	require.NoError(t, err)
+
+	err = ValidateTaskBillingJSONString(`{
 		"broken": {"version": 1, "mode": "per_second"}
 	}`)
 	assert.Error(t, err)

@@ -86,6 +86,26 @@ describe('task billing visual configuration', () => {
     assert.deepEqual(buildTaskBillingConfig(draft), rule)
   })
 
+  test('round-trips a resolution token price matrix', () => {
+    const rule = {
+      version: 1 as const,
+      mode: 'token_parametric' as const,
+      token_prices: {
+        paths: ['resolution', 'metadata.resolution'],
+        default: '720p',
+        values: {
+          '720p': { standard: 34.5, reference_video: 21 },
+          '1080p': { standard: 38.25, reference_video: 23.25 },
+        },
+      },
+    }
+
+    const draft = parseTaskBillingDraft(JSON.stringify(rule))
+
+    assert.equal(validateTaskBillingDraft(draft), null)
+    assert.deepEqual(buildTaskBillingConfig(draft), rule)
+  })
+
   test('rejects ambiguous dimensions and invalid enumeration multipliers', () => {
     const draft = parseTaskBillingDraft(`{
       "version": 1,

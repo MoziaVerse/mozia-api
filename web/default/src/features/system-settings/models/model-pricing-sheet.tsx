@@ -268,7 +268,8 @@ export const ModelPricingEditorPanel = forwardRef<
       if (
         editData.billingMode === 'tiered_expr' ||
         editData.billingMode === 'per_second' ||
-        editData.billingMode === 'parametric'
+        editData.billingMode === 'parametric' ||
+        editData.billingMode === 'token_parametric'
       ) {
         nextPricingMode = editData.billingMode
       }
@@ -424,7 +425,11 @@ export const ModelPricingEditorPanel = forwardRef<
     if (nextMode === 'tiered_expr' && !billingExpr) {
       setBillingExpr('tier("base", p * 0 + c * 0)')
     }
-    if (nextMode === 'per_second' || nextMode === 'parametric') {
+    if (
+      nextMode === 'per_second' ||
+      nextMode === 'parametric' ||
+      nextMode === 'token_parametric'
+    ) {
       setTaskBillingDraft((draft) => ({ ...draft, mode: nextMode }))
     }
   }
@@ -521,8 +526,15 @@ export const ModelPricingEditorPanel = forwardRef<
 
   const validatePricingValues = useCallback(() => {
     if (officialPricingError) return false
-    if (pricingMode === 'per_second' || pricingMode === 'parametric') {
-      if (toNumberOrNull(form.getValues('price')) === null) {
+    if (
+      pricingMode === 'per_second' ||
+      pricingMode === 'parametric' ||
+      pricingMode === 'token_parametric'
+    ) {
+      if (
+        pricingMode !== 'token_parametric' &&
+        toNumberOrNull(form.getValues('price')) === null
+      ) {
         form.setError('price', { message: t('Fixed price is required') })
         return false
       }
@@ -591,7 +603,11 @@ export const ModelPricingEditorPanel = forwardRef<
         data.billingExpr = billingExpr
         data.requestRuleExpr = requestRuleExpr
       }
-      if (pricingMode === 'per_second' || pricingMode === 'parametric') {
+      if (
+        pricingMode === 'per_second' ||
+        pricingMode === 'parametric' ||
+        pricingMode === 'token_parametric'
+      ) {
         data.taskBilling = JSON.stringify(
           buildTaskBillingConfig(taskBillingDraft)
         )
@@ -690,7 +706,7 @@ export const ModelPricingEditorPanel = forwardRef<
                   onValueChange={handleModeChange}
                   className='gap-4'
                 >
-                  <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5'>
+                  <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-6'>
                     <TabsTrigger value='per-token'>
                       {t('Per-token')}
                     </TabsTrigger>
@@ -705,6 +721,9 @@ export const ModelPricingEditorPanel = forwardRef<
                     </TabsTrigger>
                     <TabsTrigger value='parametric'>
                       {t('Multi-parameter')}
+                    </TabsTrigger>
+                    <TabsTrigger value='token_parametric'>
+                      {t('Multi-parameter Token')}
                     </TabsTrigger>
                   </TabsList>
 
@@ -809,43 +828,48 @@ export const ModelPricingEditorPanel = forwardRef<
                   </TabsContent>
 
                   {(pricingMode === 'per_second' ||
-                    pricingMode === 'parametric') && (
+                    pricingMode === 'parametric' ||
+                    pricingMode === 'token_parametric') && (
                     <TabsContent value={pricingMode} className='pt-0'>
                       <FieldGroup className='gap-5'>
-                        <FormField
-                          control={form.control}
-                          name='price'
-                          render={({ field }) => (
-                            <FormItem className='contents'>
-                              <Field>
-                                <FieldLabel>{t('Fixed price')}</FieldLabel>
-                                <FormControl>
-                                  <InputGroup>
-                                    <InputGroupAddon>$</InputGroupAddon>
-                                    <InputGroupInput
-                                      inputMode='decimal'
-                                      placeholder='0.01'
-                                      {...field}
-                                      onChange={(event) => {
-                                        const value = event.target.value
-                                        if (numericDraftRegex.test(value)) {
-                                          field.onChange(value)
-                                        }
-                                      }}
-                                    />
-                                  </InputGroup>
-                                </FormControl>
-                                <FieldDescription>
-                                  {t(
-                                    'Base USD price before applying the configured task parameters.'
-                                  )}
-                                </FieldDescription>
-                                <FormMessage />
-                              </Field>
-                            </FormItem>
-                          )}
-                        />
-                        <ReferenceVideoPriceField form={form} />
+                        {pricingMode !== 'token_parametric' && (
+                          <FormField
+                            control={form.control}
+                            name='price'
+                            render={({ field }) => (
+                              <FormItem className='contents'>
+                                <Field>
+                                  <FieldLabel>{t('Fixed price')}</FieldLabel>
+                                  <FormControl>
+                                    <InputGroup>
+                                      <InputGroupAddon>$</InputGroupAddon>
+                                      <InputGroupInput
+                                        inputMode='decimal'
+                                        placeholder='0.01'
+                                        {...field}
+                                        onChange={(event) => {
+                                          const value = event.target.value
+                                          if (numericDraftRegex.test(value)) {
+                                            field.onChange(value)
+                                          }
+                                        }}
+                                      />
+                                    </InputGroup>
+                                  </FormControl>
+                                  <FieldDescription>
+                                    {t(
+                                      'Base USD price before applying the configured task parameters.'
+                                    )}
+                                  </FieldDescription>
+                                  <FormMessage />
+                                </Field>
+                              </FormItem>
+                            )}
+                          />
+                        )}
+                        {pricingMode !== 'token_parametric' && (
+                          <ReferenceVideoPriceField form={form} />
+                        )}
                         <TaskBillingEditor
                           draft={taskBillingDraft}
                           onChange={setTaskBillingDraft}

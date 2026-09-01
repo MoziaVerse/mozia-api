@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,10 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	}
 	if info.PriceData.TaskBillingSurcharge != nil {
 		other["task_billing_surcharge"] = info.PriceData.TaskBillingSurcharge
+	}
+	if info.PriceData.TaskTokenPrice != nil {
+		other["task_token_price"] = info.PriceData.TaskTokenPrice
+		other["task_token_quota_per_unit"] = info.PriceData.TaskTokenQuotaPerUnit
 	}
 	if info.PriceData.ModelRatio > 0 {
 		other["model_ratio"] = info.PriceData.ModelRatio
@@ -169,6 +174,10 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		}
 		if bc.TaskBillingSurcharge != nil {
 			other["task_billing_surcharge"] = bc.TaskBillingSurcharge
+		}
+		if bc.TaskTokenPrice != nil {
+			other["task_token_price"] = bc.TaskTokenPrice
+			other["task_token_quota_per_unit"] = bc.TaskTokenQuotaPerUnit
 		}
 	}
 	props := task.Properties
@@ -470,6 +479,47 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		usageJSON = string(encoded)
 	} else {
 		logger.LogError(ctx, fmt.Sprintf("序列化 reseller task usage 失败 task %s: %s", task.TaskID, err.Error()))
+	}
+	recalculateTaskQuota(ctx, task, actualQuota, reason, usageJSON)
+}
+
+// RecalculateTaskQuotaByTokenPrice settles token_parametric tasks from the
+// provider's actual token count and the immutable request-selected unit price.
+func RecalculateTaskQuotaByTokenPrice(ctx context.Context, task *model.Task, totalTokens int) {
+	if task == nil || totalTokens <= 0 || task.PrivateData.BillingContext == nil {
+		return
+	}
+	bc := task.PrivateData.BillingContext
+	if bc.TaskTokenPrice == nil || bc.TaskTokenPrice.UnitPrice <= 0 || bc.GroupRatio <= 0 {
+		return
+	}
+	quotaPerUnit := bc.TaskTokenQuotaPerUnit
+	if quotaPerUnit <= 0 {
+		quotaPerUnit = common.QuotaPerUnit
+	}
+	actualQuota := max(1, billingexpr.QuotaRound(float64(totalTokens)/1_000_000*bc.TaskTokenPrice.UnitPrice*quotaPerUnit*bc.GroupRatio))
+	reason := fmt.Sprintf(
+		"参数化 token 重算：tokens=%d, resolution=%s, referenceVideo=%t, unitPrice=%.6f, groupRatio=%.4f",
+		totalTokens,
+		bc.TaskTokenPrice.Resolution,
+		bc.TaskTokenPrice.ReferenceVideo,
+		bc.TaskTokenPrice.UnitPrice,
+		bc.GroupRatio,
+	)
+	usageJSON := ""
+	if encoded, err := common.Marshal(map[string]any{
+		"kind":            "task_token_parametric",
+		"total_tokens":    totalTokens,
+		"resolution":      bc.TaskTokenPrice.Resolution,
+		"reference_video": bc.TaskTokenPrice.ReferenceVideo,
+		"unit_price":      bc.TaskTokenPrice.UnitPrice,
+		"quota_per_unit":  quotaPerUnit,
+		"group_ratio":     bc.GroupRatio,
+		"actual_quota":    actualQuota,
+	}); err == nil {
+		usageJSON = string(encoded)
+	} else {
+		logger.LogError(ctx, fmt.Sprintf("序列化参数化 token 用量失败 task %s: %s", task.TaskID, err.Error()))
 	}
 	recalculateTaskQuota(ctx, task, actualQuota, reason, usageJSON)
 }

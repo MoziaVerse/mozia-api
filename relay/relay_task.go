@@ -14,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/taskbilling"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -186,38 +188,61 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		info.PublicTaskID = model.GenerateTaskID()
 	}
 
-	// 4. 价格计算：基础模型价格
+	// 4. 计费配置先基于已应用渠道参数覆盖的请求体求值。
 	info.OriginModelName = modelName
-	priceData, err := helper.ModelPriceHelperPerCall(c, info)
+	taskBillingEvaluation, taskBillingConfig, hasTaskBillingConfig, err := helper.TaskBillingEvaluation(c, modelName)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
+		return nil, service.TaskErrorWrapperLocal(err, "invalid_task_billing", http.StatusBadRequest)
+	}
+
+	var priceData types.PriceData
+	if hasTaskBillingConfig && taskBillingConfig.Mode == taskbilling.ModeTokenParametric {
+		if taskBillingEvaluation.TokenPrice == nil {
+			return nil, service.TaskErrorWrapperLocal(
+				fmt.Errorf("token_parametric task billing did not select a token price"),
+				"invalid_task_billing",
+				http.StatusBadRequest,
+			)
+		}
+		groupRatioInfo := helper.HandleGroupRatio(c, info)
+		quota := configuredTaskTokenPreconsumeQuota(taskBillingEvaluation.TokenPrice.UnitPrice, groupRatioInfo.GroupRatio)
+		priceData = types.PriceData{
+			FreeModel:             quota == 0,
+			Quota:                 quota,
+			GroupRatioInfo:        groupRatioInfo,
+			TaskTokenPrice:        taskBillingEvaluation.TokenPrice,
+			TaskTokenQuotaPerUnit: common.QuotaPerUnit,
+			TaskBillingMode:       taskBillingConfig.Mode,
+			TaskBillingVersion:    taskBillingConfig.Version,
+		}
+	} else {
+		priceData, err = helper.ModelPriceHelperPerCall(c, info)
+		if err != nil {
+			return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
+		}
 	}
 	info.PriceData = priceData
 	if apiErr := service.EnforceMoziaQuotaPolicy(info.UserId, info.OriginModelName); apiErr != nil {
 		return nil, service.TaskErrorFromAPIError(apiErr)
 	}
 
-	// 5. 计费估算：显式 task_billing 配置优先；未配置时保持每个
-	//    adaptor 的既有 EstimateBilling 语义。两者均使用已经过渠道参数
-	//    覆盖处理的请求体。
-	taskBillingEvaluation, taskBillingConfig, hasTaskBillingConfig, err := helper.TaskBillingEvaluation(c, modelName)
-	if err != nil {
-		return nil, service.TaskErrorWrapperLocal(err, "invalid_task_billing", http.StatusBadRequest)
-	}
+	// 5. 显式固定任务计费优先；未配置时保持 adaptor 的既有估算语义。
 	if hasTaskBillingConfig {
-		if !info.PriceData.UsePrice {
+		if taskBillingConfig.Mode != taskbilling.ModeTokenParametric && !info.PriceData.UsePrice {
 			return nil, service.TaskErrorWrapperLocal(
 				fmt.Errorf("task billing for model %s requires a ModelPrice", modelName),
 				"invalid_task_billing",
 				http.StatusBadRequest,
 			)
 		}
-		info.PriceData.TaskBillingMode = taskBillingConfig.Mode
-		info.PriceData.TaskBillingVersion = taskBillingConfig.Version
-		for k, v := range taskBillingEvaluation.Ratios {
-			info.PriceData.AddOtherRatio(k, v)
+		if taskBillingConfig.Mode != taskbilling.ModeTokenParametric {
+			info.PriceData.TaskBillingMode = taskBillingConfig.Mode
+			info.PriceData.TaskBillingVersion = taskBillingConfig.Version
+			for k, v := range taskBillingEvaluation.Ratios {
+				info.PriceData.AddOtherRatio(k, v)
+			}
+			info.PriceData.TaskBillingSurcharge = taskBillingEvaluation.Surcharge
 		}
-		info.PriceData.TaskBillingSurcharge = taskBillingEvaluation.Surcharge
 	} else if estimatedRatios := adaptor.EstimateBilling(c, info); len(estimatedRatios) > 0 {
 		for k, v := range estimatedRatios {
 			info.PriceData.AddOtherRatio(k, v)
@@ -230,7 +255,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度
-	if hasTaskBillingConfig {
+	if hasTaskBillingConfig && taskBillingConfig.Mode != taskbilling.ModeTokenParametric {
 		info.PriceData.Quota = configuredTaskBillingQuota(info.PriceData)
 		if info.PriceData.Quota > 0 {
 			info.PriceData.FreeModel = false
@@ -364,6 +389,14 @@ func configuredTaskBillingQuota(priceData types.PriceData) int {
 		price += priceData.TaskBillingSurcharge.Price
 	}
 	return int(price * common.QuotaPerUnit * priceData.GroupRatioInfo.GroupRatio)
+}
+
+func configuredTaskTokenPreconsumeQuota(unitPrice, groupRatio float64) int {
+	if unitPrice <= 0 || groupRatio <= 0 {
+		return 0
+	}
+	const estimatedTaskTokens = 250_000
+	return max(1, billingexpr.QuotaRound(unitPrice*estimatedTaskTokens/1_000_000*common.QuotaPerUnit*groupRatio))
 }
 
 // recalcQuotaFromRatios 根据 adjustedRatios 重新计算 quota。

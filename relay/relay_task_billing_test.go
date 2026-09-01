@@ -22,3 +22,8 @@ func TestConfiguredTaskBillingQuotaAddsSurchargeBeforeGroupRatio(t *testing.T) {
 	expectedPrice := (0.1*15 + 0.4) * 1.2
 	assert.Equal(t, int(expectedPrice*common.QuotaPerUnit), quota)
 }
+
+func TestConfiguredTaskTokenPreconsumeQuotaUsesQuarterMillionTokens(t *testing.T) {
+	assert.Equal(t, int(0.5*common.QuotaPerUnit), configuredTaskTokenPreconsumeQuota(2, 1))
+	assert.Zero(t, configuredTaskTokenPreconsumeQuota(2, 0))
+}

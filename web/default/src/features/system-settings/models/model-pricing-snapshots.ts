@@ -75,6 +75,9 @@ type TaskBillingRuleSummary = {
     free_count?: number
     unit_price?: number
   }
+  token_prices?: {
+    values?: Record<string, unknown>
+  }
 }
 
 const getTaskBillingRuleSummary = (
@@ -100,6 +103,7 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
 }
 
 export const getModeLabel = (mode?: string) => {
+  if (mode === 'token_parametric') return 'Multi-parameter Token'
   if (mode === 'per_second') return 'Per-second'
   if (mode === 'parametric') return 'Multi-parameter'
   if (mode === 'per-request') return 'Per-request'
@@ -110,7 +114,12 @@ export const getModeLabel = (mode?: string) => {
 export const getModeVariant = (
   mode?: string
 ): 'warning' | 'info' | 'success' => {
-  if (mode === 'per_second' || mode === 'parametric') return 'warning'
+  if (
+    mode === 'per_second' ||
+    mode === 'parametric' ||
+    mode === 'token_parametric'
+  )
+    return 'warning'
   if (mode === 'per-request') return 'warning'
   if (mode === 'tiered_expr') return 'info'
   return 'success'
@@ -139,6 +148,12 @@ export const getPriceSummary = (
     return row.referenceVideoPrice
       ? `$${row.price} / ${t('request')} · ${t('Reference video')} $${row.referenceVideoPrice}`
       : `$${row.price} / ${t('request')}`
+  }
+  if (row.billingMode === 'token_parametric') {
+    const count = Object.keys(
+      getTaskBillingRuleSummary(row.taskBilling).token_prices?.values || {}
+    ).length
+    return `${t('Multi-parameter Token')} · ${count}`
   }
   if (row.billingMode === 'per_second' || row.billingMode === 'parametric') {
     if (!row.price) return t('Unset price')
@@ -181,6 +196,9 @@ export const getPriceDetail = (
   }
   if (row.billingMode === 'per-request') {
     return t('Fixed request price')
+  }
+  if (row.billingMode === 'token_parametric') {
+    return t('USD price per 1M tokens.')
   }
   if (row.billingMode === 'per_second' || row.billingMode === 'parametric') {
     const surcharge = getTaskBillingRuleSummary(row.taskBilling).surcharge
@@ -326,10 +344,14 @@ export const buildModelSnapshots = ({
     const modeForModel = billingModeMap[name]
     const taskBillingRule = taskBillingMap[name]
     if (taskBillingRule) {
+      const taskMode =
+        taskBillingRule.mode === 'per_second' ||
+        taskBillingRule.mode === 'token_parametric'
+          ? taskBillingRule.mode
+          : 'parametric'
       return {
         name,
-        billingMode:
-          taskBillingRule.mode === 'per_second' ? 'per_second' : 'parametric',
+        billingMode: taskMode,
         taskBilling: JSON.stringify(taskBillingRule, null, 2),
         price,
         ratio,

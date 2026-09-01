@@ -57,6 +57,35 @@ func TestEvaluateParametricUsesDefaultsAndEnumMultipliers(t *testing.T) {
 	assert.Equal(t, map[string]float64{"duration": 5, "resolution": 2.15}, ratios)
 }
 
+func TestEvaluateTokenPricingSelectsResolutionAndTrustedReferenceState(t *testing.T) {
+	reference480p := 21.0
+	reference1080p := 23.25
+	config := Config{
+		Version: Version1,
+		Mode:    ModeTokenParametric,
+		TokenPrices: &TokenPriceTable{
+			Paths: []string{"resolution", "metadata.resolution"},
+			Values: map[string]TokenUnitPrice{
+				"480p":  {Standard: 34.5, ReferenceVideo: &reference480p},
+				"1080p": {Standard: 38.25, ReferenceVideo: &reference1080p},
+			},
+		},
+	}
+
+	standard, err := EvaluateTokenPricing(config, []byte(`{"resolution":"1080P"}`), false)
+	require.NoError(t, err)
+	require.NotNil(t, standard.TokenPrice)
+	assert.Equal(t, &TokenPriceResult{Resolution: "1080p", UnitPrice: 38.25}, standard.TokenPrice)
+
+	reference, err := EvaluateTokenPricing(config, []byte(`{"resolution":"480p"}`), true)
+	require.NoError(t, err)
+	require.NotNil(t, reference.TokenPrice)
+	assert.Equal(t, &TokenPriceResult{Resolution: "480p", ReferenceVideo: true, UnitPrice: 21}, reference.TokenPrice)
+
+	_, err = EvaluateTokenPricing(config, []byte(`{"resolution":"720p"}`), false)
+	assert.ErrorContains(t, err, "does not support resolution")
+}
+
 func TestValidateRejectsAmbiguousOrInvalidTaskBilling(t *testing.T) {
 	tests := []Config{
 		{Version: Version1, Mode: ModePerSecond},
@@ -65,6 +94,7 @@ func TestValidateRejectsAmbiguousOrInvalidTaskBilling(t *testing.T) {
 		{Version: 2, Mode: ModePerRequest},
 		{Version: Version1, Mode: ModeParametric, Dimensions: []Dimension{{Name: "quality", Kind: DimensionEnum, Paths: []string{"quality"}, Default: "high", Values: map[string]float64{"low": 1}}}},
 		{Version: Version1, Mode: ModePerRequest, Surcharge: &Surcharge{Name: "images", Kind: SurchargeItemCount, Paths: []string{"images"}, UnitPrice: -0.2}},
+		{Version: Version1, Mode: ModeTokenParametric},
 	}
 
 	for _, config := range tests {

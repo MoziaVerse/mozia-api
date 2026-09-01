@@ -1,6 +1,4 @@
-// Package taskbilling defines versioned, request-parameter based billing for
-// asynchronous tasks. It deliberately models only request quantities: token
-// billing remains in billingexpr.
+// Package taskbilling defines versioned billing rules for asynchronous tasks.
 package taskbilling
 
 import (
@@ -18,6 +16,9 @@ const (
 	ModePerRequest = "per_request"
 	ModePerSecond  = "per_second"
 	ModeParametric = "parametric"
+	// ModeTokenParametric settles asynchronous tasks from the provider's
+	// actual token usage and a request-selected per-million-token price.
+	ModeTokenParametric = "token_parametric"
 
 	DimensionNumber    = "number"
 	DimensionEnum      = "enum"
@@ -29,18 +30,34 @@ const (
 	RoundNearest = "nearest"
 )
 
-// Config describes how a task ModelPrice is multiplied. ModelPrice is always
-// the base price; this config only defines the request-derived quantities.
-//
-// Per-request has no dimensions. Per-second has one required Duration
-// dimension. Parametric accepts one or more dimensions and multiplies all of
-// their values together.
+// Config is the persisted model-level task billing rule.
 type Config struct {
-	Version    int         `json:"version"`
-	Mode       string      `json:"mode"`
-	Duration   *Dimension  `json:"duration,omitempty"`
-	Dimensions []Dimension `json:"dimensions,omitempty"`
-	Surcharge  *Surcharge  `json:"surcharge,omitempty"`
+	Version     int              `json:"version"`
+	Mode        string           `json:"mode"`
+	Duration    *Dimension       `json:"duration,omitempty"`
+	Dimensions  []Dimension      `json:"dimensions,omitempty"`
+	Surcharge   *Surcharge       `json:"surcharge,omitempty"`
+	TokenPrices *TokenPriceTable `json:"token_prices,omitempty"`
+}
+
+// TokenPriceTable selects an actual USD price per million provider tokens by
+// resolution. Reference-video presence is derived by the relay, never trusted
+// from a client-provided billing flag.
+type TokenPriceTable struct {
+	Paths   []string                  `json:"paths"`
+	Default string                    `json:"default,omitempty"`
+	Values  map[string]TokenUnitPrice `json:"values"`
+}
+
+type TokenUnitPrice struct {
+	Standard       float64  `json:"standard"`
+	ReferenceVideo *float64 `json:"reference_video,omitempty"`
+}
+
+type TokenPriceResult struct {
+	Resolution     string  `json:"resolution"`
+	ReferenceVideo bool    `json:"reference_video"`
+	UnitPrice      float64 `json:"unit_price"`
 }
 
 // Surcharge adds a fixed price for each billable item after FreeCount. The
@@ -65,8 +82,9 @@ type SurchargeResult struct {
 }
 
 type Evaluation struct {
-	Ratios    map[string]float64 `json:"ratios,omitempty"`
-	Surcharge *SurchargeResult   `json:"surcharge,omitempty"`
+	Ratios     map[string]float64 `json:"ratios,omitempty"`
+	Surcharge  *SurchargeResult   `json:"surcharge,omitempty"`
+	TokenPrice *TokenPriceResult  `json:"token_price,omitempty"`
 }
 
 // Dimension reads the first present JSON path from Paths. A number dimension
@@ -83,7 +101,7 @@ type Dimension struct {
 }
 
 // Validate rejects unsupported or ambiguous rules before they reach the relay
-// hot path. This keeps a configured ModelPrice's unit explicit.
+// hot path.
 func Validate(config Config) error {
 	if config.Version != Version1 {
 		return fmt.Errorf("unsupported task billing version %d", config.Version)
@@ -130,13 +148,62 @@ func Validate(config Config) error {
 				seen[name] = struct{}{}
 			}
 		}
+	case ModeTokenParametric:
+		if config.Duration != nil || len(config.Dimensions) != 0 || config.Surcharge != nil {
+			modeErr = fmt.Errorf("token_parametric task billing only supports token_prices")
+		} else {
+			modeErr = validateTokenPriceTable(config.TokenPrices)
+		}
 	default:
 		modeErr = fmt.Errorf("unsupported task billing mode %q", config.Mode)
 	}
 	if modeErr != nil {
 		return modeErr
 	}
+	if config.Mode != ModeTokenParametric && config.TokenPrices != nil {
+		return fmt.Errorf("task billing mode %q cannot define token_prices", config.Mode)
+	}
 	return validateSurcharge(config.Surcharge)
+}
+
+func validateTokenPriceTable(table *TokenPriceTable) error {
+	if table == nil {
+		return fmt.Errorf("token_parametric task billing requires token_prices")
+	}
+	if len(table.Paths) == 0 {
+		return fmt.Errorf("token_parametric task billing requires resolution paths")
+	}
+	for _, path := range table.Paths {
+		if strings.TrimSpace(path) == "" {
+			return fmt.Errorf("token_parametric task billing has an empty resolution path")
+		}
+	}
+	if len(table.Values) == 0 {
+		return fmt.Errorf("token_parametric task billing requires prices")
+	}
+	seen := make(map[string]struct{}, len(table.Values))
+	for resolution, price := range table.Values {
+		normalized := normalizeEnum(resolution)
+		if normalized == "" {
+			return fmt.Errorf("token_parametric task billing has an empty resolution")
+		}
+		if _, ok := seen[normalized]; ok {
+			return fmt.Errorf("token_parametric task billing has duplicate resolution %q", resolution)
+		}
+		seen[normalized] = struct{}{}
+		if !isFinite(price.Standard) || price.Standard <= 0 {
+			return fmt.Errorf("token_parametric task billing has invalid standard price for %q", resolution)
+		}
+		if price.ReferenceVideo != nil && (!isFinite(*price.ReferenceVideo) || *price.ReferenceVideo <= 0) {
+			return fmt.Errorf("token_parametric task billing has invalid reference-video price for %q", resolution)
+		}
+	}
+	if defaultResolution := normalizeEnum(table.Default); defaultResolution != "" {
+		if _, ok := seen[defaultResolution]; !ok {
+			return fmt.Errorf("token_parametric task billing default %q is not configured", table.Default)
+		}
+	}
+	return nil
 }
 
 func validateSurcharge(surcharge *Surcharge) error {
@@ -282,6 +349,8 @@ func EvaluatePricing(config Config, body []byte) (Evaluation, error) {
 			}
 			ratios[dimension.Name] = value
 		}
+	case ModeTokenParametric:
+		return Evaluation{}, fmt.Errorf("token_parametric task billing requires server-derived reference-video state")
 	default:
 		return Evaluation{}, fmt.Errorf("unsupported task billing mode %q", config.Mode)
 	}
@@ -303,6 +372,54 @@ func EvaluatePricing(config Config, body []byte) (Evaluation, error) {
 		}
 	}
 	return Evaluation{Ratios: ratios, Surcharge: surchargeResult}, nil
+}
+
+// EvaluateTokenPricing selects the exact per-million-token price for an
+// effective request body. The caller supplies reference-video presence after
+// applying the relay's trusted request inspection.
+func EvaluateTokenPricing(config Config, body []byte, hasReferenceVideo bool) (Evaluation, error) {
+	if err := Validate(config); err != nil {
+		return Evaluation{}, err
+	}
+	if config.Mode != ModeTokenParametric {
+		return Evaluation{}, fmt.Errorf("task billing mode %q is not token_parametric", config.Mode)
+	}
+
+	table := config.TokenPrices
+	raw, found := findValue(body, table.Paths)
+	resolution := ""
+	if found {
+		resolution = normalizeEnum(raw.String())
+	}
+	if resolution == "" {
+		resolution = normalizeEnum(table.Default)
+	}
+	if resolution == "" {
+		return Evaluation{}, fmt.Errorf("token_parametric task billing resolution is required")
+	}
+
+	var selected *TokenUnitPrice
+	for candidate, price := range table.Values {
+		if normalizeEnum(candidate) == resolution {
+			copyPrice := price
+			selected = &copyPrice
+			break
+		}
+	}
+	if selected == nil {
+		return Evaluation{}, fmt.Errorf("token_parametric task billing does not support resolution %q", resolution)
+	}
+
+	unitPrice := selected.Standard
+	if hasReferenceVideo {
+		if selected.ReferenceVideo == nil {
+			return Evaluation{}, fmt.Errorf("token_parametric task billing has no reference-video price for resolution %q", resolution)
+		}
+		unitPrice = *selected.ReferenceVideo
+	}
+	return Evaluation{TokenPrice: &TokenPriceResult{
+		Resolution: resolution, ReferenceVideo: hasReferenceVideo, UnitPrice: unitPrice,
+	}}, nil
 }
 
 func evaluateItemCount(surcharge Surcharge, body []byte) (int, error) {

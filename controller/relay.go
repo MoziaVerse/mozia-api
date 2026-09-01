@@ -609,18 +609,20 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.NodeName = common.NodeName
 		task.PrivateData.BillingSettlementPending = billingSettlementPending
 		task.PrivateData.BillingContext = &model.TaskBillingContext{
-			ModelPrice:           relayInfo.PriceData.ModelPrice,
-			GroupRatio:           relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-			BaseGroupRatio:       relayInfo.PriceData.GroupRatioInfo.BaseGroupRatio,
-			UserModelRatio:       relayInfo.PriceData.GroupRatioInfo.UserModelRatio,
-			HasUserModelRatio:    relayInfo.PriceData.GroupRatioInfo.HasUserModelRatio,
-			ModelRatio:           relayInfo.PriceData.ModelRatio,
-			OtherRatios:          relayInfo.PriceData.OtherRatios,
-			TaskBillingSurcharge: relayInfo.PriceData.TaskBillingSurcharge,
-			TaskBillingMode:      relayInfo.PriceData.TaskBillingMode,
-			TaskBillingVersion:   relayInfo.PriceData.TaskBillingVersion,
-			OriginModelName:      relayInfo.OriginModelName,
-			PerCallBilling:       common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+			ModelPrice:            relayInfo.PriceData.ModelPrice,
+			GroupRatio:            relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+			BaseGroupRatio:        relayInfo.PriceData.GroupRatioInfo.BaseGroupRatio,
+			UserModelRatio:        relayInfo.PriceData.GroupRatioInfo.UserModelRatio,
+			HasUserModelRatio:     relayInfo.PriceData.GroupRatioInfo.HasUserModelRatio,
+			ModelRatio:            relayInfo.PriceData.ModelRatio,
+			OtherRatios:           relayInfo.PriceData.OtherRatios,
+			TaskBillingSurcharge:  relayInfo.PriceData.TaskBillingSurcharge,
+			TaskTokenPrice:        relayInfo.PriceData.TaskTokenPrice,
+			TaskTokenQuotaPerUnit: relayInfo.PriceData.TaskTokenQuotaPerUnit,
+			TaskBillingMode:       relayInfo.PriceData.TaskBillingMode,
+			TaskBillingVersion:    relayInfo.PriceData.TaskBillingVersion,
+			OriginModelName:       relayInfo.OriginModelName,
+			PerCallBilling:        common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		}
 		task.Quota = result.Quota
 		task.Data = result.TaskData

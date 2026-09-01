@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/taskbilling"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -792,6 +793,35 @@ func TestSettle_NonPerCallBilling_AppliesAdaptorAdjustment(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestSettleTokenParametricUsesFrozenUnitPriceAndActualTokens(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, channelID = 35, 35
+	const currentQuota, preConsumedQuota = 1000, 150
+	seedUser(t, userID, currentQuota)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumedQuota, 0, BillingSourceWallet, 0)
+	task.PrivateData.BillingContext.TaskBillingMode = taskbilling.ModeTokenParametric
+	task.PrivateData.BillingContext.TaskTokenQuotaPerUnit = 500_000
+	task.PrivateData.BillingContext.TaskTokenPrice = &taskbilling.TokenPriceResult{
+		Resolution: "720p", UnitPrice: 2,
+	}
+	task.PrivateData.BillingContext.GroupRatio = 1
+
+	settleTaskBillingOnComplete(ctx, &mockAdaptor{adjustReturn: 999}, task, &relaycommon.TaskInfo{
+		Status: model.TaskStatusSuccess, TotalTokens: 100,
+	})
+
+	assert.Equal(t, 100, task.Quota)
+	assert.Equal(t, currentQuota+50, getUserQuota(t, userID))
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Contains(t, log.Content, "resolution=720p")
+	assert.Contains(t, log.Content, "unitPrice=2.000000")
 }
 
 func TestRecalculateTaskQuotaByTokensUsesFrozenUserModelRatioSnapshot(t *testing.T) {

@@ -64,7 +64,7 @@ describe('task billing pricing summaries', () => {
       billingMode: '{}',
       billingExpr: '{}',
       taskBilling:
-        '{"per-second-model":{"mode":"per_second"},"parameter-model":{"mode":"parametric"}}',
+        '{"per-second-model":{"mode":"per_second"},"parameter-model":{"mode":"parametric"},"token-model":{"mode":"token_parametric","token_prices":{"values":{"720p":{"standard":34.5}}}}}',
     })
 
     assert.equal(
@@ -74,6 +74,12 @@ describe('task billing pricing summaries', () => {
     assert.equal(
       rows.find((row) => row.name === 'parameter-model')?.billingMode,
       'parametric'
+    )
+    const tokenRow = rows.find((row) => row.name === 'token-model')
+    assert.equal(tokenRow?.billingMode, 'token_parametric')
+    assert.equal(
+      getPriceSummary(tokenRow!, (key) => key),
+      'Multi-parameter Token · 1'
     )
     const perSecondRow = rows.find((row) => row.name === 'per-second-model')
     assert.ok(perSecondRow)

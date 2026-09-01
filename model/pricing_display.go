@@ -60,6 +60,8 @@ func BuildPricingDisplay(pricing Pricing, customerRatio float64) *PricingDisplay
 			Key: "dynamic", Item: "动态计费", Unit: "dynamic",
 			Condition: "按请求内容、参数与实际用量", Note: "以实际账单为准",
 		}}
+	} else if pricing.TaskBilling != nil && pricing.TaskBilling.Mode == taskbilling.ModeTokenParametric {
+		items = buildTokenParametricPricingItems(pricing.TaskBilling, customerRatio)
 	} else if pricing.QuotaType == 1 {
 		items = buildFixedPricingItems(pricing, customerRatio)
 	} else {
@@ -141,6 +143,36 @@ func resellerMultiplierFromOfficialDiscount(pricing Pricing, discount string) (i
 
 func formatOfficialDiscount(rate float64) string {
 	return FormatResellerMultiplier(int64(math.Round(rate * float64(ResellerDefaultMultiplierPPM))))
+}
+
+func buildTokenParametricPricingItems(config *taskbilling.Config, customerRatio float64) []PricingDisplayItem {
+	if config.TokenPrices == nil {
+		return nil
+	}
+	resolutions := make([]string, 0, len(config.TokenPrices.Values))
+	for resolution := range config.TokenPrices.Values {
+		resolutions = append(resolutions, resolution)
+	}
+	sort.Strings(resolutions)
+	items := make([]PricingDisplayItem, 0, len(resolutions)*2)
+	for _, resolution := range resolutions {
+		price := config.TokenPrices.Values[resolution]
+		items = append(items, pricingAmountItem(
+			"task:tokens:resolution="+resolution+":reference_video=false",
+			"任务 Token", "million_tokens",
+			fmt.Sprintf("resolution = %s；不含参考视频", resolution),
+			"按上游返回的实际总 Token 结算", price.Standard*customerRatio,
+		))
+		if price.ReferenceVideo != nil {
+			items = append(items, pricingAmountItem(
+				"task:tokens:resolution="+resolution+":reference_video=true",
+				"任务 Token", "million_tokens",
+				fmt.Sprintf("resolution = %s；包含参考视频", resolution),
+				"参考视频由服务端根据有效请求内容识别", *price.ReferenceVideo*customerRatio,
+			))
+		}
+	}
+	return items
 }
 
 func buildTokenPricingItems(pricing Pricing, customerRatio float64) []PricingDisplayItem {

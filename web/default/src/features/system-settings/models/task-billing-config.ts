@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { nanoid } from 'nanoid'
 
-type TaskBillingMode = 'per_second' | 'parametric'
+type TaskBillingMode = 'per_second' | 'parametric' | 'token_parametric'
 type TaskDimensionKind = 'number' | 'enum'
 type TaskDimensionRound = 'none' | 'ceil' | 'floor' | 'nearest'
 
@@ -48,11 +48,25 @@ export type TaskSurchargeDraft = {
   unitPrice: string
 }
 
+export type TaskTokenPriceDraft = {
+  id: string
+  resolution: string
+  standard: string
+  referenceVideo: string
+}
+
+export type TaskTokenPricingDraft = {
+  paths: string
+  defaultValue: string
+  values: TaskTokenPriceDraft[]
+}
+
 export type TaskBillingDraft = {
   mode: TaskBillingMode
   duration: TaskDimensionDraft
   dimensions: TaskDimensionDraft[]
   surcharge: TaskSurchargeDraft
+  tokenPrices: TaskTokenPricingDraft
 }
 
 export const createEnumValueDraft = (
@@ -91,11 +105,27 @@ export const createTaskSurchargeDraft = (
   ...overrides,
 })
 
+export const createTaskTokenPriceDraft = (
+  resolution = '',
+  standard = '',
+  referenceVideo = ''
+): TaskTokenPriceDraft => ({
+  id: nanoid(8),
+  resolution,
+  standard,
+  referenceVideo,
+})
+
 export const createTaskBillingDraft = (): TaskBillingDraft => ({
   mode: 'per_second',
   duration: createTaskDimensionDraft(),
   dimensions: [createTaskDimensionDraft()],
   surcharge: createTaskSurchargeDraft(),
+  tokenPrices: {
+    paths: 'resolution, metadata.resolution',
+    defaultValue: '',
+    values: [createTaskTokenPriceDraft()],
+  },
 })
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -160,6 +190,28 @@ const parseSurcharge = (value: unknown): TaskSurchargeDraft => {
   })
 }
 
+const parseTokenPrices = (value: unknown): TaskTokenPricingDraft | null => {
+  if (!isRecord(value) || !isRecord(value.values)) return null
+  return {
+    paths: Array.isArray(value.paths)
+      ? value.paths
+          .filter((path): path is string => typeof path === 'string')
+          .join(', ')
+      : '',
+    defaultValue: typeof value.default === 'string' ? value.default : '',
+    values: Object.entries(value.values).map(([resolution, price]) => {
+      const item = isRecord(price) ? price : {}
+      return createTaskTokenPriceDraft(
+        resolution,
+        typeof item.standard === 'number' ? String(item.standard) : '',
+        typeof item.reference_video === 'number'
+          ? String(item.reference_video)
+          : ''
+      )
+    }),
+  }
+}
+
 export const parseTaskBillingDraft = (raw: string): TaskBillingDraft => {
   const fallback = createTaskBillingDraft()
   if (!raw) return fallback
@@ -194,6 +246,13 @@ export const parseTaskBillingDraft = (raw: string): TaskBillingDraft => {
         dimensions: dimensions.length > 0 ? dimensions : fallback.dimensions,
         surcharge,
       }
+    }
+
+    if (config.mode === 'token_parametric') {
+      const tokenPrices = parseTokenPrices(config.token_prices)
+      return tokenPrices
+        ? { ...fallback, mode: 'token_parametric', tokenPrices }
+        : fallback
     }
   } catch {
     return fallback
@@ -265,6 +324,30 @@ export const buildTaskBillingConfig = (draft: TaskBillingDraft) => {
     }
   }
 
+  if (draft.mode === 'token_parametric') {
+    return {
+      version: 1,
+      mode: 'token_parametric',
+      token_prices: {
+        paths: parsePaths(draft.tokenPrices.paths),
+        ...(draft.tokenPrices.defaultValue.trim()
+          ? { default: draft.tokenPrices.defaultValue.trim() }
+          : {}),
+        values: Object.fromEntries(
+          draft.tokenPrices.values.map((price) => [
+            price.resolution.trim(),
+            {
+              standard: Number(price.standard),
+              ...(price.referenceVideo.trim()
+                ? { reference_video: Number(price.referenceVideo) }
+                : {}),
+            },
+          ])
+        ),
+      },
+    }
+  }
+
   return {
     version: 1,
     mode: 'parametric',
@@ -281,6 +364,40 @@ const isPositiveNumber = (value: string) => {
 export const validateTaskBillingDraft = (
   draft: TaskBillingDraft
 ): string | null => {
+  if (draft.mode === 'token_parametric') {
+    if (parsePaths(draft.tokenPrices.paths).length === 0) {
+      return 'Every dimension requires at least one parameter path.'
+    }
+    if (draft.tokenPrices.values.length === 0) {
+      return 'Enumeration dimensions require at least one option.'
+    }
+    const resolutions = new Set<string>()
+    for (const price of draft.tokenPrices.values) {
+      const resolution = price.resolution.trim().toLowerCase()
+      if (!resolution) return 'Enumeration options cannot be empty.'
+      if (resolutions.has(resolution)) {
+        return 'Enumeration options must be unique.'
+      }
+      resolutions.add(resolution)
+      if (!isPositiveNumber(price.standard)) {
+        return 'Enumeration multipliers must be greater than zero.'
+      }
+      if (
+        price.referenceVideo.trim() &&
+        !isPositiveNumber(price.referenceVideo)
+      ) {
+        return 'Enumeration multipliers must be greater than zero.'
+      }
+    }
+    if (
+      draft.tokenPrices.defaultValue.trim() &&
+      !resolutions.has(draft.tokenPrices.defaultValue.trim().toLowerCase())
+    ) {
+      return 'The enumeration default must match a configured option.'
+    }
+    return null
+  }
+
   const dimensions =
     draft.mode === 'per_second' ? [draft.duration] : draft.dimensions
   if (dimensions.length === 0) return 'At least one dimension is required.'

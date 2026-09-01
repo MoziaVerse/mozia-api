@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/taskbilling"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
@@ -634,6 +635,14 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 	// 0. 按次计费的任务不做差额结算
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
 		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 按次计费，跳过差额结算", task.TaskID))
+		return
+	}
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.TaskBillingMode == taskbilling.ModeTokenParametric {
+		if taskResult.TotalTokens > 0 {
+			RecalculateTaskQuotaByTokenPrice(ctx, task, taskResult.TotalTokens)
+		} else {
+			logger.LogWarn(ctx, fmt.Sprintf("任务 %s 使用参数化 token 计费，但上游未返回 total_tokens，保留预扣额度", task.TaskID))
+		}
 		return
 	}
 	// 1. 优先让 adaptor 决定最终额度
