@@ -1350,6 +1350,7 @@ func GetTagModels(c *gin.Context) {
 //
 //	suffix         - string appended to the original name (default "_复制")
 //	reset_balance  - bool, when true will reset balance & used_quota to 0 (default true)
+//	disabled       - bool, when true the clone starts manually disabled (default false)
 func CopyChannel(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -1363,6 +1364,11 @@ func CopyChannel(c *gin.Context) {
 		if v, err := strconv.ParseBool(rbStr); err == nil {
 			resetBalance = v
 		}
+	}
+	disabled, err := strconv.ParseBool(c.DefaultQuery("disabled", "false"))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid disabled"})
+		return
 	}
 
 	// fetch original channel with key
@@ -1380,6 +1386,9 @@ func CopyChannel(c *gin.Context) {
 	clone.Name = origin.Name + suffix
 	clone.TestTime = 0
 	clone.ResponseTime = 0
+	if disabled {
+		clone.Status = common.ChannelStatusManuallyDisabled
+	}
 	if resetBalance {
 		clone.Balance = 0
 		clone.UsedQuota = 0

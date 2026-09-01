@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -131,6 +132,68 @@ func TestSelectChannelsForAutomaticTestScheduledSkipsManualDisabled(t *testing.T
 	require.Len(t, selected, 2)
 	require.Equal(t, 1, selected[0].Id)
 	require.Equal(t, 2, selected[1].Id)
+}
+
+func TestCopyChannelCanStartDisabled(t *testing.T) {
+	tests := []struct {
+		name            string
+		query           string
+		expectedStatus  int
+		expectedAbility bool
+	}{
+		{name: "default remains enabled", expectedStatus: common.ChannelStatusEnabled, expectedAbility: true},
+		{name: "explicitly disabled", query: "?disabled=true", expectedStatus: common.ChannelStatusManuallyDisabled, expectedAbility: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupModelListControllerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.Log{}))
+
+			origin := &model.Channel{
+				Name:      "upstream models",
+				Key:       "secret-key",
+				Status:    common.ChannelStatusEnabled,
+				Models:    "vendor/model-a,vendor/model-b",
+				Group:     "default",
+				Balance:   12,
+				UsedQuota: 34,
+			}
+			require.NoError(t, db.Create(origin).Error)
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/channel/copy/%d%s", origin.Id, tt.query), nil)
+			ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(origin.Id)}}
+
+			CopyChannel(ctx)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var response struct {
+				Success bool `json:"success"`
+				Data    struct {
+					Id int `json:"id"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.True(t, response.Success)
+
+			clone, err := model.GetChannelById(response.Data.Id, true)
+			require.NoError(t, err)
+			require.Equal(t, tt.expectedStatus, clone.Status)
+			require.Equal(t, origin.Key, clone.Key)
+			require.Equal(t, origin.Models, clone.Models)
+			require.Equal(t, origin.Name+"_复制", clone.Name)
+			require.Zero(t, clone.Balance)
+			require.Zero(t, clone.UsedQuota)
+
+			var abilities []model.Ability
+			require.NoError(t, db.Where("channel_id = ?", clone.Id).Order("model ASC").Find(&abilities).Error)
+			require.Len(t, abilities, 2)
+			require.Equal(t, tt.expectedAbility, abilities[0].Enabled)
+			require.Equal(t, tt.expectedAbility, abilities[1].Enabled)
+		})
+	}
 }
 
 func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
