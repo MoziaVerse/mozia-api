@@ -24,13 +24,6 @@ type UserThinkingDisabledRedirect struct {
 	TargetModel string `json:"target_model"`
 }
 
-type persistedUserThinkingDisabledRedirect struct {
-	UserId      int    `json:"user_id"`
-	SourceModel string `json:"source_model"`
-	TargetModel string `json:"target_model"`
-	Enabled     *bool  `json:"enabled,omitempty"`
-}
-
 type userThinkingDisabledRedirectRules struct {
 	*types.RWMap[string, UserThinkingDisabledRedirect]
 }
@@ -63,18 +56,10 @@ func ValidateUserThinkingDisabledRedirect(rule UserThinkingDisabledRedirect) err
 }
 
 func (rules *userThinkingDisabledRedirectRules) UnmarshalJSON(data []byte) error {
-	persisted := make(map[string]persistedUserThinkingDisabledRedirect)
-	if err := common.Unmarshal(data, &persisted); err == nil {
-		normalized := make(map[string]UserThinkingDisabledRedirect, len(persisted))
-		for _, stored := range persisted {
-			if stored.Enabled != nil && !*stored.Enabled {
-				continue
-			}
-			rule := UserThinkingDisabledRedirect{
-				UserId:      stored.UserId,
-				SourceModel: stored.SourceModel,
-				TargetModel: stored.TargetModel,
-			}
+	configured := make(map[string]UserThinkingDisabledRedirect)
+	if err := common.Unmarshal(data, &configured); err == nil {
+		normalized := make(map[string]UserThinkingDisabledRedirect, len(configured))
+		for _, rule := range configured {
 			rule = NormalizeUserThinkingDisabledRedirect(rule)
 			if err := ValidateUserThinkingDisabledRedirect(rule); err != nil {
 				return err
@@ -90,7 +75,7 @@ func (rules *userThinkingDisabledRedirectRules) UnmarshalJSON(data []byte) error
 	if err := common.Unmarshal(data, &legacy); err != nil {
 		return err
 	}
-	configured := make(map[string]UserThinkingDisabledRedirect, len(legacy))
+	configured = make(map[string]UserThinkingDisabledRedirect, len(legacy))
 	for userId, enabled := range legacy {
 		if userId <= 0 || !enabled {
 			continue

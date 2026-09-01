@@ -73,6 +73,13 @@ export function MoziaUserModelRedirectSection() {
   const [sourceModel, setSourceModel] = useState('')
   const [targetModel, setTargetModel] = useState('')
 
+  const resetForm = () => {
+    setEditing(null)
+    setSsoSub('')
+    setSourceModel('')
+    setTargetModel('')
+  }
+
   const rulesQuery = useQuery({
     queryKey,
     queryFn: getMoziaUserModelRedirects,
@@ -81,10 +88,7 @@ export function MoziaUserModelRedirectSection() {
     mutationFn: saveMoziaUserModelRedirect,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey })
-      setEditing(null)
-      setSsoSub('')
-      setSourceModel('')
-      setTargetModel('')
+      resetForm()
       toast.success(t('User model redirect saved'))
     },
     onError: (error: unknown) =>
@@ -95,15 +99,7 @@ export function MoziaUserModelRedirectSection() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey })
       toast.success(t('User model redirect deleted'))
-      if (
-        editing?.user_id === deleteTarget?.user_id &&
-        editing?.source_model === deleteTarget?.source_model
-      ) {
-        setEditing(null)
-        setSsoSub('')
-        setSourceModel('')
-        setTargetModel('')
-      }
+      resetForm()
       setDeleteTarget(null)
     },
     onError: (error: unknown) =>
@@ -130,14 +126,8 @@ export function MoziaUserModelRedirectSection() {
     saveMutation.mutate(payload)
   }
 
-  const cancelEdit = () => {
-    setEditing(null)
-    setSsoSub('')
-    setSourceModel('')
-    setTargetModel('')
-  }
-
   const rules = rulesQuery.data ?? []
+  const SubmitIcon = editing ? Pencil : Plus
 
   return (
     <SettingsSection title={t('User Model Redirects')}>
@@ -181,17 +171,15 @@ export function MoziaUserModelRedirectSection() {
           />
           <div className='flex gap-2'>
             <Button type='submit' disabled={saveMutation.isPending}>
-              {saveMutation.isPending && <Spinner data-icon='inline-start' />}
-              {!saveMutation.isPending && editing && (
-                <Pencil data-icon='inline-start' />
-              )}
-              {!saveMutation.isPending && !editing && (
-                <Plus data-icon='inline-start' />
+              {saveMutation.isPending ? (
+                <Spinner data-icon='inline-start' />
+              ) : (
+                <SubmitIcon data-icon='inline-start' />
               )}
               {editing ? t('Save') : t('Add rule')}
             </Button>
             {editing ? (
-              <Button type='button' variant='outline' onClick={cancelEdit}>
+              <Button type='button' variant='outline' onClick={resetForm}>
                 {t('Cancel')}
               </Button>
             ) : null}

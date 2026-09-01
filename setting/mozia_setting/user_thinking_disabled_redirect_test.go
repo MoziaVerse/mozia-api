@@ -61,15 +61,4 @@ func TestUserThinkingDisabledRedirectMigratesBooleanFormat(t *testing.T) {
 	rule, ok := GetUserThinkingDisabledRedirect(7073, "moonshotai/kimi-k3")
 	require.True(t, ok)
 	assert.Equal(t, "moonshotai/kimi-k2.6", rule.TargetModel)
-
-	require.NoError(t, UpdateUserThinkingDisabledRedirectsByJSONString(`{
-		"7073:vendor/source": {
-			"user_id": 7073,
-			"source_model": "vendor/source",
-			"target_model": "vendor/target",
-			"enabled": false
-		}
-	}`))
-	_, ok = GetUserThinkingDisabledRedirect(7073, "vendor/source")
-	assert.False(t, ok)
 }
