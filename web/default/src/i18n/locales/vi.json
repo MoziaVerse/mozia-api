@@ -4885,7 +4885,7 @@
     "USD": "USD",
     "USD Exchange Rate": "Tỷ giá USD",
     "USD price per 1M input tokens.": "Giá USD cho mỗi 1 triệu token đầu vào.",
-    "USD price per 1M tokens.": "Giá USD cho mỗi 1 triệu token.",
+    "Price per 1M tokens.": "Giá cho mỗi 1 triệu token.",
     "Use +: to add a group, -: to remove a default selectable group, or no prefix to append a group.": "Dùng +: để thêm nhóm, -: để xóa nhóm có thể chọn mặc định, hoặc không có tiền tố để nối nhóm.",
     "Use 1 to keep the calculated amount unchanged, or 0.36 to charge 36% of it.": "Dùng 1 để giữ nguyên số tiền, hoặc 0,36 để tính phí 36% số tiền đó.",
     "Use a compatible browser or device with biometric authentication or a security key to register a Passkey.": "Sử dụng trình duyệt hoặc thiết bị tương thích có xác thực sinh trắc học hoặc khóa bảo mật để đăng ký Khóa truy cập.",

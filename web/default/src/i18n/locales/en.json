@@ -4885,7 +4885,7 @@
     "USD": "USD",
     "USD Exchange Rate": "USD Exchange Rate",
     "USD price per 1M input tokens.": "USD price per 1M input tokens.",
-    "USD price per 1M tokens.": "USD price per 1M tokens.",
+    "Price per 1M tokens.": "Price per 1M tokens.",
     "Use +: to add a group, -: to remove a default selectable group, or no prefix to append a group.": "Use +: to add a group, -: to remove a default selectable group, or no prefix to append a group.",
     "Use 1 to keep the calculated amount unchanged, or 0.36 to charge 36% of it.": "Use 1 to keep the calculated amount unchanged, or 0.36 to charge 36% of it.",
     "Use a compatible browser or device with biometric authentication or a security key to register a Passkey.": "Use a compatible browser or device with biometric authentication or a security key to register a Passkey.",

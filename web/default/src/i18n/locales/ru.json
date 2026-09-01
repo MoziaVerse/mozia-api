@@ -4885,7 +4885,7 @@
     "USD": "USD",
     "USD Exchange Rate": "Обменный курс USD",
     "USD price per 1M input tokens.": "Цена в USD за 1 млн входных токенов.",
-    "USD price per 1M tokens.": "Цена в USD за 1 млн токенов.",
+    "Price per 1M tokens.": "Цена за 1 млн токенов.",
     "Use +: to add a group, -: to remove a default selectable group, or no prefix to append a group.": "Используйте +: для добавления группы, -: для удаления выбираемой по умолчанию группы, без префикса — для добавления в конец.",
     "Use 1 to keep the calculated amount unchanged, or 0.36 to charge 36% of it.": "Укажите 1, чтобы не менять сумму, или 0,36, чтобы списывать 36 % от неё.",
     "Use a compatible browser or device with biometric authentication or a security key to register a Passkey.": "Используйте совместимый браузер или устройство с биометрической аутентификацией или ключ безопасности для регистрации ключа доступа.",

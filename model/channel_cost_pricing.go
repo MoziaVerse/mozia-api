@@ -13,11 +13,12 @@ import (
 )
 
 const (
-	ChannelCostModePerToken   = "per_token"
-	ChannelCostModePerRequest = "per_request"
-	ChannelCostModePerSecond  = "per_second"
-	ChannelCostModeParametric = "parametric"
-	ChannelCostModeTieredExpr = "tiered_expr"
+	ChannelCostModePerToken        = "per_token"
+	ChannelCostModePerRequest      = "per_request"
+	ChannelCostModePerSecond       = "per_second"
+	ChannelCostModeParametric      = "parametric"
+	ChannelCostModeTokenParametric = "token_parametric"
+	ChannelCostModeTieredExpr      = "tiered_expr"
 )
 
 type ChannelCostConfig struct {
@@ -89,17 +90,16 @@ func ValidateChannelCostPricing(cost *ChannelCostPricing) error {
 		if err := validatePrice("base price", cost.Config.BasePrice); err != nil {
 			return err
 		}
-	case ChannelCostModePerSecond, ChannelCostModeParametric:
-		if err := validatePrice("base price", cost.Config.BasePrice); err != nil {
-			return err
+	case ChannelCostModePerSecond, ChannelCostModeParametric, ChannelCostModeTokenParametric:
+		if cost.Mode != ChannelCostModeTokenParametric {
+			if err := validatePrice("base price", cost.Config.BasePrice); err != nil {
+				return err
+			}
 		}
 		if cost.Config.TaskBilling == nil {
 			return fmt.Errorf("task billing configuration is required")
 		}
-		expectedMode := taskbilling.ModePerSecond
-		if cost.Mode == ChannelCostModeParametric {
-			expectedMode = taskbilling.ModeParametric
-		}
+		expectedMode := cost.Mode
 		if cost.Config.TaskBilling.Mode != expectedMode {
 			return fmt.Errorf("task billing mode must be %s", expectedMode)
 		}

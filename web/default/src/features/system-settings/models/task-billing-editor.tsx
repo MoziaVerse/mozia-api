@@ -239,7 +239,7 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
 
   return (
     <FieldGroup className='gap-5'>
-      {props.draft.mode === 'token_parametric' ? (
+      {props.draft.mode === 'token_parametric' && (
         <FieldGroup className='gap-4'>
           <div className='grid gap-4 sm:grid-cols-2'>
             <Field>
@@ -282,7 +282,7 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
                 {t('Add option')}
               </Button>
             </div>
-            <FieldDescription>{t('USD price per 1M tokens.')}</FieldDescription>
+            <FieldDescription>{t('Price per 1M tokens.')}</FieldDescription>
             <div className='grid gap-2'>
               {props.draft.tokenPrices.values.map((price) => (
                 <div
@@ -341,7 +341,8 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
             </div>
           </Field>
         </FieldGroup>
-      ) : props.draft.mode === 'per_second' ? (
+      )}
+      {props.draft.mode === 'per_second' && (
         <FieldGroup className='gap-4'>
           <Field>
             <FieldLabel>{t('Duration paths')}</FieldLabel>
@@ -359,7 +360,8 @@ export function TaskBillingEditor(props: TaskBillingEditorProps) {
           </Field>
           {renderNumericFields(props.draft.duration, updateDuration)}
         </FieldGroup>
-      ) : (
+      )}
+      {props.draft.mode === 'parametric' && (
         <FieldGroup className='gap-4'>
           <div className='flex items-start justify-between gap-4'>
             <p className='text-muted-foreground text-sm'>

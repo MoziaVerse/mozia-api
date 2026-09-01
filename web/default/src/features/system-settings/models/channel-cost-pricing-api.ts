@@ -23,6 +23,7 @@ export type ChannelCostMode =
   | 'per_request'
   | 'per_second'
   | 'parametric'
+  | 'token_parametric'
   | 'tiered_expr'
 
 export type ChannelCostConfig = {

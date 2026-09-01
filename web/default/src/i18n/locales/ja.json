@@ -4885,7 +4885,7 @@
     "USD": "USD",
     "USD Exchange Rate": "USD 為替レート",
     "USD price per 1M input tokens.": "100万入力トークンあたりのUSD価格。",
-    "USD price per 1M tokens.": "100万トークンあたりのUSD価格。",
+    "Price per 1M tokens.": "100万トークンあたりの価格。",
     "Use +: to add a group, -: to remove a default selectable group, or no prefix to append a group.": "+: はグループ追加、-: はデフォルト選択可能グループの削除、接頭辞なしはグループ追記に使います。",
     "Use 1 to keep the calculated amount unchanged, or 0.36 to charge 36% of it.": "1 は計算額を変更せず、0.36 はその 36% を請求します。",
     "Use a compatible browser or device with biometric authentication or a security key to register a Passkey.": "生体認証またはセキュリティキーを備えた互換性のあるブラウザまたはデバイスを使用して、パスキーを登録してください。",

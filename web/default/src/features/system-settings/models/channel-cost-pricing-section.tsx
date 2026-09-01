@@ -79,6 +79,7 @@ const MODES: ChannelCostMode[] = [
   'per_request',
   'per_second',
   'parametric',
+  'token_parametric',
   'tiered_expr',
 ]
 
@@ -146,6 +147,7 @@ const modeLabel = (mode: ChannelCostMode) => {
     per_request: 'Per request',
     per_second: 'Per second',
     parametric: 'Parametric',
+    token_parametric: 'Multi-parameter Token',
     tiered_expr: 'Tiered expression',
   }
   return labels[mode]
@@ -170,6 +172,9 @@ const buildConfig = (draft: Draft): ChannelCostConfig => {
   }
   if (draft.mode === 'tiered_expr') {
     return { billing_expr: draft.billingExpr.trim() }
+  }
+  if (draft.mode === 'token_parametric') {
+    return { task_billing: buildTaskBillingConfig(draft.taskBilling) }
   }
   const basePrice = parsePrice(draft.basePrice)
   const referenceVideoPrice = parsePrice(draft.referenceVideoPrice)
@@ -244,7 +249,13 @@ export function ChannelCostPricingSection() {
   const changeMode = (mode: ChannelCostMode) => {
     if (!draft) return
     const taskBilling = { ...draft.taskBilling }
-    if (mode === 'per_second' || mode === 'parametric') taskBilling.mode = mode
+    if (
+      mode === 'per_second' ||
+      mode === 'parametric' ||
+      mode === 'token_parametric'
+    ) {
+      taskBilling.mode = mode
+    }
     setDraft({ ...draft, mode, taskBilling })
   }
 
@@ -265,13 +276,18 @@ export function ChannelCostPricingSection() {
       }
     }
     if (
+      draft.mode !== 'token_parametric' &&
       draft.referenceVideoPrice.trim() &&
       parsePrice(draft.referenceVideoPrice) === null
     ) {
       toast.error(t('Prices must be non-negative numbers.'))
       return
     }
-    if (draft.mode === 'per_second' || draft.mode === 'parametric') {
+    if (
+      draft.mode === 'per_second' ||
+      draft.mode === 'parametric' ||
+      draft.mode === 'token_parametric'
+    ) {
       const error = validateTaskBillingDraft(draft.taskBilling)
       if (error) {
         toast.error(t(error))
@@ -577,7 +593,8 @@ export function ChannelCostPricingSection() {
                   </div>
                 )}
                 {(draft.mode === 'per_second' ||
-                  draft.mode === 'parametric') && (
+                  draft.mode === 'parametric' ||
+                  draft.mode === 'token_parametric') && (
                   <TaskBillingEditor
                     draft={draft.taskBilling}
                     onChange={(taskBilling) =>

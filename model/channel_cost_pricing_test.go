@@ -48,6 +48,25 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 	err = UpsertChannelCostPricing(&cost)
 	assert.ErrorContains(t, err, "task billing mode must be parametric")
 
+	cost.Mode = ChannelCostModeTokenParametric
+	cost.Config.BasePrice = nil
+	cost.Config.TaskBilling = &taskbilling.Config{
+		Version: taskbilling.Version1,
+		Mode:    taskbilling.ModeTokenParametric,
+		TokenPrices: &taskbilling.TokenPriceTable{
+			Paths: []string{"resolution"},
+			Values: map[string]taskbilling.TokenUnitPrice{
+				"720p": {Standard: 0.12},
+			},
+		},
+	}
+	require.NoError(t, UpsertChannelCostPricing(&cost))
+	costs, err = ListChannelCostPricing()
+	require.NoError(t, err)
+	require.Len(t, costs, 1)
+	assert.Equal(t, ChannelCostModeTokenParametric, costs[0].Mode)
+	assert.Equal(t, 0.12, costs[0].Config.TaskBilling.TokenPrices.Values["720p"].Standard)
+
 	deleted, err := DeleteChannelCostPricing(cost.Id)
 	require.NoError(t, err)
 	assert.True(t, deleted)

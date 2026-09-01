@@ -4885,7 +4885,7 @@
     "USD": "USD",
     "USD Exchange Rate": "Taux de change USD",
     "USD price per 1M input tokens.": "Prix en USD par million de tokens d’entrée.",
-    "USD price per 1M tokens.": "Prix en USD par million de tokens.",
+    "Price per 1M tokens.": "Prix par million de tokens.",
     "Use +: to add a group, -: to remove a default selectable group, or no prefix to append a group.": "Utilisez +: pour ajouter un groupe, -: pour supprimer un groupe sélectionnable par défaut, ou aucun préfixe pour annexer un groupe.",
     "Use 1 to keep the calculated amount unchanged, or 0.36 to charge 36% of it.": "Utilisez 1 pour conserver le montant calculé, ou 0,36 pour en facturer 36 %.",
     "Use a compatible browser or device with biometric authentication or a security key to register a Passkey.": "Utilisez un navigateur ou un appareil compatible avec l'authentification biométrique ou une clé de sécurité pour enregistrer une clé d'accès (Passkey).",
