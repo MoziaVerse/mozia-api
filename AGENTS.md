@@ -64,7 +64,7 @@ web/             — Frontend themes container
 - `reseller_domains` 是代理商 Host 绑定的权威数据。只有规范化、`verified=true`、`status=active` 的 Host 才能解析 presentation/tenant context。
 - Mega 的代理商编辑会调用平台接口更新名称与 Host。当前 `UpdateResellerAdminRecord` 在事务内删除该代理商旧域名记录，并写入一个新的 active/verified Host，所以该操作当前是单 Host 替换，不是多域名生命周期管理。
 - 数据库中的 `verified=true` 表示平台已确认该 Host 可用，不代表本仓库已执行 DNS challenge、反向代理配置或 TLS 签发；这些基础设施动作不由 `mozia-api` 完成。
-- 域名切换还必须同步 reseller 部署入口和 `mozia-sso` OIDC redirect URI。不要把“Mega 保存成功”解释为外部域名已经完整上线。
+- Matrix 挂牌域名由 Matrix 动态解析，并通过中心 OAuth Proxy 回调，不再逐域名同步 Matrix 环境变量或 `mozia-sso` redirect URI。Mega 保存后仍需完成 DNS，或由客户侧终止 TLS 并保留原 Host 反代；不要把数据库保存成功解释为公网域名已经上线。
 - Logo 存在 `resellers.logo`，属于代理商而非域名。Mega 和 `matrix-reseller` Owner 更新同一字段，更换 Host 不应复制或重置 Logo。
 
 ## Internationalization (i18n)
