@@ -57,6 +57,7 @@ const _systemInfoSchema = z.object({
   }),
   SystemName: z.string().min(1),
   ServerAddress: z.string().optional(),
+  PublicVideoAddress: z.string().optional(),
   Logo: z.string().url().optional().or(z.literal('')),
   Footer: z.string().optional(),
   About: z.string().optional(),
@@ -89,6 +90,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
     },
     SystemName: normalizeValue(defaultValues.SystemName),
     ServerAddress: normalizeValue(defaultValues.ServerAddress),
+    PublicVideoAddress: normalizeValue(defaultValues.PublicVideoAddress),
     Logo: normalizeValue(defaultValues.Logo),
     Footer: normalizeValue(defaultValues.Footer),
     About: normalizeValue(defaultValues.About),
@@ -107,6 +109,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       error: () => t('System name is required'),
     }),
     ServerAddress: z.string().optional(),
+    PublicVideoAddress: z.string().optional(),
     Logo: z.string().url().optional().or(z.literal('')),
     Footer: z.string().optional(),
     About: z.string().optional(),
@@ -136,7 +139,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
         let allSucceeded = true
         for (const [key, value] of otherEntries) {
           let v = normalizeValue(value)
-          if (key === 'ServerAddress') {
+          if (key === 'ServerAddress' || key === 'PublicVideoAddress') {
             v = v.replace(/\/+$/, '')
           }
           const res = await updateOption.mutateAsync({
@@ -262,6 +265,25 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                     <FormDescription>
                       {t(
                         'The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='PublicVideoAddress'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Public Video Address')}</FormLabel>
+                    <FormControl>
+                      <Input placeholder='https://api.example.com' {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Public URL used only for video result links. Leave blank to use the server address.'
                       )}
                     </FormDescription>
                     <FormMessage />
