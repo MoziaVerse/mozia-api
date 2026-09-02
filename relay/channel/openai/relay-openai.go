@@ -17,7 +17,6 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/sjson"
 )
 
 func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
@@ -170,11 +169,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 	if containStreamUsage {
 		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
-		cachedTokens := usage.PromptTokensDetails.CachedTokens
-		normalizedData, err := sjson.Set(lastStreamData, "usage.prompt_tokens_details.cached_tokens", cachedTokens)
+		normalizedData, err := normalizeCachedTokens(lastStreamData, usage.PromptTokensDetails.CachedTokens)
 		if err != nil {
-			logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
-		} else if normalizedData, err = sjson.Set(normalizedData, "usage.cached_tokens", cachedTokens); err != nil {
 			logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
 		} else {
 			lastStreamData = normalizedData
@@ -279,8 +275,12 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			if err != nil {
 				return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 			}
+		}
+		normalizedBody, normalizeErr := normalizeCachedTokens(string(responseBody), simpleResponse.Usage.PromptTokensDetails.CachedTokens)
+		if normalizeErr != nil {
+			logger.LogError(c, "failed to normalize cache usage: "+normalizeErr.Error())
 		} else {
-			break
+			responseBody = common.StringToByteSlice(normalizedBody)
 		}
 	case types.RelayFormatClaude:
 		claudeResp := service.ResponseOpenAI2Claude(&simpleResponse, info)

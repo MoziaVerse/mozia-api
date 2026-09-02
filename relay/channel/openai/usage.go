@@ -5,7 +5,16 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/tidwall/sjson"
 )
+
+func normalizeCachedTokens(body string, cachedTokens int) (string, error) {
+	normalized, err := sjson.Set(body, "usage.prompt_tokens_details.cached_tokens", cachedTokens)
+	if err != nil {
+		return body, err
+	}
+	return sjson.Set(normalized, "usage.cached_tokens", cachedTokens)
+}
 
 func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, responseBody []byte) {
 	if info == nil || usage == nil {
@@ -43,7 +52,9 @@ func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, res
 		}
 	case constant.ChannelTypeOpenAI:
 		if usage.PromptTokensDetails.CachedTokens == 0 {
-			if cachedTokens, ok := extractLlamaCachedTokensFromBody(responseBody); ok {
+			if cachedTokens, ok := extractCachedTokensFromBody(responseBody); ok {
+				usage.PromptTokensDetails.CachedTokens = cachedTokens
+			} else if cachedTokens, ok := extractLlamaCachedTokensFromBody(responseBody); ok {
 				usage.PromptTokensDetails.CachedTokens = cachedTokens
 			}
 		}

@@ -47,3 +47,27 @@ func TestOaiStreamHandlerNormalizesCachedTokens(t *testing.T) {
 	require.Equal(t, 1280, usage.PromptTokensDetails.CachedTokens)
 	require.Contains(t, recorder.Body.String(), `"prompt_tokens_details":{"cached_tokens":1280},"cached_tokens":1280`)
 }
+
+func TestOpenaiHandlerNormalizesMissingCachedTokens(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	body := `{"id":"chatcmpl-test","object":"chat.completion","model":"kimi-k3","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":378,"completion_tokens":1,"total_tokens":379,"prompt_tokens_details":null}}`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:       constant.ChannelTypeOpenAI,
+			UpstreamModelName: "kimi-k3",
+		},
+		RelayFormat: types.RelayFormatOpenAI,
+	}
+
+	usage, err := OpenaiHandler(c, info, resp)
+	require.Nil(t, err)
+	require.Zero(t, usage.PromptTokensDetails.CachedTokens)
+	require.Contains(t, recorder.Body.String(), `"prompt_tokens_details":{"cached_tokens":0}`)
+	require.Contains(t, recorder.Body.String(), `"cached_tokens":0`)
+}
