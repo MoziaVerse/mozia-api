@@ -86,6 +86,11 @@ func StringData(c *gin.Context, str string) error {
 	if c.Request != nil && c.Request.Context().Err() != nil {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
+	data, err := common.ApplyUserVisibleModel(c, common.StringToByteSlice(str))
+	if err != nil {
+		return fmt.Errorf("failed to override response model: %w", err)
+	}
+	str = string(data)
 
 	c.Render(-1, common.CustomEvent{Data: "data: " + str})
 	return FlushWriter(c)

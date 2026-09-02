@@ -5249,6 +5249,17 @@
     "Token price used when the video generation request includes a reference video.": "動画生成リクエストに参照動画が含まれる場合のトークン価格です。",
     "Reference video price": "参照動画単価",
     "JSON map of model → USD base price used when a video task includes a reference video.": "モデル → 動画タスクに参照動画が含まれる場合に使用する米ドル建て基本単価の JSON マップ。",
-    "Overrides the base price when the request includes a reference video.": "リクエストに参照動画が含まれる場合、基本単価を上書きします。"
+    "Overrides the base price when the request includes a reference video.": "リクエストに参照動画が含まれる場合、基本単価を上書きします。",
+    "Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.": "設定されたリクエストは既定で対象モデルを使用します。トリガー条件とユーザーに表示するモデルは個別に制御できます。",
+    "User model fallback": "ユーザーモデルのフォールバック",
+    "This user will stop using the configured model fallback.": "このユーザーは設定されたモデルフォールバックを使用しなくなります。",
+    "Only when thinking is disabled": "思考が無効な場合のみ",
+    "Seamless fallback": "シームレスフォールバック",
+    "Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.": "API レスポンスとユーザー向けログには元のモデルを表示します。ルーティング、課金、管理者診断では引き続き対象モデルを使用します。",
+    "Trigger": "トリガー",
+    "Fallback mode": "フォールバックモード",
+    "Thinking disabled": "思考無効",
+    "Always": "常時",
+    "Standard fallback": "通常フォールバック"
   }
 }

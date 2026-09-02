@@ -7,10 +7,11 @@ const (
 	ContextKeyPromptTokens    ContextKey = "prompt_tokens"
 	ContextKeyEstimatedTokens ContextKey = "estimated_tokens"
 
-	ContextKeyOriginalModel        ContextKey = "original_model"
-	ContextKeyRequestedModel       ContextKey = "requested_model"
-	ContextKeyModelRedirectApplied ContextKey = "model_redirect_applied"
-	ContextKeyRequestStartTime     ContextKey = "request_start_time"
+	ContextKeyOriginalModel         ContextKey = "original_model"
+	ContextKeyRequestedModel        ContextKey = "requested_model"
+	ContextKeyStripRedirectThinking ContextKey = "strip_redirect_thinking"
+	ContextKeyUserVisibleModel      ContextKey = "user_visible_model"
+	ContextKeyRequestStartTime      ContextKey = "request_start_time"
 
 	/* token related keys */
 	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"

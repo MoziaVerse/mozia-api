@@ -12,20 +12,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type moziaUserThinkingDisabledRedirectResponse struct {
-	mozia_setting.UserThinkingDisabledRedirect
+type moziaUserModelRedirectResponse struct {
+	mozia_setting.UserModelRedirect
 	Username string `json:"username"`
 }
 
-type upsertMoziaUserThinkingDisabledRedirectRequest struct {
-	UserId      int    `json:"user_id"`
-	SSOSub      string `json:"sso_sub"`
-	SourceModel string `json:"source_model"`
-	TargetModel string `json:"target_model"`
+type upsertMoziaUserModelRedirectRequest struct {
+	UserId               int    `json:"user_id"`
+	SSOSub               string `json:"sso_sub"`
+	SourceModel          string `json:"source_model"`
+	TargetModel          string `json:"target_model"`
+	OnlyThinkingDisabled bool   `json:"only_thinking_disabled"`
+	Seamless             bool   `json:"seamless"`
 }
 
-func GetMoziaUserThinkingDisabledRedirects(c *gin.Context) {
-	rules := mozia_setting.GetUserThinkingDisabledRedirects()
+func GetMoziaUserModelRedirects(c *gin.Context) {
+	rules := mozia_setting.GetUserModelRedirects()
 	userIds := make([]int, 0, len(rules))
 	seen := make(map[int]struct{}, len(rules))
 	for _, rule := range rules {
@@ -40,18 +42,18 @@ func GetMoziaUserThinkingDisabledRedirects(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	response := make([]moziaUserThinkingDisabledRedirectResponse, 0, len(rules))
+	response := make([]moziaUserModelRedirectResponse, 0, len(rules))
 	for _, rule := range rules {
-		response = append(response, moziaUserThinkingDisabledRedirectResponse{
-			UserThinkingDisabledRedirect: rule,
-			Username:                     usernames[rule.UserId],
+		response = append(response, moziaUserModelRedirectResponse{
+			UserModelRedirect: rule,
+			Username:          usernames[rule.UserId],
 		})
 	}
 	common.ApiSuccess(c, response)
 }
 
-func UpsertMoziaUserThinkingDisabledRedirect(c *gin.Context) {
-	var request upsertMoziaUserThinkingDisabledRedirectRequest
+func UpsertMoziaUserModelRedirect(c *gin.Context) {
+	var request upsertMoziaUserModelRedirectRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		common.ApiError(c, err)
 		return
@@ -71,12 +73,14 @@ func UpsertMoziaUserThinkingDisabledRedirect(c *gin.Context) {
 		request.UserId = userSSO.UserId
 	}
 
-	rule := mozia_setting.NormalizeUserThinkingDisabledRedirect(mozia_setting.UserThinkingDisabledRedirect{
-		UserId:      request.UserId,
-		SourceModel: request.SourceModel,
-		TargetModel: request.TargetModel,
+	rule := mozia_setting.NormalizeUserModelRedirect(mozia_setting.UserModelRedirect{
+		UserId:               request.UserId,
+		SourceModel:          request.SourceModel,
+		TargetModel:          request.TargetModel,
+		OnlyThinkingDisabled: request.OnlyThinkingDisabled,
+		Seamless:             request.Seamless,
 	})
-	if err := mozia_setting.ValidateUserThinkingDisabledRedirect(rule); err != nil {
+	if err := mozia_setting.ValidateUserModelRedirect(rule); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
@@ -84,18 +88,20 @@ func UpsertMoziaUserThinkingDisabledRedirect(c *gin.Context) {
 		common.ApiErrorMsg(c, "用户不存在")
 		return
 	}
-	if err := service.UpsertMoziaUserThinkingDisabledRedirect(rule); err != nil {
+	if err := service.UpsertMoziaUserModelRedirect(rule); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	recordManageAuditFor(c, rule.UserId, "mozia.user_model_redirect_upsert", map[string]interface{}{
-		"source_model": rule.SourceModel,
-		"target_model": rule.TargetModel,
+		"source_model":           rule.SourceModel,
+		"target_model":           rule.TargetModel,
+		"only_thinking_disabled": rule.OnlyThinkingDisabled,
+		"seamless":               rule.Seamless,
 	})
 	common.ApiSuccess(c, rule)
 }
 
-func DeleteMoziaUserThinkingDisabledRedirect(c *gin.Context) {
+func DeleteMoziaUserModelRedirect(c *gin.Context) {
 	userId, err := strconv.Atoi(c.Param("user_id"))
 	if err != nil || userId <= 0 {
 		common.ApiErrorMsg(c, "无效的用户 ID")
@@ -106,7 +112,7 @@ func DeleteMoziaUserThinkingDisabledRedirect(c *gin.Context) {
 		common.ApiErrorMsg(c, "source_model must not be empty")
 		return
 	}
-	if err := service.DeleteMoziaUserThinkingDisabledRedirect(userId, sourceModel); err != nil {
+	if err := service.DeleteMoziaUserModelRedirect(userId, sourceModel); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}

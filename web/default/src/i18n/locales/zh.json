@@ -5225,14 +5225,14 @@
     "Delete redirect rule?": "删除模型降级规则？",
     "Failed to delete user model redirect": "删除用户模型降级规则失败",
     "Failed to save user model redirect": "保存用户模型降级规则失败",
-    "For selected users, requests with thinking.type set to disabled use the configured target model.": "指定用户传入 thinking.type 为 disabled 时，将使用配置的目标模型。",
+    "Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.": "配置后默认直接使用目标模型，可独立控制触发条件和用户可见模型。",
     "Loading user model redirects...": "正在加载用户模型降级规则...",
     "No user model redirects": "暂无用户模型降级规则",
     "SSO subject": "SSO subject",
     "Source model": "源模型",
     "Target model": "目标模型",
-    "Thinking-disabled model redirects": "关闭思考时的模型降级",
-    "This user will stop using the configured thinking-disabled model redirect.": "该用户将不再使用已配置的关闭思考模型降级规则。",
+    "User model fallback": "用户模型降级",
+    "This user will stop using the configured model fallback.": "该用户将不再使用已配置的模型降级规则。",
     "User Model Redirects": "用户模型降级",
     "User model redirect deleted": "用户模型降级规则已删除",
     "User model redirect saved": "用户模型降级规则已保存",
@@ -5310,6 +5310,14 @@
     "per 1M tokens": "每百万 Token",
     "Prices must be non-negative numbers.": "价格必须是非负数。",
     "Search or select a channel": "搜索或选择渠道",
-    "No channels found": "未找到渠道"
+    "No channels found": "未找到渠道",
+    "Only when thinking is disabled": "仅关闭思考时降级",
+    "Seamless fallback": "无感降级",
+    "Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.": "API 响应和用户可见日志均显示源模型；实际路由、计费和管理员诊断仍使用目标模型。",
+    "Trigger": "触发条件",
+    "Fallback mode": "降级模式",
+    "Thinking disabled": "关闭思考时",
+    "Always": "始终",
+    "Standard fallback": "普通降级"
   }
 }

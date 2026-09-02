@@ -5249,6 +5249,17 @@
     "Token price used when the video generation request includes a reference video.": "Giá token áp dụng khi yêu cầu tạo video có video tham chiếu.",
     "Reference video price": "Giá video tham chiếu",
     "JSON map of model → USD base price used when a video task includes a reference video.": "Ánh xạ JSON từ mô hình sang giá cơ sở USD dùng khi tác vụ video có video tham chiếu.",
-    "Overrides the base price when the request includes a reference video.": "Ghi đè giá cơ sở khi yêu cầu có video tham chiếu."
+    "Overrides the base price when the request includes a reference video.": "Ghi đè giá cơ sở khi yêu cầu có video tham chiếu.",
+    "Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.": "Các yêu cầu đã cấu hình mặc định sử dụng mô hình đích. Điều kiện kích hoạt và mô hình hiển thị cho người dùng có thể được điều khiển độc lập.",
+    "User model fallback": "Chuyển đổi mô hình người dùng",
+    "This user will stop using the configured model fallback.": "Người dùng này sẽ ngừng sử dụng cấu hình chuyển đổi mô hình.",
+    "Only when thinking is disabled": "Chỉ khi chế độ suy luận bị tắt",
+    "Seamless fallback": "Chuyển đổi liền mạch",
+    "Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.": "Hiển thị mô hình nguồn trong phản hồi API và nhật ký người dùng. Định tuyến, tính phí và chẩn đoán quản trị viên vẫn sử dụng mô hình đích.",
+    "Trigger": "Điều kiện",
+    "Fallback mode": "Chế độ chuyển đổi",
+    "Thinking disabled": "Đã tắt suy luận",
+    "Always": "Luôn luôn",
+    "Standard fallback": "Chuyển đổi thông thường"
   }
 }

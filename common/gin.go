@@ -13,6 +13,8 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/pkg/errors"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 
 	"github.com/gin-gonic/gin"
 )
@@ -194,6 +196,14 @@ func GetContextKeyType[T any](c *gin.Context, key constant.ContextKey) (T, bool)
 	}
 	var t T
 	return t, false
+}
+
+func ApplyUserVisibleModel(c *gin.Context, data []byte) ([]byte, error) {
+	model := GetContextKeyString(c, constant.ContextKeyUserVisibleModel)
+	if model == "" || !gjson.GetBytes(data, "model").Exists() {
+		return data, nil
+	}
+	return sjson.SetBytes(data, "model", model)
 }
 
 func ApiError(c *gin.Context, err error) {

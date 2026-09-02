@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { type FormEvent, useState } from 'react'
+import { type FormEvent, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -36,6 +36,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -72,12 +73,18 @@ export function MoziaUserModelRedirectSection() {
   const [ssoSub, setSsoSub] = useState('')
   const [sourceModel, setSourceModel] = useState('')
   const [targetModel, setTargetModel] = useState('')
+  const [onlyThinkingDisabled, setOnlyThinkingDisabled] = useState(false)
+  const [seamless, setSeamless] = useState(false)
+  const onlyThinkingDisabledId = useId()
+  const seamlessId = useId()
 
   const resetForm = () => {
     setEditing(null)
     setSsoSub('')
     setSourceModel('')
     setTargetModel('')
+    setOnlyThinkingDisabled(false)
+    setSeamless(false)
   }
 
   const rulesQuery = useQuery({
@@ -114,6 +121,8 @@ export function MoziaUserModelRedirectSection() {
       user_id: editing?.user_id ?? 0,
       source_model: sourceModel.trim(),
       target_model: targetModel.trim(),
+      only_thinking_disabled: onlyThinkingDisabled,
+      seamless,
     }
     if (!editing) payload.sso_sub = ssoSub.trim()
     if (
@@ -132,9 +141,9 @@ export function MoziaUserModelRedirectSection() {
   return (
     <SettingsSection title={t('User Model Redirects')}>
       <SettingsCard
-        title={t('Thinking-disabled model redirects')}
+        title={t('User model fallback')}
         description={t(
-          'For selected users, requests with thinking.type set to disabled use the configured target model.'
+          'Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.'
         )}
       >
         <form
@@ -184,6 +193,36 @@ export function MoziaUserModelRedirectSection() {
               </Button>
             ) : null}
           </div>
+          <div className='flex flex-wrap gap-x-6 gap-y-2 px-1 lg:col-span-4'>
+            <div className='flex min-h-9 items-center gap-2'>
+              <Switch
+                id={onlyThinkingDisabledId}
+                checked={onlyThinkingDisabled}
+                onCheckedChange={setOnlyThinkingDisabled}
+                disabled={saveMutation.isPending}
+              />
+              <label htmlFor={onlyThinkingDisabledId} className='text-sm'>
+                {t('Only when thinking is disabled')}
+              </label>
+            </div>
+            <div className='flex min-h-9 items-center gap-2'>
+              <Switch
+                id={seamlessId}
+                checked={seamless}
+                onCheckedChange={setSeamless}
+                disabled={saveMutation.isPending}
+              />
+              <label
+                htmlFor={seamlessId}
+                className='text-sm'
+                title={t(
+                  'Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.'
+                )}
+              >
+                {t('Seamless fallback')}
+              </label>
+            </div>
+          </div>
         </form>
 
         {rulesQuery.isLoading && (
@@ -203,12 +242,14 @@ export function MoziaUserModelRedirectSection() {
         )}
         {!rulesQuery.isLoading && !rulesQuery.isError && rules.length > 0 && (
           <div className='overflow-x-auto'>
-            <Table className='min-w-[680px]'>
+            <Table className='min-w-[940px]'>
               <TableHeader>
                 <TableRow>
                   <TableHead>{t('User')}</TableHead>
                   <TableHead>{t('Source model')}</TableHead>
                   <TableHead>{t('Target model')}</TableHead>
+                  <TableHead>{t('Trigger')}</TableHead>
+                  <TableHead>{t('Fallback mode')}</TableHead>
                   <TableHead className='text-right'>{t('Actions')}</TableHead>
                 </TableRow>
               </TableHeader>
@@ -227,6 +268,20 @@ export function MoziaUserModelRedirectSection() {
                     <TableCell className='font-mono text-xs'>
                       {rule.target_model}
                     </TableCell>
+                    <TableCell>
+                      {t(
+                        rule.only_thinking_disabled
+                          ? 'Thinking disabled'
+                          : 'Always'
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {t(
+                        rule.seamless
+                          ? 'Seamless fallback'
+                          : 'Standard fallback'
+                      )}
+                    </TableCell>
                     <TableCell className='text-right'>
                       <div className='flex justify-end gap-1'>
                         <Button
@@ -238,6 +293,8 @@ export function MoziaUserModelRedirectSection() {
                             setSsoSub('')
                             setSourceModel(rule.source_model)
                             setTargetModel(rule.target_model)
+                            setOnlyThinkingDisabled(rule.only_thinking_disabled)
+                            setSeamless(rule.seamless)
                           }}
                         >
                           <Pencil />
@@ -268,9 +325,7 @@ export function MoziaUserModelRedirectSection() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t('Delete redirect rule?')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t(
-                'This user will stop using the configured thinking-disabled model redirect.'
-              )}
+              {t('This user will stop using the configured model fallback.')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

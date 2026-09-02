@@ -78,9 +78,8 @@ func Distribute() func(c *gin.Context) {
 				}
 			}
 
-			applyUserThinkingDisabledRedirect(c, modelRequest)
-
 			if shouldSelectChannel {
+				applyUserModelRedirect(c, modelRequest)
 				if modelRequest.Model == "" {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
 					return
@@ -148,7 +147,9 @@ func Distribute() func(c *gin.Context) {
 						if usingGroup == "auto" {
 							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
 						}
-						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
+						displayModel := common.GetStringIfEmpty(common.GetContextKeyString(c, constant.ContextKeyUserVisibleModel), modelRequest.Model)
+						displayError := strings.ReplaceAll(err.Error(), modelRequest.Model, displayModel)
+						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": displayModel, "Error": displayError})
 						// 如果错误，但是渠道不为空，说明是数据库一致性问题
 						//if channel != nil {
 						//	common.SysError(fmt.Sprintf("渠道不存在：%d", channel.Id))
@@ -158,7 +159,8 @@ func Distribute() func(c *gin.Context) {
 						return
 					}
 					if channel == nil {
-						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+						displayModel := common.GetStringIfEmpty(common.GetContextKeyString(c, constant.ContextKeyUserVisibleModel), modelRequest.Model)
+						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": displayModel}), types.ErrorCodeModelNotFound)
 						return
 					}
 				}
@@ -248,17 +250,21 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 	}, nil
 }
 
-func applyUserThinkingDisabledRedirect(c *gin.Context, request *ModelRequest) {
-	if request == nil || request.ThinkingType != "disabled" ||
-		relayconstant.Path2RelayMode(c.Request.URL.Path) != relayconstant.RelayModeChatCompletions {
+func applyUserModelRedirect(c *gin.Context, request *ModelRequest) {
+	if request == nil {
 		return
 	}
-	rule, ok := mozia_setting.GetUserThinkingDisabledRedirect(c.GetInt("id"), request.Model)
-	if !ok {
+	rule, ok := mozia_setting.GetUserModelRedirect(c.GetInt("id"), request.Model)
+	if !ok || (rule.OnlyThinkingDisabled && request.ThinkingType != "disabled") {
 		return
 	}
 	common.SetContextKey(c, constant.ContextKeyRequestedModel, request.Model)
-	common.SetContextKey(c, constant.ContextKeyModelRedirectApplied, true)
+	if rule.OnlyThinkingDisabled {
+		common.SetContextKey(c, constant.ContextKeyStripRedirectThinking, true)
+	}
+	if rule.Seamless {
+		common.SetContextKey(c, constant.ContextKeyUserVisibleModel, request.Model)
+	}
 	request.Model = rule.TargetModel
 }
 

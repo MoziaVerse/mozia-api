@@ -28,15 +28,15 @@ type UserModelRatio struct {
 }
 
 type MoziaSetting struct {
-	UserModelRatios               *types.RWMap[string, UserModelRatio] `json:"user_model_ratios"`
-	UserThinkingDisabledRedirects *userThinkingDisabledRedirectRules   `json:"user_thinking_disabled_redirects"`
+	UserModelRatios    *types.RWMap[string, UserModelRatio] `json:"user_model_ratios"`
+	UserModelRedirects *userModelRedirectRules              `json:"user_thinking_disabled_redirects"`
 }
 
 var userModelRatioMap = types.NewRWMap[string, UserModelRatio]()
 
 var moziaSetting = MoziaSetting{
-	UserModelRatios:               userModelRatioMap,
-	UserThinkingDisabledRedirects: userThinkingDisabledRedirectMap,
+	UserModelRatios:    userModelRatioMap,
+	UserModelRedirects: userModelRedirectMap,
 }
 
 func init() {

@@ -45,6 +45,8 @@ export type MoziaUserModelRedirect = {
   username?: string
   source_model: string
   target_model: string
+  only_thinking_disabled: boolean
+  seamless: boolean
 }
 
 export type MoziaUserModelRedirectPayload = Omit<

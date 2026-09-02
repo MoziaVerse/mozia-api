@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/types"
 
@@ -284,6 +285,7 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other map[string]interface{}) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
+	modelName, other = applyUserVisibleModelToLog(c, modelName, other)
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
@@ -347,6 +349,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	if !common.LogConsumeEnabled {
 		return
 	}
+	params.ModelName, params.Other = applyUserVisibleModelToLog(c, params.ModelName, params.Other)
 	logger.LogInfo(c, fmt.Sprintf("record consume log: userId=%d, params=%s", userId, common.GetJsonString(params)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
@@ -407,6 +410,30 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			})
 		})
 	}
+}
+
+func applyUserVisibleModelToLog(c *gin.Context, modelName string, other map[string]interface{}) (string, map[string]interface{}) {
+	visibleModel := common.GetContextKeyString(c, constant.ContextKeyUserVisibleModel)
+	if visibleModel == "" {
+		return modelName, other
+	}
+	if other == nil {
+		other = make(map[string]interface{})
+	}
+	adminInfo, _ := other["admin_info"].(map[string]interface{})
+	if adminInfo == nil {
+		adminInfo = make(map[string]interface{})
+	}
+	for _, key := range []string{"requested_model", "effective_model", "is_model_mapped", "upstream_model_name"} {
+		if value, ok := other[key]; ok {
+			adminInfo[key] = value
+			delete(other, key)
+		}
+	}
+	adminInfo["requested_model"] = visibleModel
+	adminInfo["effective_model"] = modelName
+	other["admin_info"] = adminInfo
+	return visibleModel, other
 }
 
 type RecordTaskBillingLogParams struct {

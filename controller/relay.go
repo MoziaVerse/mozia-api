@@ -254,7 +254,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 }
 
 func stripThinkingForModelRedirect(c *gin.Context, request dto.Request) {
-	if !common.GetContextKeyBool(c, constant.ContextKeyModelRedirectApplied) {
+	if !common.GetContextKeyBool(c, constant.ContextKeyStripRedirectThinking) {
 		return
 	}
 	if openAIRequest, ok := request.(*dto.GeneralOpenAIRequest); ok {

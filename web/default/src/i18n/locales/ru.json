@@ -5249,6 +5249,17 @@
     "Token price used when the video generation request includes a reference video.": "Цена токенов для генерации с референсным видео.",
     "Reference video price": "Цена с референсным видео",
     "JSON map of model → USD base price used when a video task includes a reference video.": "JSON-сопоставление модели с базовой ценой в USD для видеозадач с референсным видео.",
-    "Overrides the base price when the request includes a reference video.": "Заменяет базовую цену, если запрос содержит референсное видео."
+    "Overrides the base price when the request includes a reference video.": "Заменяет базовую цену, если запрос содержит референсное видео.",
+    "Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.": "Настроенные запросы по умолчанию используют целевую модель. Условие срабатывания и видимую пользователю модель можно настраивать независимо.",
+    "User model fallback": "Переключение модели пользователя",
+    "This user will stop using the configured model fallback.": "Этот пользователь больше не будет использовать настроенное переключение модели.",
+    "Only when thinking is disabled": "Только когда рассуждение отключено",
+    "Seamless fallback": "Незаметное переключение",
+    "Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.": "Показывает исходную модель в ответах API и пользовательских журналах. Маршрутизация, тарификация и диагностика администратора по-прежнему используют целевую модель.",
+    "Trigger": "Условие",
+    "Fallback mode": "Режим переключения",
+    "Thinking disabled": "Рассуждение отключено",
+    "Always": "Всегда",
+    "Standard fallback": "Обычное переключение"
   }
 }

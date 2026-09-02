@@ -18,7 +18,7 @@ func TestStripThinkingForModelRedirect(t *testing.T) {
 	stripThinkingForModelRedirect(c, request)
 	assert.NotNil(t, request.THINKING)
 
-	common.SetContextKey(c, constant.ContextKeyModelRedirectApplied, true)
+	common.SetContextKey(c, constant.ContextKeyStripRedirectThinking, true)
 	stripThinkingForModelRedirect(c, request)
 	assert.Nil(t, request.THINKING)
 }

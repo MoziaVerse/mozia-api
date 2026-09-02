@@ -5249,6 +5249,17 @@
     "Token price used when the video generation request includes a reference video.": "Prix des tokens appliqué lorsqu'une génération inclut une vidéo de référence.",
     "Reference video price": "Prix avec vidéo de référence",
     "JSON map of model → USD base price used when a video task includes a reference video.": "Mappage JSON modèle → prix de base en USD utilisé lorsque la tâche vidéo contient une vidéo de référence.",
-    "Overrides the base price when the request includes a reference video.": "Remplace le prix de base lorsque la requête contient une vidéo de référence."
+    "Overrides the base price when the request includes a reference video.": "Remplace le prix de base lorsque la requête contient une vidéo de référence.",
+    "Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.": "Les requêtes configurées utilisent le modèle cible par défaut. La condition de déclenchement et le modèle visible par l'utilisateur peuvent être contrôlés séparément.",
+    "User model fallback": "Repli du modèle utilisateur",
+    "This user will stop using the configured model fallback.": "Cet utilisateur cessera d'utiliser le repli de modèle configuré.",
+    "Only when thinking is disabled": "Uniquement lorsque le raisonnement est désactivé",
+    "Seamless fallback": "Repli transparent",
+    "Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.": "Affiche le modèle source dans les réponses API et les journaux visibles par l'utilisateur. Le routage, la facturation et les diagnostics administrateur utilisent toujours le modèle cible.",
+    "Trigger": "Déclencheur",
+    "Fallback mode": "Mode de repli",
+    "Thinking disabled": "Raisonnement désactivé",
+    "Always": "Toujours",
+    "Standard fallback": "Repli standard"
   }
 }

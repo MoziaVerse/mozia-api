@@ -476,9 +476,9 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 	userModelRedirectRoute := moziaRouter.Group("/user-model-redirect")
 	userModelRedirectRoute.Use(middleware.RootOnlyAuth())
 	{
-		userModelRedirectRoute.GET("/", controller.GetMoziaUserThinkingDisabledRedirects)
-		userModelRedirectRoute.POST("/", controller.UpsertMoziaUserThinkingDisabledRedirect)
-		userModelRedirectRoute.DELETE("/:user_id", controller.DeleteMoziaUserThinkingDisabledRedirect)
+		userModelRedirectRoute.GET("/", controller.GetMoziaUserModelRedirects)
+		userModelRedirectRoute.POST("/", controller.UpsertMoziaUserModelRedirect)
+		userModelRedirectRoute.DELETE("/:user_id", controller.DeleteMoziaUserModelRedirect)
 	}
 
 	modelPricingRoute := moziaRouter.Group("/model-pricing")

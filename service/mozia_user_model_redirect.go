@@ -7,30 +7,30 @@ import (
 	"github.com/QuantumNous/new-api/setting/mozia_setting"
 )
 
-var moziaUserThinkingRedirectMutationMutex sync.Mutex
+var moziaUserModelRedirectMutationMutex sync.Mutex
 
-func UpsertMoziaUserThinkingDisabledRedirect(rule mozia_setting.UserThinkingDisabledRedirect) error {
-	moziaUserThinkingRedirectMutationMutex.Lock()
-	defer moziaUserThinkingRedirectMutationMutex.Unlock()
+func UpsertMoziaUserModelRedirect(rule mozia_setting.UserModelRedirect) error {
+	moziaUserModelRedirectMutationMutex.Lock()
+	defer moziaUserModelRedirectMutationMutex.Unlock()
 
-	value, err := mozia_setting.BuildUserThinkingDisabledRedirectUpsertJSON(rule)
+	value, err := mozia_setting.BuildUserModelRedirectUpsertJSON(rule)
 	if err != nil {
 		return err
 	}
 	return model.UpdateOptionsBulk(map[string]string{
-		mozia_setting.UserThinkingDisabledRedirectOptionKey: value,
+		mozia_setting.UserModelRedirectOptionKey: value,
 	})
 }
 
-func DeleteMoziaUserThinkingDisabledRedirect(userId int, sourceModel string) error {
-	moziaUserThinkingRedirectMutationMutex.Lock()
-	defer moziaUserThinkingRedirectMutationMutex.Unlock()
+func DeleteMoziaUserModelRedirect(userId int, sourceModel string) error {
+	moziaUserModelRedirectMutationMutex.Lock()
+	defer moziaUserModelRedirectMutationMutex.Unlock()
 
-	value, err := mozia_setting.BuildUserThinkingDisabledRedirectDeleteJSON(userId, sourceModel)
+	value, err := mozia_setting.BuildUserModelRedirectDeleteJSON(userId, sourceModel)
 	if err != nil {
 		return err
 	}
 	return model.UpdateOptionsBulk(map[string]string{
-		mozia_setting.UserThinkingDisabledRedirectOptionKey: value,
+		mozia_setting.UserModelRedirectOptionKey: value,
 	})
 }

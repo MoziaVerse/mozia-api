@@ -5225,14 +5225,14 @@
     "Delete redirect rule?": "Delete redirect rule?",
     "Failed to delete user model redirect": "Failed to delete user model redirect",
     "Failed to save user model redirect": "Failed to save user model redirect",
-    "For selected users, requests with thinking.type set to disabled use the configured target model.": "For selected users, requests with thinking.type set to disabled use the configured target model.",
+    "Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.": "Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.",
     "Loading user model redirects...": "Loading user model redirects...",
     "No user model redirects": "No user model redirects",
     "SSO subject": "SSO subject",
     "Source model": "Source model",
     "Target model": "Target model",
-    "Thinking-disabled model redirects": "Thinking-disabled model redirects",
-    "This user will stop using the configured thinking-disabled model redirect.": "This user will stop using the configured thinking-disabled model redirect.",
+    "User model fallback": "User model fallback",
+    "This user will stop using the configured model fallback.": "This user will stop using the configured model fallback.",
     "User Model Redirects": "User Model Redirects",
     "User model redirect deleted": "User model redirect deleted",
     "User model redirect saved": "User model redirect saved",
@@ -5310,6 +5310,14 @@
     "per 1M tokens": "per 1M tokens",
     "Prices must be non-negative numbers.": "Prices must be non-negative numbers.",
     "Search or select a channel": "Search or select a channel",
-    "No channels found": "No channels found"
+    "No channels found": "No channels found",
+    "Only when thinking is disabled": "Only when thinking is disabled",
+    "Seamless fallback": "Seamless fallback",
+    "Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.": "Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.",
+    "Trigger": "Trigger",
+    "Fallback mode": "Fallback mode",
+    "Thinking disabled": "Thinking disabled",
+    "Always": "Always",
+    "Standard fallback": "Standard fallback"
   }
 }
