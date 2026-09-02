@@ -25,6 +25,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 type TaskSubmitResult struct {
@@ -689,6 +690,14 @@ func publicVideoTaskModel(task *model.Task) string {
 func publicVideoTaskMetadata(data []byte, resp *dto.PublicVideoTaskResponse) {
 	if len(data) == 0 {
 		return
+	}
+	completionTokens := int(gjson.GetBytes(data, "usage.completion_tokens").Int())
+	totalTokens := int(gjson.GetBytes(data, "usage.total_tokens").Int())
+	if totalTokens == 0 {
+		totalTokens = completionTokens
+	}
+	if totalTokens > 0 {
+		resp.Usage = &dto.VideoTaskUsage{CompletionTokens: completionTokens, TotalTokens: totalTokens}
 	}
 	var raw map[string]any
 	if err := common.Unmarshal(data, &raw); err != nil {

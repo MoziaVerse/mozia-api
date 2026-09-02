@@ -14,7 +14,10 @@ import (
 
 func TestConvertToOpenAIVideoSeparatesSuccessURLAndFailureReason(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		task := &model.Task{TaskID: "task_public", Status: model.TaskStatusSuccess, Progress: "100%"}
+		task := &model.Task{
+			TaskID: "task_public", Status: model.TaskStatusSuccess, Progress: "100%",
+			Data: []byte(`{"usage":{"completion_tokens":68361,"total_tokens":68361}}`),
+		}
 		task.Properties.OriginModelName = "public-model"
 		task.PrivateData.ResultURL = "https://cdn.example/result.mp4"
 
@@ -25,6 +28,9 @@ func TestConvertToOpenAIVideoSeparatesSuccessURLAndFailureReason(t *testing.T) {
 		assert.Equal(t, dto.VideoStatusCompleted, video.Status)
 		assert.Equal(t, "https://cdn.example/result.mp4", video.ContentURL)
 		assert.Equal(t, "https://cdn.example/result.mp4", video.Metadata["url"])
+		require.NotNil(t, video.Usage)
+		assert.Equal(t, 68361, video.Usage.CompletionTokens)
+		assert.Equal(t, 68361, video.Usage.TotalTokens)
 		assert.Nil(t, video.Error)
 	})
 

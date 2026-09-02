@@ -38,6 +38,10 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 		},
 		Data: mustMarshalTaskData(t, map[string]any{
 			"ratio": "16:9",
+			"usage": map[string]any{
+				"completion_tokens": 68361,
+				"total_tokens":      68361,
+			},
 			"output": map[string]any{
 				"filename": "final.mp4",
 			},
@@ -78,6 +82,9 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 	assert.Equal(t, "16:9", resp.Ratio)
 	require.NotNil(t, resp.Duration)
 	assert.Equal(t, 5.5, *resp.Duration)
+	require.NotNil(t, resp.Usage)
+	assert.Equal(t, 68361, resp.Usage.CompletionTokens)
+	assert.Equal(t, 68361, resp.Usage.TotalTokens)
 
 	var raw map[string]any
 	require.NoError(t, common.Unmarshal(body, &raw))
@@ -89,7 +96,7 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 	assert.NotContains(t, raw, "fail_reason")
 	assert.NotContains(t, raw, "result_url")
 	assert.NotContains(t, raw, "properties")
-	assert.NotContains(t, raw, "usage")
+	assert.Contains(t, raw, "usage")
 }
 
 func TestPublicVideoTaskResponseStatusesAndConditionals(t *testing.T) {

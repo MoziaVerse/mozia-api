@@ -47,6 +47,7 @@ type PublicVideoTaskResponse struct {
 	Resolution string                  `json:"resolution,omitempty" example:"720p"`
 	Ratio      string                  `json:"ratio,omitempty" example:"16:9"`
 	Duration   *float64                `json:"duration,omitempty" example:"5"`
+	Usage      *VideoTaskUsage         `json:"usage,omitempty"`
 }
 
 type PublicVideoTaskContent struct {
@@ -57,6 +58,11 @@ type PublicVideoTaskContent struct {
 type PublicVideoTaskFailure struct {
 	Code    string `json:"code" example:"task_failed"`
 	Message string `json:"message" example:"upstream provider rejected the request"`
+}
+
+type VideoTaskUsage struct {
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 // VideoTaskMetadata 视频任务元数据

@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
+	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -19,6 +20,14 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(originTask *model.Task) ([]byte, erro
 	video.SetProgressStr(originTask.Progress)
 	video.CreatedAt = originTask.CreatedAt
 	video.CompletedAt = originTask.UpdatedAt
+	completionTokens := int(gjson.GetBytes(originTask.Data, "usage.completion_tokens").Int())
+	totalTokens := int(gjson.GetBytes(originTask.Data, "usage.total_tokens").Int())
+	if totalTokens == 0 {
+		totalTokens = completionTokens
+	}
+	if totalTokens > 0 {
+		video.Usage = &dto.VideoTaskUsage{CompletionTokens: completionTokens, TotalTokens: totalTokens}
+	}
 
 	switch originTask.Status {
 	case model.TaskStatusSuccess:
