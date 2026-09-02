@@ -80,8 +80,10 @@ func TestBuildPricingDisplayShowsTokenParametricMatrix(t *testing.T) {
 	require.Equal(t, PricingDisplayVersion, display.Version)
 	require.Len(t, display.Items, 2)
 	assert.Equal(t, "task:tokens:resolution=480p:reference_video=false", display.Items[0].Key)
+	assert.Empty(t, display.Items[0].Note)
 	assert.InDelta(t, 17.25, *display.Items[0].OurAmountUSD, 0.000001)
 	assert.Equal(t, "task:tokens:resolution=480p:reference_video=true", display.Items[1].Key)
+	assert.Empty(t, display.Items[1].Note)
 	assert.InDelta(t, 10.5, *display.Items[1].OurAmountUSD, 0.000001)
 }
 
