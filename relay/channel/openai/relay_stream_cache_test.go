@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOaiStreamHandlerNormalizesMoonshotCachedTokens(t *testing.T) {
+func TestOaiStreamHandlerNormalizesCachedTokens(t *testing.T) {
 	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
 	t.Cleanup(func() { gin.SetMode(oldMode) })
@@ -24,7 +24,7 @@ func TestOaiStreamHandlerNormalizesMoonshotCachedTokens(t *testing.T) {
 
 	body := strings.Join([]string{
 		`data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1710000000,"model":"kimi-k3","choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":null}]}`,
-		`data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1710000000,"model":"kimi-k3","choices":[{"index":0,"delta":{},"finish_reason":"stop","usage":{"cached_tokens":1280}}],"usage":{"prompt_tokens":3760,"completion_tokens":2,"total_tokens":3762}}`,
+		`data: {"id":"chatcmpl-test","object":"chat.completion.chunk","created":1710000000,"model":"kimi-k3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3760,"completion_tokens":2,"total_tokens":3762,"prompt_tokens_details":{"cached_tokens":1280}}}`,
 		`data: [DONE]`,
 		``,
 	}, "\n")
@@ -34,7 +34,7 @@ func TestOaiStreamHandlerNormalizesMoonshotCachedTokens(t *testing.T) {
 	resp := &http.Response{Body: io.NopCloser(strings.NewReader(body))}
 	info := &relaycommon.RelayInfo{
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelType:       constant.ChannelTypeMoonshot,
+			ChannelType:       constant.ChannelTypeOpenAI,
 			UpstreamModelName: "kimi-k3",
 		},
 		RelayFormat:        types.RelayFormatOpenAI,

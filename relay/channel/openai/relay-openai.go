@@ -170,16 +170,14 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 	if containStreamUsage {
 		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
-		if info.ChannelType == constant.ChannelTypeMoonshot {
-			cachedTokens := usage.PromptTokensDetails.CachedTokens
-			normalizedData, err := sjson.Set(lastStreamData, "usage.prompt_tokens_details.cached_tokens", cachedTokens)
-			if err != nil {
-				logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
-			} else if normalizedData, err = sjson.Set(normalizedData, "usage.cached_tokens", cachedTokens); err != nil {
-				logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
-			} else {
-				lastStreamData = normalizedData
-			}
+		cachedTokens := usage.PromptTokensDetails.CachedTokens
+		normalizedData, err := sjson.Set(lastStreamData, "usage.prompt_tokens_details.cached_tokens", cachedTokens)
+		if err != nil {
+			logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
+		} else if normalizedData, err = sjson.Set(normalizedData, "usage.cached_tokens", cachedTokens); err != nil {
+			logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
+		} else {
+			lastStreamData = normalizedData
 		}
 	}
 
