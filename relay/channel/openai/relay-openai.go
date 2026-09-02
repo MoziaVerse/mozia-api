@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/sjson"
 )
 
 func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, forceFormat bool, thinkToContent bool) error {
@@ -167,6 +168,20 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		&containStreamUsage, info, &shouldSendLastResp); err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
 	}
+	if containStreamUsage {
+		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+		if info.ChannelType == constant.ChannelTypeMoonshot {
+			cachedTokens := usage.PromptTokensDetails.CachedTokens
+			normalizedData, err := sjson.Set(lastStreamData, "usage.prompt_tokens_details.cached_tokens", cachedTokens)
+			if err != nil {
+				logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
+			} else if normalizedData, err = sjson.Set(normalizedData, "usage.cached_tokens", cachedTokens); err != nil {
+				logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
+			} else {
+				lastStreamData = normalizedData
+			}
+		}
+	}
 
 	if info.RelayFormat == types.RelayFormatOpenAI {
 		if shouldSendLastResp {
@@ -177,9 +192,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	if !containStreamUsage {
 		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		usage.CompletionTokens += toolCount * 7
+		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 	}
-
-	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 
 	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 
