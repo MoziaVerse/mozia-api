@@ -57,6 +57,23 @@ func TestBuildSignedVideoGenerationURLAndVerify(t *testing.T) {
 	require.NoError(t, VerifySignedVideoProxy(42, "task_public", "final clip.mp4", expires, query.Get("signature"), now.Add(23*time.Hour)))
 }
 
+func TestBuildSignedVideoURLUsesPublicVideoAddress(t *testing.T) {
+	originalServerAddress := system_setting.ServerAddress
+	originalPublicVideoAddress := system_setting.PublicVideoAddress
+	system_setting.ServerAddress = "https://management.example"
+	system_setting.PublicVideoAddress = "https://api.example/"
+	t.Cleanup(func() {
+		system_setting.ServerAddress = originalServerAddress
+		system_setting.PublicVideoAddress = originalPublicVideoAddress
+	})
+
+	signedURL := BuildSignedVideoGenerationURLAt(time.Unix(1_700_000_000, 0), 42, "task_public", "video.mp4")
+	parsed, err := url.Parse(signedURL)
+	require.NoError(t, err)
+	assert.Equal(t, "api.example", parsed.Host)
+	assert.Equal(t, "https://api.example/v1/videos/task_public/content", BuildProxyURL("task_public"))
+}
+
 func TestVerifySignedVideoProxyRejectsExpiredAndTamperedFields(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	signedURL := BuildSignedVideoProxyURLAt(now, 7, "task_alpha", "video.mp4")

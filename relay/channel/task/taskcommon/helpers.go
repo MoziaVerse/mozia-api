@@ -71,7 +71,14 @@ func DecodeLocalTaskID(id string) (string, error) {
 // BuildProxyURL constructs the video proxy URL using the public task ID.
 // e.g., "https://your-server.com/v1/videos/task_xxxx/content"
 func BuildProxyURL(taskID string) string {
-	return fmt.Sprintf("%s/v1/videos/%s/content", system_setting.ServerAddress, taskID)
+	return fmt.Sprintf("%s/v1/videos/%s/content", publicVideoAddress(), taskID)
+}
+
+func publicVideoAddress() string {
+	if address := strings.TrimRight(system_setting.PublicVideoAddress, "/"); address != "" {
+		return address
+	}
+	return strings.TrimRight(system_setting.ServerAddress, "/")
 }
 
 const SignedVideoURLTTL = 24 * time.Hour
@@ -127,7 +134,7 @@ func buildSignedVideoURLAt(now time.Time, resourcePath string, userID int, taskI
 	values.Set("expires", strconv.FormatInt(expires, 10))
 	values.Set("signature", signature)
 	return fmt.Sprintf("%s%s/%s/content/%s?%s",
-		strings.TrimRight(system_setting.ServerAddress, "/"),
+		publicVideoAddress(),
 		resourcePath,
 		url.PathEscape(taskID),
 		url.PathEscape(filename),
