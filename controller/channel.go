@@ -1349,8 +1349,10 @@ func GetTagModels(c *gin.Context) {
 // Optional query params:
 //
 //	suffix         - string appended to the original name (default "_复制")
+//	name           - replacement name for the clone
 //	reset_balance  - bool, when true will reset balance & used_quota to 0 (default true)
 //	disabled       - bool, when true the clone starts manually disabled (default false)
+//	material_only  - bool, when true creates a model-free Cool material channel
 func CopyChannel(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -1370,6 +1372,11 @@ func CopyChannel(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid disabled"})
 		return
 	}
+	materialOnly, err := strconv.ParseBool(c.DefaultQuery("material_only", "false"))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid material_only"})
+		return
+	}
 
 	// fetch original channel with key
 	origin, err := model.GetChannelById(id, true)
@@ -1378,14 +1385,27 @@ func CopyChannel(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "获取渠道信息失败，请稍后重试"})
 		return
 	}
+	if materialOnly && origin.Type != constant.ChannelTypeMoziaCool {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "material_only requires a Cool channel"})
+		return
+	}
 
 	// clone channel
 	clone := *origin // shallow copy is sufficient as we will overwrite primitives
 	clone.Id = 0     // let DB auto-generate
 	clone.CreatedTime = common.GetTimestamp()
-	clone.Name = origin.Name + suffix
+	clone.Name = strings.TrimSpace(c.Query("name"))
+	if clone.Name == "" {
+		clone.Name = origin.Name + suffix
+	}
 	clone.TestTime = 0
 	clone.ResponseTime = 0
+	if materialOnly {
+		clone.Models = ""
+		clone.ModelMapping = nil
+		clone.TestModel = nil
+		clone.AutoBan = common.GetPointer(0)
+	}
 	if disabled {
 		clone.Status = common.ChannelStatusManuallyDisabled
 	}
@@ -1402,9 +1422,10 @@ func CopyChannel(c *gin.Context) {
 	}
 	model.InitChannelCache()
 	recordManageAudit(c, "channel.copy", map[string]interface{}{
-		"sourceId": id,
-		"id":       clone.Id,
-		"name":     clone.Name,
+		"sourceId":      id,
+		"id":            clone.Id,
+		"name":          clone.Name,
+		"material_only": materialOnly,
 	})
 	// success
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"id": clone.Id}})

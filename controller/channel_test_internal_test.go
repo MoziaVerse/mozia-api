@@ -196,6 +196,48 @@ func TestCopyChannelCanStartDisabled(t *testing.T) {
 	}
 }
 
+func TestCopyChannelCanCreateMaterialOnlyChannel(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	origin := &model.Channel{
+		Name:      "Cool models",
+		Type:      constant.ChannelTypeMoziaCool,
+		Key:       "secret-key",
+		Status:    common.ChannelStatusEnabled,
+		Models:    "video-a,video-b",
+		Group:     "default",
+		AutoBan:   common.GetPointer(1),
+		TestModel: common.GetPointer("video-a"),
+	}
+	require.NoError(t, origin.Insert())
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/channel/copy/%d?material_only=true&name=material-upload", origin.Id), nil)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprint(origin.Id)}}
+
+	CopyChannel(ctx)
+
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Id int `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	clone, err := model.GetChannelById(response.Data.Id, true)
+	require.NoError(t, err)
+	require.Equal(t, "material-upload", clone.Name)
+	require.Empty(t, clone.Models)
+	require.Nil(t, clone.TestModel)
+	require.False(t, clone.GetAutoBan())
+
+	var abilityCount int64
+	require.NoError(t, db.Model(&model.Ability{}).Where("channel_id = ?", clone.Id).Count(&abilityCount).Error)
+	require.Zero(t, abilityCount)
+}
+
 func TestTestAllChannelsRejectsExistingActiveTask(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.SystemTaskLock{}))
