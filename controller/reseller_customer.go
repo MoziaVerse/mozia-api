@@ -141,6 +141,7 @@ func GetResellerManagementProfile(c *gin.Context) {
 		"brand_name":                    branding.BrandName,
 		"icp_filing_number":             branding.IcpFilingNumber,
 		"public_security_filing_number": branding.PublicSecurityFilingNumber,
+		"value_added_telecom_license":   branding.ValueAddedTelecomLicense,
 		"copyright_text":                branding.CopyrightText,
 		"bank_transfer":                 bankTransfer,
 	})
