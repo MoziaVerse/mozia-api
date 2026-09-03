@@ -184,6 +184,11 @@ type RelayInfo struct {
 
 	StreamStatus *StreamStatus
 
+	// SuppressReasoningContent is set when the channel enables
+	// hide_reasoning_when_disabled and the client asked to disable thinking;
+	// OpenAI-format responses then drop reasoning_content / reasoning.
+	SuppressReasoningContent bool
+
 	ThinkingContentInfo
 	TokenCountMeta
 	*ClaudeConvertInfo

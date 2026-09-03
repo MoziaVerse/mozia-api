@@ -276,6 +276,7 @@ const SENSITIVE_FORM_FIELDS = [
   'azure_responses_version',
   'force_format',
   'thinking_to_content',
+  'hide_reasoning_when_disabled',
   'proxy',
   'pass_through_body_enabled',
   'system_prompt',
@@ -331,6 +332,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.system_prompt?.trim() ||
     values.force_format ||
     values.thinking_to_content ||
+    values.hide_reasoning_when_disabled ||
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     values.claude_beta_query ||
@@ -720,6 +722,9 @@ export function ChannelMutateDrawer({
   const currentHeaderOverride = form.watch('header_override')
   const currentForceFormat = form.watch('force_format')
   const currentThinkingToContent = form.watch('thinking_to_content')
+  const currentHideReasoningWhenDisabled = form.watch(
+    'hide_reasoning_when_disabled'
+  )
   const currentPassThroughBodyEnabled = form.watch('pass_through_body_enabled')
   const currentDisableTaskPollingSleep = form.watch(
     'disable_task_polling_sleep'
@@ -928,6 +933,7 @@ export function ChannelMutateDrawer({
   const extraSettingsConfigured = Boolean(
     currentForceFormat ||
       currentThinkingToContent ||
+      currentHideReasoningWhenDisabled ||
       currentPassThroughBodyEnabled ||
       currentDisableTaskPollingSleep ||
       currentProxy?.trim() ||
@@ -3965,6 +3971,31 @@ export function ChannelMutateDrawer({
                                       <FormDescription>
                                         {t(
                                           'Convert reasoning_content to <think> tag in content'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <FormControl>
+                                      <Switch
+                                        checked={field.value}
+                                        onCheckedChange={field.onChange}
+                                      />
+                                    </FormControl>
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='hide_reasoning_when_disabled'
+                                render={({ field }) => (
+                                  <FormItem className='flex items-center justify-between px-4 py-3'>
+                                    <div className='space-y-0.5'>
+                                      <FormLabel>
+                                        {t('Hide Reasoning When Disabled')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Strip reasoning_content from responses when the client sends reasoning_effort=none or thinking.type=disabled but the upstream still returns it'
                                         )}
                                       </FormDescription>
                                     </div>
