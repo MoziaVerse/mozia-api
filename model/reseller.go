@@ -76,6 +76,7 @@ type Reseller struct {
 	Favicon                    string  `json:"favicon" gorm:"type:text;not null;default:''"`
 	IcpFilingNumber            string  `json:"icp_filing_number" gorm:"type:varchar(64);not null;default:''"`
 	PublicSecurityFilingNumber string  `json:"public_security_filing_number" gorm:"type:varchar(64);not null;default:''"`
+	ValueAddedTelecomLicense   string  `json:"value_added_telecom_license" gorm:"type:varchar(64);not null;default:''"`
 	CopyrightText              string  `json:"copyright_text" gorm:"type:varchar(255);not null;default:''"`
 	Status                     string  `json:"status" gorm:"type:varchar(16);not null;index"`
 	PaymentConfigEnabled       bool    `json:"payment_config_enabled" gorm:"column:bank_transfer_enabled"`
@@ -159,6 +160,7 @@ type ResellerAdminRecord struct {
 	Favicon                    string  `json:"favicon"`
 	IcpFilingNumber            string  `json:"icp_filing_number"`
 	PublicSecurityFilingNumber string  `json:"public_security_filing_number"`
+	ValueAddedTelecomLicense   string  `json:"value_added_telecom_license"`
 	CopyrightText              string  `json:"copyright_text"`
 	OwnerSubject               string  `json:"owner_subject"`
 	OwnerUserId                int     `json:"owner_user_id"`
@@ -200,6 +202,7 @@ type ResellerBranding struct {
 	Favicon                    string `json:"favicon"`
 	IcpFilingNumber            string `json:"icp_filing_number"`
 	PublicSecurityFilingNumber string `json:"public_security_filing_number"`
+	ValueAddedTelecomLicense   string `json:"value_added_telecom_license"`
 	CopyrightText              string `json:"copyright_text"`
 }
 
@@ -212,6 +215,7 @@ type ResellerPresentation struct {
 	Favicon                    string `json:"favicon"`
 	IcpFilingNumber            string `json:"icp_filing_number"`
 	PublicSecurityFilingNumber string `json:"public_security_filing_number"`
+	ValueAddedTelecomLicense   string `json:"value_added_telecom_license"`
 	CopyrightText              string `json:"copyright_text"`
 }
 
@@ -461,7 +465,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 func ResolveResellerPresentation(host string) (*ResellerPresentation, error) {
 	var presentation ResellerPresentation
 	err := DB.Table("reseller_domains AS rd").
-		Select("r.id AS reseller_id, r.name AS reseller_name, rd.host, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.copyright_text").
+		Select("r.id AS reseller_id, r.name AS reseller_name, rd.host, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text").
 		Joins("JOIN resellers AS r ON r.id = rd.reseller_id AND r.status = ?", ResellerStatusActive).
 		Where("rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
 		Take(&presentation).Error
@@ -474,7 +478,7 @@ func ResolveResellerPresentation(host string) (*ResellerPresentation, error) {
 func ResolveResellerMatrixPresentation(host string) (*ResellerPresentation, error) {
 	var presentation ResellerPresentation
 	err := DB.Table("resellers AS r").
-		Select("r.id AS reseller_id, r.name AS reseller_name, r.matrix_host AS host, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.copyright_text").
+		Select("r.id AS reseller_id, r.name AS reseller_name, r.matrix_host AS host, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text").
 		Where("r.matrix_host = ? AND r.status = ?", host, ResellerStatusActive).
 		Take(&presentation).Error
 	if err != nil {
@@ -1186,7 +1190,7 @@ func UpdateResellerFavicon(id int, favicon string) (*ResellerBranding, error) {
 
 func GetResellerBranding(id int) (*ResellerBranding, error) {
 	var branding ResellerBranding
-	result := DB.Model(&Reseller{}).Select("brand_name", "logo", "favicon", "icp_filing_number", "public_security_filing_number", "copyright_text").Where("id = ?", id).Limit(1).Scan(&branding)
+	result := DB.Model(&Reseller{}).Select("brand_name", "logo", "favicon", "icp_filing_number", "public_security_filing_number", "value_added_telecom_license", "copyright_text").Where("id = ?", id).Limit(1).Scan(&branding)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -1196,16 +1200,17 @@ func GetResellerBranding(id int) (*ResellerBranding, error) {
 	return &branding, nil
 }
 
-func UpdateResellerPresentation(id int, brandName string, logo string, favicon string, icpFilingNumber string, publicSecurityFilingNumber string, copyrightText string) (*ResellerBranding, error) {
+func UpdateResellerPresentation(id int, brandName string, logo string, favicon string, icpFilingNumber string, publicSecurityFilingNumber string, valueAddedTelecomLicense string, copyrightText string) (*ResellerBranding, error) {
 	brandName = strings.TrimSpace(brandName)
 	icpFilingNumber = strings.TrimSpace(icpFilingNumber)
 	publicSecurityFilingNumber = strings.TrimSpace(publicSecurityFilingNumber)
+	valueAddedTelecomLicense = strings.TrimSpace(valueAddedTelecomLicense)
 	copyrightText = strings.TrimSpace(copyrightText)
 	containsControl := func(value string) bool {
 		return strings.IndexFunc(value, func(character rune) bool { return character < 0x20 || character == 0x7f }) >= 0
 	}
-	if utf8.RuneCountInString(brandName) > 128 || utf8.RuneCountInString(icpFilingNumber) > 64 || utf8.RuneCountInString(publicSecurityFilingNumber) > 64 || utf8.RuneCountInString(copyrightText) > 255 ||
-		containsControl(brandName) || containsControl(icpFilingNumber) || containsControl(publicSecurityFilingNumber) || containsControl(copyrightText) {
+	if utf8.RuneCountInString(brandName) > 128 || utf8.RuneCountInString(icpFilingNumber) > 64 || utf8.RuneCountInString(publicSecurityFilingNumber) > 64 || utf8.RuneCountInString(valueAddedTelecomLicense) > 64 || utf8.RuneCountInString(copyrightText) > 255 ||
+		containsControl(brandName) || containsControl(icpFilingNumber) || containsControl(publicSecurityFilingNumber) || containsControl(valueAddedTelecomLicense) || containsControl(copyrightText) {
 		return nil, ErrInvalidResellerPresentation
 	}
 	normalizedLogo, err := NormalizeResellerLogo(logo)
@@ -1222,6 +1227,7 @@ func UpdateResellerPresentation(id int, brandName string, logo string, favicon s
 		"favicon":                       normalizedFavicon,
 		"icp_filing_number":             icpFilingNumber,
 		"public_security_filing_number": publicSecurityFilingNumber,
+		"value_added_telecom_license":   valueAddedTelecomLicense,
 		"copyright_text":                copyrightText,
 	})
 	if result.Error != nil {
@@ -1380,14 +1386,14 @@ func GetResellerAdminRecord(id int) (*ResellerAdminRecord, error) {
 
 func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("resellers AS r").
-		Select("r.id, r.name, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.copyright_text, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, COALESCE(r.matrix_host, '') AS matrix_host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
+		Select("r.id, r.name, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, COALESCE(r.matrix_host, '') AS matrix_host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
 		Joins("LEFT JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.verified = ? AND rd.status = ?", true, ResellerDomainStatusActive).
 		Joins("LEFT JOIN reseller_members AS owner ON owner.reseller_id = r.id AND owner.role = ? AND owner.status = ?", ResellerRoleOwner, ResellerMemberStatusActive).
 		Joins("LEFT JOIN user_ssos AS owner_sso ON owner_sso.sso_sub = owner.subject").
 		Joins("LEFT JOIN users AS owner_sso_user ON owner_sso_user.id = owner_sso.user_id AND owner_sso_user.deleted_at IS NULL").
 		Joins("LEFT JOIN users AS owner_oidc_user ON owner_oidc_user.id = (SELECT MIN(owner_candidate.id) FROM users AS owner_candidate WHERE owner_candidate.oidc_id = owner.subject AND owner_candidate.deleted_at IS NULL)").
 		Joins("LEFT JOIN reseller_members AS members ON members.reseller_id = r.id AND members.status = ?", ResellerMemberStatusActive).
-		Group("r.id, r.name, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.copyright_text, r.status, r.matrix_host, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
+		Group("r.id, r.name, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.status, r.matrix_host, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
 }
 
 func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {

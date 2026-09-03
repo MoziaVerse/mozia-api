@@ -45,6 +45,7 @@ type updateResellerAdminPresentationRequest struct {
 	Favicon                    *string `json:"favicon"`
 	IcpFilingNumber            string  `json:"icp_filing_number"`
 	PublicSecurityFilingNumber string  `json:"public_security_filing_number"`
+	ValueAddedTelecomLicense   string  `json:"value_added_telecom_license"`
 	CopyrightText              string  `json:"copyright_text"`
 }
 
@@ -179,7 +180,7 @@ func UpdateResellerAdminPresentation(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
 		return
 	}
-	branding, err := model.UpdateResellerPresentation(id, request.BrandName, *request.Logo, *request.Favicon, request.IcpFilingNumber, request.PublicSecurityFilingNumber, request.CopyrightText)
+	branding, err := model.UpdateResellerPresentation(id, request.BrandName, *request.Logo, *request.Favicon, request.IcpFilingNumber, request.PublicSecurityFilingNumber, request.ValueAddedTelecomLicense, request.CopyrightText)
 	switch {
 	case err == nil:
 		writeResellerAdminSuccess(c, http.StatusOK, branding)
