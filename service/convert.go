@@ -301,8 +301,22 @@ func buildClaudeUsageFromOpenAIUsage(oaiUsage *dto.Usage) *dto.ClaudeUsage {
 		oaiUsage.ClaudeCacheCreation5mTokens,
 		oaiUsage.ClaudeCacheCreation1hTokens,
 	)
+	// 两种协议对 input 的口径不同：OpenAI 的 prompt_tokens 是**总量**（含 cached_tokens），
+	// Anthropic 的 input_tokens 只算**未命中缓存**的部分，缓存命中单独放在
+	// cache_read_input_tokens。上游按 OpenAI 口径回来时，直接把 prompt_tokens 填进
+	// input_tokens 再另报 cache_read，客户端一相加就把命中缓存的部分算了两遍——
+	// Claude Code 用这个和估算上下文占用，命中率一高就被高估近一倍，触发反复自动压缩
+	// （"Autocompact is thrashing"）。这里按 Anthropic 口径把缓存部分从 input 里扣掉。
+	// 反向转换（relay-claude.go 的 buildOpenAIStyleUsageFromClaudeUsage）做的是相加，两边对称。
+	inputTokens := oaiUsage.PromptTokens
+	if oaiUsage.UsageSemantic != "anthropic" {
+		inputTokens = lo.Max([]int{
+			oaiUsage.PromptTokens - oaiUsage.PromptTokensDetails.CachedTokens - oaiUsage.PromptTokensDetails.CachedCreationTokens,
+			0,
+		})
+	}
 	usage := &dto.ClaudeUsage{
-		InputTokens:              oaiUsage.PromptTokens,
+		InputTokens:              inputTokens,
 		OutputTokens:             oaiUsage.CompletionTokens,
 		CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
 		CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,
