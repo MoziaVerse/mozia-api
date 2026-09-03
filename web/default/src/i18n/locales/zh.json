@@ -5312,7 +5312,6 @@
     "per 1M tokens": "每百万 Token",
     "Prices must be non-negative numbers.": "价格必须是非负数。",
     "Search or select a channel": "搜索或选择渠道",
-    "No channels found": "未找到渠道",
     "Only when thinking is disabled": "仅关闭思考时降级",
     "Seamless fallback": "无感降级",
     "Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.": "API 响应和用户可见日志均显示源模型；实际路由、计费和管理员诊断仍使用目标模型。",
@@ -5321,5 +5320,7 @@
     "Thinking disabled": "关闭思考时",
     "Always": "始终",
     "Standard fallback": "普通降级"
-  }
+  },
+  "Hide Reasoning When Disabled": "关闭思考时隐藏推理内容",
+  "Strip reasoning_content from responses when the client sends reasoning_effort=none or thinking.type=disabled but the upstream still returns it": "当客户端传 reasoning_effort=none 或 thinking.type=disabled 但上游仍返回推理内容时，从响应中剥掉 reasoning_content"
 }

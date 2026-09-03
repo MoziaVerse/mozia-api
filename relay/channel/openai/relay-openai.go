@@ -24,6 +24,17 @@ func sendStreamData(c *gin.Context, info *relaycommon.RelayInfo, data string, fo
 		return nil
 	}
 
+	if info.SuppressReasoningContent {
+		stripped, skip, err := stripStreamReasoning(data)
+		if err != nil {
+			return err
+		}
+		if skip {
+			return nil
+		}
+		data = stripped
+	}
+
 	if !forceFormat && !thinkToContent {
 		return helper.StringData(c, data)
 	}
@@ -261,6 +272,18 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
+		if info.SuppressReasoningContent {
+			stripped, stripErr := stripResponseReasoning(responseBody)
+			if stripErr != nil {
+				logger.LogError(c, "failed to strip reasoning from response: "+stripErr.Error())
+			} else {
+				responseBody = stripped
+				for i := range simpleResponse.Choices {
+					simpleResponse.Choices[i].Message.ReasoningContent = nil
+					simpleResponse.Choices[i].Message.Reasoning = nil
+				}
+			}
+		}
 		if usageModified {
 			var bodyMap map[string]interface{}
 			err = common.Unmarshal(responseBody, &bodyMap)
