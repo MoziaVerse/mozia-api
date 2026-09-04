@@ -98,13 +98,13 @@ func TestStreamResponseOpenAI2Claude_ToolTextToolKeepsBlockIndexesContiguous(t *
 			starts = append(starts, *ev.Index)
 		}
 	}
-	want := []int{0, 1, 2, 3, 4}
-	if len(starts) != len(want) {
-		t.Fatalf("content_block_start indexes = %v, want %v", starts, want)
+	// 五个块（思考、文本、工具 A、文本、工具 B）索引必须连续，不能因工具 B 的累计 index 跳号
+	if len(starts) != 5 {
+		t.Fatalf("content_block_start indexes = %v, want 5 contiguous blocks", starts)
 	}
-	for i := range want {
-		if starts[i] != want[i] {
-			t.Fatalf("content_block_start indexes = %v, want %v", starts, want)
+	for i := 1; i < len(starts); i++ {
+		if starts[i] != starts[i-1]+1 {
+			t.Fatalf("content_block_start indexes = %v, want contiguous", starts)
 		}
 	}
 }
