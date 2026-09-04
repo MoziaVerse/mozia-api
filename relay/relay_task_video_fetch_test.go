@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -25,6 +26,7 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 	successTask := &model.Task{
 		TaskID:    "task_success",
 		UserId:    42,
+		Platform:  constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMoziaH3)),
 		Status:    model.TaskStatusSuccess,
 		Progress:  "30%",
 		CreatedAt: 100,
@@ -97,6 +99,26 @@ func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 	assert.NotContains(t, raw, "result_url")
 	assert.NotContains(t, raw, "properties")
 	assert.Contains(t, raw, "usage")
+}
+
+func TestPublicVideoTaskResponseReturnsRawResultURLOnlyForArtsAPI(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_artsapi",
+		UserId:   42,
+		Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMoziaArtsapi)),
+		Status:   model.TaskStatusSuccess,
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://upstream.example/video.mp4?token=secret",
+		},
+	}
+
+	body, err := publicVideoTaskResponseBody(task, nil)
+	require.NoError(t, err)
+	var resp dto.PublicVideoTaskResponse
+	require.NoError(t, common.Unmarshal(body, &resp))
+	require.NotNil(t, resp.Content)
+	assert.Equal(t, task.GetResultURL(), resp.Content.URL)
+	assert.NotContains(t, string(body), `"expires_at"`)
 }
 
 func TestPublicVideoTaskResponseStatusesAndConditionals(t *testing.T) {

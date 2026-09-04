@@ -769,10 +769,11 @@ func publicVideoTaskResponse(task *model.Task, metadataData []byte) *dto.PublicV
 		UpdatedAt: task.UpdatedAt,
 	}
 	if status == "succeeded" && task.GetResultURL() != "" {
-		now := time.Now()
-		resp.Content = &dto.PublicVideoTaskContent{
-			URL:       taskcommon.BuildSignedVideoGenerationURLAt(now, task.UserId, task.TaskID, taskcommon.TaskVideoFilename(task)),
-			ExpiresAt: now.Add(taskcommon.SignedVideoURLTTL).Unix(),
+		resp.Content = &dto.PublicVideoTaskContent{URL: task.GetResultURL()}
+		if task.Platform != constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMoziaArtsapi)) {
+			now := time.Now()
+			resp.Content.URL = taskcommon.BuildSignedVideoGenerationURLAt(now, task.UserId, task.TaskID, taskcommon.TaskVideoFilename(task))
+			resp.Content.ExpiresAt = now.Add(taskcommon.SignedVideoURLTTL).Unix()
 		}
 	}
 	if status == "failed" {
