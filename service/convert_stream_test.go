@@ -27,7 +27,7 @@ func toolChunk(index int, id, name, args string) dto.ChatCompletionsStreamRespon
 // 把整段 OpenAI 流喂给转换器，返回全部 Claude 事件。SendResponseCount 与真实调用方一致：从 1 起逐块递增。
 func convertStream(t *testing.T, chunks []*dto.ChatCompletionsStreamResponse) []*dto.ClaudeResponse {
 	t.Helper()
-	info := &relaycommon.RelayInfo{}
+	info := &relaycommon.RelayInfo{ClaudeConvertInfo: &relaycommon.ClaudeConvertInfo{}}
 	var out []*dto.ClaudeResponse
 	for _, chunk := range chunks {
 		info.SendResponseCount++
