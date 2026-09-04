@@ -413,6 +413,12 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 					toolCall = dto.ToolCallResponse{}
 				}
 			}
+			// 首块就是工具调用：本段以它的 index 为基准，后续并行工具（index 1、2…）才能落到相邻块
+			info.ClaudeConvertInfo.ToolCallSegmentFirstIndex = 0
+			if toolCall.Index != nil {
+				info.ClaudeConvertInfo.ToolCallSegmentFirstIndex = *toolCall.Index
+			}
+			info.ClaudeConvertInfo.ToolCallSegmentFirstIndexSet = true
 			resp := &dto.ClaudeResponse{
 				Type: "content_block_start",
 				ContentBlock: &dto.ClaudeMediaMessage{
