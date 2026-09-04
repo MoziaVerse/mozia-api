@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -40,16 +41,32 @@ func convertStream(t *testing.T, chunks []*dto.ChatCompletionsStreamResponse) []
 }
 
 // 每个 delta / stop 引用的索引都必须先有 content_block_start，否则 Claude Code 报 "Content block not found"。
+func describeEvents(events []*dto.ClaudeResponse) string {
+	out := ""
+	for _, ev := range events {
+		idx := "-"
+		if ev.Index != nil {
+			idx = fmt.Sprint(*ev.Index)
+		}
+		out += ev.Type + "[" + idx + "] "
+	}
+	return out
+}
+
 func assertBlockIndexesConsistent(t *testing.T, events []*dto.ClaudeResponse) {
 	t.Helper()
+	t.Logf("events: %s", describeEvents(events))
 	started := map[int]bool{}
 	for _, ev := range events {
 		switch ev.Type {
 		case "content_block_start":
 			started[*ev.Index] = true
 		case "content_block_delta", "content_block_stop":
-			if ev.Index == nil || !started[*ev.Index] {
-				t.Fatalf("%s references block index %v that was never started", ev.Type, ev.Index)
+			if ev.Index == nil {
+				t.Fatalf("%s carries no block index", ev.Type)
+			}
+			if !started[*ev.Index] {
+				t.Fatalf("%s references block index %d that was never started", ev.Type, *ev.Index)
 			}
 		}
 	}
