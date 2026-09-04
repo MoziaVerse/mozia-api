@@ -66,6 +66,7 @@ web/             — Frontend themes container
 - 数据库中的 `verified=true` 表示平台已确认该 Host 可用，不代表本仓库已执行 DNS challenge、反向代理配置或 TLS 签发；这些基础设施动作不由 `mozia-api` 完成。
 - Matrix 挂牌域名由 Matrix 动态解析，并通过中心 OAuth Proxy 回调，不再逐域名同步 Matrix 环境变量或 `mozia-sso` redirect URI。Mega 保存后仍需完成 DNS，或由客户侧终止 TLS 并保留原 Host 反代；不要把数据库保存成功解释为公网域名已经上线。
 - Logo 存在 `resellers.logo`，属于代理商而非域名。Mega 和 `matrix-reseller` Owner 更新同一字段，更换 Host 不应复制或重置 Logo。
+- Matrix 新业务用户通过 registration `/customers/register` 按服务端 Host 自动归属：只匹配 active 代理商的 `matrix_host`，不匹配代理商管理台域名；按 OIDC `sub` 幂等创建客户，不转移已有归属或恢复暂停客户。接口使用独立 registration credential，不能由浏览器指定代理商 ID。
 
 ## Internationalization (i18n)
 

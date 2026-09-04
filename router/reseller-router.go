@@ -41,6 +41,7 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerRegistrationRoute.Use(middleware.ResellerRegistrationServiceAuth())
 	resellerRegistrationRoute.POST("/presentation", controller.GetResellerMatrixPresentation)
 	resellerRegistrationRoute.POST("/invitations/consume", controller.ConsumeResellerRegistrationInvitation)
+	resellerRegistrationRoute.POST("/customers/register", controller.RegisterResellerCustomerByHost)
 	resellerRegistrationRoute.POST("/customers/profile", controller.SyncResellerRegistrationCustomerIdentity)
 	resellerRegistrationRoute.GET("/customers/pending-profiles", controller.ListPendingResellerRegistrationCustomerProfiles)
 	resellerRegistrationRoute.POST("/customers/payment-method", controller.GetResellerRegistrationCustomerPaymentMethod)
