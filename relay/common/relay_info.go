@@ -43,6 +43,11 @@ type ClaudeConvertInfo struct {
 
 	ToolCallBaseIndex      int
 	ToolCallMaxIndexOffset int
+	// OpenAI 的 tool_calls[].index 按整条消息累计：先调工具 A、说一句话、再调工具 B 时，
+	// B 的 index 是 1 而不是 0。每个 tools 段的偏移必须相对本段首个 tool_call 的 index 归零，
+	// 否则块索引会跳号，收尾时按 0..max 补发的 content_block_stop 会指向从未 start 的索引。
+	ToolCallSegmentFirstIndex    int
+	ToolCallSegmentFirstIndexSet bool
 }
 
 type RerankerInfo struct {
