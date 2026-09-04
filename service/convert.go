@@ -566,6 +566,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 				stopOpenBlocksAndAdvance()
 				info.ClaudeConvertInfo.ToolCallBaseIndex = info.ClaudeConvertInfo.Index
 				info.ClaudeConvertInfo.ToolCallMaxIndexOffset = 0
+				info.ClaudeConvertInfo.ToolCallSegmentFirstIndexSet = false
 			}
 			info.ClaudeConvertInfo.LastMessagesType = relaycommon.LastMessageTypeTools
 			base := info.ClaudeConvertInfo.ToolCallBaseIndex
@@ -574,7 +575,15 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 			for i, toolCall := range toolCalls {
 				offset := 0
 				if toolCall.Index != nil {
-					offset = *toolCall.Index
+					// index 按整条消息累计，本段内相对首个 tool_call 归零（见 ClaudeConvertInfo 注释）
+					if !info.ClaudeConvertInfo.ToolCallSegmentFirstIndexSet {
+						info.ClaudeConvertInfo.ToolCallSegmentFirstIndex = *toolCall.Index
+						info.ClaudeConvertInfo.ToolCallSegmentFirstIndexSet = true
+					}
+					offset = *toolCall.Index - info.ClaudeConvertInfo.ToolCallSegmentFirstIndex
+					if offset < 0 {
+						offset = 0
+					}
 				} else {
 					offset = i
 				}
