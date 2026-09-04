@@ -370,6 +370,11 @@ type ResellerCustomerBatchAssignRecord struct {
 	Results    []ResellerCustomerBatchAssignResult `json:"results"`
 }
 
+type ResellerRegistrationRecord struct {
+	ResellerId   int    `json:"reseller_id"`
+	ResellerName string `json:"reseller_name"`
+}
+
 func NormalizeResellerHost(raw string) (string, error) {
 	if raw == "" || len(raw) > 260 || strings.TrimSpace(raw) != raw {
 		return "", ErrInvalidResellerHost
@@ -1065,6 +1070,41 @@ func BatchAssignResellerCustomerRecords(resellerId int, inputs []ResellerCustome
 		ResellerId: resellerId,
 		Results:    results,
 	}, nil
+}
+
+// RegisterResellerCustomerByHost is called only when Matrix creates a new business
+// user. The host is server-observed, and existing ownership is never transferred.
+func RegisterResellerCustomerByHost(host string, subject string, matrixName string, phone string) (*ResellerRegistrationRecord, error) {
+	host, err := NormalizeResellerHost(host)
+	if err != nil {
+		return nil, err
+	}
+	matrixName = strings.TrimSpace(matrixName)
+	phone = strings.TrimSpace(phone)
+	if !ValidResellerSubject(subject) || !validResellerCustomerText(matrixName, 255) || !validResellerCustomerText(phone, 50) {
+		return nil, ErrInvalidResellerCustomerIdentity
+	}
+	var reseller Reseller
+	if err := DB.Select("id", "name").Where("matrix_host = ? AND status = ?", host, ResellerStatusActive).Take(&reseller).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil // Official, unbound and disabled portals do not assign customers.
+		}
+		return nil, err
+	}
+	assignment, err := BatchAssignResellerCustomerRecords(reseller.Id, []ResellerCustomerBatchAssignInput{{Subject: subject, MatrixName: matrixName, Phone: phone}})
+	if err != nil {
+		return nil, err
+	}
+	currentResellerId := *assignment.Results[0].CurrentResellerId
+	if currentResellerId != reseller.Id {
+		// Return the authoritative existing owner so Matrix also keeps its local
+		// invoice/customer-type projection consistent, including suspended customers.
+		reseller = Reseller{}
+		if err := DB.Select("id", "name").Where("id = ?", currentResellerId).Take(&reseller).Error; err != nil {
+			return nil, err
+		}
+	}
+	return &ResellerRegistrationRecord{ResellerId: reseller.Id, ResellerName: reseller.Name}, nil
 }
 
 func batchAssignResellerCustomerRecord(resellerId int, subject string, matrixName string, phone string) (*ResellerCustomerBatchAssignResult, error) {

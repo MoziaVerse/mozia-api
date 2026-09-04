@@ -102,6 +102,14 @@ type resellerCustomerIdentitySyncRequest struct {
 	ResellerId  json.RawMessage `json:"reseller_id"`
 }
 
+type resellerHostRegistrationRequest struct {
+	Host       string          `json:"host"`
+	Subject    string          `json:"subject"`
+	MatrixName string          `json:"matrix_name"`
+	Phone      string          `json:"phone"`
+	ResellerId json.RawMessage `json:"reseller_id"`
+}
+
 type resellerCustomerBatchAssignRequest struct {
 	Customers  []model.ResellerCustomerBatchAssignInput `json:"customers"`
 	ResellerId json.RawMessage                          `json:"reseller_id"`
@@ -738,6 +746,28 @@ func ConsumeResellerRegistrationInvitation(c *gin.Context) {
 		middleware.AbortResellerRequest(c, http.StatusNotFound, middleware.ResellerErrorNotFound, "reseller not found")
 	default:
 		logger.LogError(c.Request.Context(), "ConsumeResellerInvitationRecord database error: "+err.Error())
+		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
+	}
+}
+
+func RegisterResellerCustomerByHost(c *gin.Context) {
+	body, ok := resellerRequestBody(c, resellerManagementBodyLimit)
+	if !ok {
+		return
+	}
+	var request resellerHostRegistrationRequest
+	if common.Unmarshal(body, &request) != nil || len(request.ResellerId) != 0 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+		return
+	}
+	record, err := model.RegisterResellerCustomerByHost(request.Host, request.Subject, request.MatrixName, request.Phone)
+	switch {
+	case err == nil:
+		writeResellerAdminSuccess(c, http.StatusOK, record)
+	case errors.Is(err, model.ErrInvalidResellerHost), errors.Is(err, model.ErrInvalidResellerCustomerIdentity):
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid request")
+	default:
+		logger.LogError(c.Request.Context(), "RegisterResellerCustomerByHost database error: "+err.Error())
 		middleware.AbortResellerRequest(c, http.StatusInternalServerError, middleware.ResellerErrorInternal, "internal error")
 	}
 }
