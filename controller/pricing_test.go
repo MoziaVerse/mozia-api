@@ -102,6 +102,22 @@ func TestGetPricingCanIncludeInaccessibleMoziaWalletModels(t *testing.T) {
 	assert.Equal(t, model.MoziaPricingAccessReasonRequiresPaidQuota, item.Access.Reason)
 	assert.Equal(t, []string{model.MoziaWalletSourcePaid}, item.Access.RequiredSources)
 	assert.True(t, item.Access.SubscriptionAllowed)
+
+	t.Run("include_inaccessible cannot bypass reseller authorization", func(t *testing.T) {
+		agency := model.Reseller{Name: "restricted-agency", Status: model.ResellerStatusActive, ModelAccess: model.ResellerModelAccess{Restricted: true}}
+		require.NoError(t, db.Create(&agency).Error)
+		require.NoError(t, db.Create(&model.UserSSO{UserId: 1004, SSOSub: "restricted-customer"}).Error)
+		require.NoError(t, db.Create(&model.ResellerCustomer{ResellerId: agency.Id, Subject: "restricted-customer", Status: model.ResellerCustomerStatusActive}).Error)
+		for _, query := range []string{"", "?include_inaccessible=true"} {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodGet, "/api/sso/pricing"+query, nil)
+			ctx.Set("id", 1004)
+			GetPricing(ctx)
+			assert.Empty(t, decodePricingResponse(t, recorder))
+		}
+		assert.Contains(t, pricingModelNames(model.GetPricing()), "paid-only-catalog-model", "the shared catalog must not be mutated")
+	})
 }
 
 func TestGetPricingProjectsRetailWithoutLeakingResellerMetadataOrMutatingCache(t *testing.T) {

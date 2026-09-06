@@ -268,6 +268,12 @@ func ListModels(c *gin.Context, modelType int) {
 		}
 	}
 
+	policy, err := model.GetUserResellerModelAccess(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	userModelNames = policy.Filter(userModelNames)
 	ownerByModel := map[string]string{}
 	if len(ownerGroups) > 0 {
 		ownerByModel = getPreferredModelOwners(userModelNames, ownerGroups)
@@ -288,11 +294,16 @@ func ListModels(c *gin.Context, modelType int) {
 				Type:        "model",
 			}
 		}
+		firstID, lastID := "", ""
+		if len(useranthropicModels) > 0 {
+			firstID = useranthropicModels[0].ID
+			lastID = useranthropicModels[len(useranthropicModels)-1].ID
+		}
 		c.JSON(200, gin.H{
 			"data":     useranthropicModels,
-			"first_id": useranthropicModels[0].ID,
+			"first_id": firstID,
 			"has_more": false,
-			"last_id":  useranthropicModels[len(useranthropicModels)-1].ID,
+			"last_id":  lastID,
 		})
 	case constant.ChannelTypeGemini:
 		userGeminiModels := make([]dto.GeminiModel, len(userOpenAiModels))
@@ -323,9 +334,23 @@ func ChannelListModels(c *gin.Context) {
 }
 
 func DashboardListModels(c *gin.Context) {
+	policy, err := model.GetUserResellerModelAccess(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	models := channelId2Models
+	if policy.Restricted {
+		models = make(map[int][]string, len(channelId2Models))
+		for channel, names := range channelId2Models {
+			if allowed := policy.Filter(names); len(allowed) > 0 {
+				models[channel] = allowed
+			}
+		}
+	}
 	c.JSON(200, gin.H{
 		"success": true,
-		"data":    channelId2Models,
+		"data":    models,
 	})
 }
 
@@ -338,6 +363,15 @@ func EnabledListModels(c *gin.Context) {
 
 func RetrieveModel(c *gin.Context, modelType int) {
 	modelId := c.Param("model")
+	policy, err := model.GetUserResellerModelAccess(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !policy.Allows(modelId) {
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"message": "model not found", "type": "invalid_request_error", "code": "model_not_found"}})
+		return
+	}
 	if aiModel, ok := openAIModelsMap[modelId]; ok {
 		switch modelType {
 		case constant.ChannelTypeAnthropic:
