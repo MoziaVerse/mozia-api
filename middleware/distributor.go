@@ -40,6 +40,15 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		// Check the requested public ID before redirects and specific-channel routing.
+		// Task fetches remain available after authorization is revoked; submissions
+		// whose model is resolved later (such as remix) are checked at submission.
+		if shouldSelectChannel {
+			if apiErr := service.EnforceResellerModelAccess(c.GetInt("id"), modelRequest.Model); apiErr != nil {
+				abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
+				return
+			}
+		}
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
@@ -80,6 +89,12 @@ func Distribute() func(c *gin.Context) {
 
 			if shouldSelectChannel {
 				applyUserModelRedirect(c, modelRequest)
+				if common.GetContextKeyString(c, constant.ContextKeyRequestedModel) != "" {
+					if apiErr := service.EnforceResellerModelAccess(c.GetInt("id"), modelRequest.Model); apiErr != nil {
+						abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
+						return
+					}
+				}
 				if modelRequest.Model == "" {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
 					return

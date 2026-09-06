@@ -95,6 +95,8 @@ type Reseller struct {
 	BankAccountName            string           `json:"bank_account_name" gorm:"type:varchar(128);not null;default:''"`
 	BankAccountNumber          string           `json:"bank_account_number" gorm:"type:varchar(64);not null;default:''"`
 	BankName                   string           `json:"bank_name" gorm:"type:varchar(255);not null;default:''"`
+
+	ModelAccess ResellerModelAccess `json:"model_access" gorm:"type:text"`
 }
 
 type ResellerDomain struct {
@@ -195,6 +197,8 @@ type ResellerAdminRecord struct {
 	BankAccountName            string           `json:"bank_account_name"`
 	BankAccountNumber          string           `json:"bank_account_number"`
 	BankName                   string           `json:"bank_name"`
+
+	ModelAccess ResellerModelAccess `json:"model_access" gorm:"type:text"`
 }
 
 type ResellerBankTransferConfig struct {
@@ -238,6 +242,8 @@ type ResellerPresentation struct {
 	CopyrightText              string           `json:"copyright_text"`
 	DocumentationMode          string           `json:"documentation_mode"`
 	DocumentationURL           string           `json:"documentation_url"`
+
+	ModelAccess ResellerModelAccess `json:"model_access" gorm:"type:text"`
 }
 
 const resellerLogoMaxBytes = 256 << 10
@@ -491,7 +497,7 @@ func ResolveResellerContext(subject string, host string) (*ResellerContext, erro
 func ResolveResellerPresentation(host string) (*ResellerPresentation, error) {
 	var presentation ResellerPresentation
 	err := DB.Table("reseller_domains AS rd").
-		Select("r.id AS reseller_id, r.name AS reseller_name, rd.host, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.documentation_mode, r.documentation_url, r.feature_apps_disabled, r.feature_skills_disabled, r.feature_verification_disabled, r.feature_qoder_disabled").
+		Select("r.id AS reseller_id, r.name AS reseller_name, rd.host, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.documentation_mode, r.documentation_url, r.feature_apps_disabled, r.feature_skills_disabled, r.feature_verification_disabled, r.feature_qoder_disabled, r.model_access").
 		Joins("JOIN resellers AS r ON r.id = rd.reseller_id AND r.status = ?", ResellerStatusActive).
 		Where("rd.host = ? AND rd.verified = ? AND rd.status = ?", host, true, ResellerDomainStatusActive).
 		Take(&presentation).Error
@@ -504,7 +510,7 @@ func ResolveResellerPresentation(host string) (*ResellerPresentation, error) {
 func ResolveResellerMatrixPresentation(host string) (*ResellerPresentation, error) {
 	var presentation ResellerPresentation
 	err := DB.Table("resellers AS r").
-		Select("r.id AS reseller_id, r.name AS reseller_name, r.matrix_host AS host, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.documentation_mode, r.documentation_url, r.feature_apps_disabled, r.feature_skills_disabled, r.feature_verification_disabled, r.feature_qoder_disabled").
+		Select("r.id AS reseller_id, r.name AS reseller_name, r.matrix_host AS host, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.documentation_mode, r.documentation_url, r.feature_apps_disabled, r.feature_skills_disabled, r.feature_verification_disabled, r.feature_qoder_disabled, r.model_access").
 		Where("r.matrix_host = ? AND r.status = ?", host, ResellerStatusActive).
 		Take(&presentation).Error
 	if err != nil {
@@ -1475,14 +1481,14 @@ func GetResellerAdminRecord(id int) (*ResellerAdminRecord, error) {
 
 func resellerAdminRecordsQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("resellers AS r").
-		Select("r.id, r.name, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.documentation_mode, r.documentation_url, r.feature_apps_disabled, r.feature_skills_disabled, r.feature_verification_disabled, r.feature_qoder_disabled, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, COALESCE(r.matrix_host, '') AS matrix_host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
+		Select("r.id, r.name, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.documentation_mode, r.documentation_url, r.feature_apps_disabled, r.feature_skills_disabled, r.feature_verification_disabled, r.feature_qoder_disabled, r.model_access, r.status, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, COALESCE(r.matrix_host, '') AS matrix_host, owner.subject AS owner_subject, COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AS owner_user_id, COALESCE(owner_sso_user.username, owner_oidc_user.username, '') AS owner_username, COALESCE(owner_sso_user.display_name, owner_oidc_user.display_name, '') AS owner_display_name, COALESCE(owner_sso_user.quota, owner_oidc_user.quota, 0) AS owner_balance_quota, COALESCE((SELECT SUM(owner_gift.balance) FROM mozia_wallet_balances AS owner_gift WHERE owner_gift.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_gift.source = 'gift'), 0) AS owner_gift_balance_quota, COALESCE((SELECT SUM(owner_paid.balance) FROM mozia_wallet_balances AS owner_paid WHERE owner_paid.user_id = COALESCE(owner_sso_user.id, owner_oidc_user.id, 0) AND owner_paid.source = 'paid'), 0) AS owner_paid_balance_quota, COALESCE(owner_sso_user.request_count, owner_oidc_user.request_count, 0) AS owner_request_count, COUNT(DISTINCT members.id) AS member_count").
 		Joins("LEFT JOIN reseller_domains AS rd ON rd.reseller_id = r.id AND rd.verified = ? AND rd.status = ?", true, ResellerDomainStatusActive).
 		Joins("LEFT JOIN reseller_members AS owner ON owner.reseller_id = r.id AND owner.role = ? AND owner.status = ?", ResellerRoleOwner, ResellerMemberStatusActive).
 		Joins("LEFT JOIN user_ssos AS owner_sso ON owner_sso.sso_sub = owner.subject").
 		Joins("LEFT JOIN users AS owner_sso_user ON owner_sso_user.id = owner_sso.user_id AND owner_sso_user.deleted_at IS NULL").
 		Joins("LEFT JOIN users AS owner_oidc_user ON owner_oidc_user.id = (SELECT MIN(owner_candidate.id) FROM users AS owner_candidate WHERE owner_candidate.oidc_id = owner.subject AND owner_candidate.deleted_at IS NULL)").
 		Joins("LEFT JOIN reseller_members AS members ON members.reseller_id = r.id AND members.status = ?", ResellerMemberStatusActive).
-		Group("r.id, r.name, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.documentation_mode, r.documentation_url, r.feature_apps_disabled, r.feature_skills_disabled, r.feature_verification_disabled, r.feature_qoder_disabled, r.status, r.matrix_host, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
+		Group("r.id, r.name, r.brand_name, r.logo, r.favicon, r.icp_filing_number, r.public_security_filing_number, r.value_added_telecom_license, r.copyright_text, r.documentation_mode, r.documentation_url, r.feature_apps_disabled, r.feature_skills_disabled, r.feature_verification_disabled, r.feature_qoder_disabled, r.model_access, r.status, r.matrix_host, r.bank_transfer_enabled, r.bank_account_name, r.bank_account_number, r.bank_name, rd.host, owner.subject, owner_sso_user.id, owner_sso_user.username, owner_sso_user.display_name, owner_sso_user.quota, owner_sso_user.request_count, owner_oidc_user.id, owner_oidc_user.username, owner_oidc_user.display_name, owner_oidc_user.quota, owner_oidc_user.request_count")
 }
 
 func resellerCustomerRecordsQuery(db *gorm.DB, includeRemark bool) *gorm.DB {

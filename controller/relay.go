@@ -157,6 +157,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		return
 	}
+	if newAPIError = service.EnforceResellerModelAccess(relayInfo.UserId, relayInfo.OriginModelName); newAPIError != nil {
+		return
+	}
 	if newAPIError = service.EnforceMoziaQuotaPolicy(relayInfo.UserId, relayInfo.OriginModelName); newAPIError != nil {
 		return
 	}

@@ -49,6 +49,8 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerAdminRoute := apiRouter.Group("/internal/v1/platform/resellers")
 	resellerAdminRoute.Use(middleware.ResellerAdminServiceAuth())
 	resellerAdminRoute.GET("", controller.ListResellerAdminRecords)
+	resellerAdminRoute.GET("/model-catalog", controller.GetResellerAdminModelCatalog)
+	resellerAdminRoute.PUT("/:id/model-access", controller.UpdateResellerAdminModelAccess)
 	resellerAdminRoute.POST("", controller.CreateResellerAdmin)
 	resellerAdminRoute.PATCH("/:id", controller.UpdateResellerAdmin)
 	resellerAdminRoute.PUT("/:id/presentation", controller.UpdateResellerAdminPresentation)

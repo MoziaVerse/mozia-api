@@ -176,6 +176,9 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	if modelName == "" {
 		modelName = service.CoverTaskActionToModelName(platform, info.Action)
 	}
+	if apiErr := service.EnforceResellerModelAccess(info.UserId, modelName); apiErr != nil {
+		return nil, service.TaskErrorFromAPIError(apiErr)
+	}
 
 	// 2.5 应用渠道的模型映射（与同步任务对齐）
 	info.OriginModelName = modelName

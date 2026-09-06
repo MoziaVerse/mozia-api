@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
+	"github.com/samber/lo"
 )
 
 func attachPricingDisplay(pricing []model.Pricing, groupRatio map[string]float64, userId int) []model.Pricing {
@@ -86,6 +87,14 @@ func GetPricing(c *gin.Context) {
 	pricing = filterPricingByUsableGroups(pricing, usableGroup)
 	if exists {
 		if id, ok := userId.(int); ok && id > 0 {
+			policy, err := model.GetUserResellerModelAccess(id)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			pricing = lo.Filter(pricing, func(item model.Pricing, _ int) bool {
+				return policy.Allows(item.ModelName)
+			})
 			if includeInaccessible {
 				pricing = model.AnnotatePricingByMoziaWalletAccess(id, pricing)
 			} else {
