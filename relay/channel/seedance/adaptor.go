@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
@@ -251,6 +252,10 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	upstreamTaskID := firstNonEmpty(submitted.TaskID, submitted.ID)
 	if upstreamTaskID == "" {
 		return "", nil, service.TaskErrorWrapperLocal(fmt.Errorf("empty task_id from %s upstream", a.GetChannelName()), "task_submit_failed", resp.StatusCode)
+	}
+	if info.ChannelType == constant.ChannelTypeMoziaArtsapi {
+		// Keep the returned ArtsAPI ID and the persisted task ID identical.
+		info.PublicTaskID = upstreamTaskID
 	}
 
 	video := dto.NewOpenAIVideo()
