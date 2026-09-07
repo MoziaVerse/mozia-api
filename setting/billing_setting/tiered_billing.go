@@ -139,9 +139,6 @@ func ValidateBillingExprJSONString(raw string) error {
 		if strings.TrimSpace(model) == "" {
 			return fmt.Errorf("billing expression model name is required")
 		}
-		if strings.TrimSpace(expression) == "" {
-			return fmt.Errorf("billing expression for model %q is required", model)
-		}
 		if err := SmokeTestExpr(expression); err != nil {
 			return fmt.Errorf("billing expression for model %q: %w", model, err)
 		}
