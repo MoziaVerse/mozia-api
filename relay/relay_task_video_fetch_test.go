@@ -1,8 +1,12 @@
 package relay
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,9 +16,101 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestVideoTaskIDsForArtsAndSeedance(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/tasks.db"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	t.Cleanup(func() {
+		model.DB = originalDB
+		require.NoError(t, sqlDB.Close())
+	})
+	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.Channel{}))
+
+	legacyTask := &model.Task{
+		TaskID: "task_legacy", UserId: 42, ChannelId: constant.ChannelTypeMoziaArtsapi,
+		Platform:    constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeMoziaArtsapi)),
+		Status:      model.TaskStatusSubmitted,
+		PrivateData: model.TaskPrivateData{UpstreamTaskID: "cgt-legacy"},
+	}
+	require.NoError(t, legacyTask.Insert())
+	tasks := []*model.Task{legacyTask}
+
+	for _, tc := range []struct {
+		channelType int
+		wantID      string
+	}{
+		{constant.ChannelTypeMoziaArtsapi, "cgt-206"},
+		{constant.ChannelTypeMoziaSeedanceGen, "task_203"},
+		{constant.ChannelTypeMoziaSeedanceVideos, "task_204"},
+	} {
+		suffix := strconv.Itoa(tc.channelType)
+		platform := constant.TaskPlatform(suffix)
+		info := &relaycommon.RelayInfo{
+			UserId: 42, OriginModelName: "public-model",
+			TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_" + suffix},
+			ChannelMeta:   &relaycommon.ChannelMeta{ChannelId: tc.channelType, ChannelType: tc.channelType},
+		}
+		adaptor := GetTaskAdaptor(platform)
+		require.NotNil(t, adaptor)
+		adaptor.Init(info)
+		writer := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(writer)
+		responseBody := `{"id":"cgt-` + suffix + `","status":"pending"}`
+		upstreamID, taskData, taskErr := adaptor.DoResponse(ctx, &http.Response{
+			StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(responseBody)),
+		}, info)
+		require.Nil(t, taskErr)
+		assert.Equal(t, "cgt-"+suffix, upstreamID)
+		assert.JSONEq(t, responseBody, string(taskData))
+		var submitted dto.OpenAIVideo
+		require.NoError(t, common.Unmarshal(writer.Body.Bytes(), &submitted))
+		assert.Equal(t, tc.wantID, submitted.ID)
+		assert.Equal(t, tc.wantID, submitted.TaskID)
+
+		task := model.InitTask(platform, info)
+		task.PrivateData.UpstreamTaskID = upstreamID
+		task.Data = taskData
+		require.NoError(t, task.Insert())
+		require.NoError(t, db.Create(&model.Channel{Id: tc.channelType, Type: tc.channelType}).Error)
+		assert.Equal(t, tc.wantID, task.TaskID)
+		tasks = append(tasks, task)
+	}
+
+	for _, task := range tasks {
+		stored, exists, err := model.GetByTaskId(42, task.TaskID)
+		require.NoError(t, err)
+		require.True(t, exists)
+		assert.Equal(t, task.PrivateData.UpstreamTaskID, stored.GetUpstreamTaskID())
+		for _, route := range []string{"/v1/video/generations/", "/v1/videos/"} {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodGet, route+task.TaskID, nil)
+			ctx.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+			ctx.Set("id", 42)
+			body, taskErr := videoFetchByIDRespBodyBuilder(ctx)
+			require.Nil(t, taskErr)
+			var fetched dto.OpenAIVideo
+			require.NoError(t, common.Unmarshal(body, &fetched))
+			assert.Equal(t, task.TaskID, fetched.ID)
+			assert.Equal(t, task.TaskID, fetched.TaskID)
+
+			ctx.Set("id", 99)
+			_, taskErr = videoFetchByIDRespBodyBuilder(ctx)
+			require.NotNil(t, taskErr)
+			assert.Equal(t, "task_not_exist", taskErr.Code)
+		}
+	}
+}
 
 func TestPublicVideoTaskResponseBodyFlatContract(t *testing.T) {
 	originalServerAddress := system_setting.ServerAddress
