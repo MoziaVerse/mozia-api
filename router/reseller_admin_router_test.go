@@ -30,6 +30,7 @@ type resellerAdminItem struct {
 	PublicSecurityFilingNumber string  `json:"public_security_filing_number"`
 	ValueAddedTelecomLicense   string  `json:"value_added_telecom_license"`
 	CopyrightText              string  `json:"copyright_text"`
+	APIBaseURL                 string  `json:"api_base_url"`
 	OwnerSubject               string  `json:"owner_subject"`
 	OwnerUserId                int     `json:"owner_user_id"`
 	OwnerUsername              string  `json:"owner_username"`
@@ -74,6 +75,72 @@ func TestResellerAdminPresentationContract(t *testing.T) {
 	assert.Equal(t, "浙公网安备33010000000001号", presentation.PublicSecurityFilingNumber)
 	assert.Equal(t, "浙B2-20250001", presentation.ValueAddedTelecomLicense)
 	assert.Equal(t, "© 杭州电子科技大学", presentation.CopyrightText)
+}
+
+func TestResellerAPIBaseURLContract(t *testing.T) {
+	_, db, request := setupResellerAdminTest(t)
+	reseller := seedReseller(t, db, "API Agency", model.ResellerStatusActive, "admin.example.com", "api-owner")
+	require.NoError(t, db.Model(&reseller).Update("matrix_host", "portal.example.com").Error)
+	other := seedReseller(t, db, "Other Agency", model.ResellerStatusActive, "other.example.com", "other-owner")
+	path := fmt.Sprintf("/api/internal/v1/platform/resellers/%d/presentation", reseller.Id)
+	const custom = "https://api.example.com:8443/openai/v1"
+	expected := ""
+	for _, tc := range []struct {
+		name   string
+		value  any // nil omits the field, as older clients do.
+		status int
+	}{
+		{"default", nil, http.StatusOK},
+		{"override", "  " + custom + "///  ", http.StatusOK},
+		{"old client preserves", nil, http.StatusOK},
+		{"http", "http://api.example.com/v1", http.StatusBadRequest},
+		{"relative", "/v1", http.StatusBadRequest},
+		{"credentials", "https://user:secret@api.example.com/v1", http.StatusBadRequest},
+		{"missing host", "https:///v1", http.StatusBadRequest},
+		{"query", "https://api.example.com/v1?key=secret", http.StatusBadRequest},
+		{"fragment", "https://api.example.com/v1#chat", http.StatusBadRequest},
+		{"control", "https://api.example.com/v1\n/chat", http.StatusBadRequest},
+		{"backslash", "https://api.example.com\\evil/v1", http.StatusBadRequest},
+		{"quote", "https://api.example.com/'$(id)'", http.StatusBadRequest},
+		{"too long", "https://api.example.com/" + strings.Repeat("a", 2048), http.StatusBadRequest},
+		{"clear", "", http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := map[string]any{"logo": "", "favicon": "", "brand_name": "API Agency"}
+			if tc.value != nil {
+				body["api_base_url"] = tc.value
+			}
+			encoded, err := common.Marshal(body)
+			require.NoError(t, err)
+			recorder := request(http.MethodPut, path, string(encoded), "mozia-mega-test-token", "api-base-update")
+			require.Equal(t, tc.status, recorder.Code, recorder.Body.String())
+			if tc.status == http.StatusOK && tc.value != nil {
+				expected = strings.TrimRight(strings.TrimSpace(tc.value.(string)), "/")
+			}
+			branding, err := model.GetResellerBranding(reseller.Id)
+			require.NoError(t, err)
+			assert.Equal(t, expected, branding.APIBaseURL)
+			presentation, err := model.ResolveResellerMatrixPresentation("portal.example.com")
+			require.NoError(t, err)
+			assert.Equal(t, expected, presentation.APIBaseURL)
+			presentation, err = model.ResolveResellerPresentation("admin.example.com")
+			require.NoError(t, err)
+			assert.Equal(t, expected, presentation.APIBaseURL)
+			list := request(http.MethodGet, "/api/internal/v1/platform/resellers", "", "mozia-mega-test-token", "api-base-list")
+			require.Equal(t, http.StatusOK, list.Code)
+			var response resellerAdminListResponse
+			require.NoError(t, common.Unmarshal(list.Body.Bytes(), &response))
+			require.Len(t, response.Data, 2)
+			for _, item := range response.Data {
+				if item.Id == reseller.Id {
+					assert.Equal(t, expected, item.APIBaseURL)
+				} else {
+					assert.Equal(t, other.Id, item.Id)
+					assert.Empty(t, item.APIBaseURL)
+				}
+			}
+		})
+	}
 }
 
 type resellerAdminListResponse struct {
