@@ -776,6 +776,7 @@ func TestResellerM2Contract(t *testing.T) {
 
 func setupResellerM2Test(t *testing.T) (*gin.Engine, *gorm.DB, resellerM2Request) {
 	t.Helper()
+	setupResellerRateLimitsForTest(t)
 	gin.SetMode(gin.TestMode)
 	originalDB := model.DB
 	originalQuotaPerUnit := common.QuotaPerUnit

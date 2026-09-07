@@ -394,6 +394,7 @@ func TestResellerAdminContract(t *testing.T) {
 
 func setupResellerAdminTest(t *testing.T) (*gin.Engine, *gorm.DB, func(method string, path string, body string, token string, requestID string) *httptest.ResponseRecorder) {
 	t.Helper()
+	setupResellerRateLimitsForTest(t)
 	gin.SetMode(gin.TestMode)
 	originalDB := model.DB
 	originalQuotaPerUnit := common.QuotaPerUnit
