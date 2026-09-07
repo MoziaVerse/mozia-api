@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -106,6 +108,11 @@ func authenticateResellerService(c *gin.Context, envKey string) bool {
 	if expectedToken == "" || len(authorizations) != 1 || len(authorization) <= len("Bearer ") ||
 		!strings.EqualFold(authorization[:len("Bearer ")], "Bearer ") ||
 		!resellerServiceTokensEqual(authorization[len("Bearer "):], expectedToken) {
+		// Invalid credentials cannot exhaust a verified service's budget.
+		rateLimitFactory(60, 60, "reseller-auth")(c)
+		if c.IsAborted() {
+			return false
+		}
 		AbortResellerRequest(c, http.StatusUnauthorized, ResellerErrorServiceUnauthorized, "service authentication failed")
 		return false
 	}
@@ -119,6 +126,42 @@ func authenticateResellerService(c *gin.Context, envKey string) bool {
 		setResellerRequestID(c, requestIDs[0])
 	} else {
 		setResellerRequestID(c, common.NewRequestId())
+	}
+	return allowResellerServiceRequest(c, fmt.Sprintf("%s:%x", envKey, sha256.Sum256([]byte(expectedToken))))
+}
+
+// Caller identity comes only from the credential we just verified. Read-heavy
+// presentation/context traffic must not consume registration or mutation quotas.
+func allowResellerServiceRequest(c *gin.Context, service string) bool {
+	operation := "write"
+	limit := max(1, common.GetEnvOrDefault("RESELLER_SERVICE_WRITE_RATE_LIMIT", 120))
+	readOnly := c.Request.Method == http.MethodGet
+	if c.Request.Method == http.MethodPost {
+		path := c.FullPath()
+		readOnly = strings.HasSuffix(path, "/presentation") || strings.HasSuffix(path, "/context") ||
+			strings.HasSuffix(path, "/customers/payment-method") || strings.HasSuffix(path, "/pricing/preview")
+	}
+	if readOnly {
+		operation = "read"
+		limit = max(1, common.GetEnvOrDefault("RESELLER_SERVICE_READ_RATE_LIMIT", 600))
+	}
+	duration := int64(max(1, common.GetEnvOrDefault("RESELLER_SERVICE_RATE_LIMIT_DURATION", 60)))
+	key := "rateLimit:reseller-service:" + service + ":" + operation
+	if common.RedisEnabled {
+		userRedisRateLimiter(c, limit, duration, key)
+	} else {
+		inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+		if !inMemoryRateLimiter.Request(key, limit, duration) {
+			c.Status(http.StatusTooManyRequests)
+			c.Abort()
+		}
+	}
+	if c.IsAborted() {
+		if c.Writer.Status() == http.StatusTooManyRequests {
+			c.Header("Retry-After", strconv.FormatInt(duration, 10))
+			AbortResellerRequest(c, http.StatusTooManyRequests, "reseller_rate_limited", "service temporarily busy")
+		}
+		return false
 	}
 	return true
 }

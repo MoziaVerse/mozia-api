@@ -36,6 +36,7 @@ type resellerContextTestResponse struct {
 }
 
 func TestResellerContextContract(t *testing.T) {
+	setupResellerRateLimitsForTest(t)
 	gin.SetMode(gin.TestMode)
 	originalDB := model.DB
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
