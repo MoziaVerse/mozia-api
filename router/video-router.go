@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
 
@@ -8,6 +9,13 @@ import (
 )
 
 func SetVideoRouter(router *gin.Engine) {
+	volcengineRouter := router.Group(constant.VolcengineVideoTaskPath)
+	volcengineRouter.Use(middleware.RouteTag("relay"), middleware.TokenAuth())
+	volcengineRouter.POST("", middleware.Distribute(), controller.RelayTask)
+	volcengineRouter.GET("", controller.RelayVolcengineVideoTaskList)
+	volcengineRouter.GET("/:task_id", controller.RelayVolcengineVideoTaskFetch)
+	volcengineRouter.DELETE("/:task_id", controller.RelayVolcengineVideoTaskFetch)
+
 	// Video proxy: accepts either session auth (dashboard) or token auth (API clients)
 	videoProxyRouter := router.Group("/v1")
 	videoProxyRouter.Use(middleware.RouteTag("relay"))

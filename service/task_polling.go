@@ -463,6 +463,17 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		return fmt.Errorf("readAll failed for task %s: %w", taskId, err)
 	}
 
+	return ApplyVideoTaskResponse(ctx, adaptor, task, responseBody)
+}
+
+// ApplyVideoTaskResponse shares polling settlement with native task queries.
+// Only the winner of the terminal-state CAS may settle or refund the task.
+func ApplyVideoTaskResponse(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, responseBody []byte) error {
+	if task.Status == model.TaskStatusSuccess || task.Status == model.TaskStatusFailure {
+		return nil
+	}
+	taskId := task.GetUpstreamTaskID()
+	var err error
 	logger.LogDebug(ctx, "updateVideoSingleTask response: %s", responseBody)
 
 	snap := task.Snapshot()
@@ -470,7 +481,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	taskResult := &relaycommon.TaskInfo{}
 	// try parse as New API response format
 	var responseItems dto.TaskResponse[model.Task]
-	if err = common.Unmarshal(responseBody, &responseItems); err == nil && responseItems.IsSuccess() {
+	if task.Platform != constant.TaskPlatformVolcengineVideo && common.Unmarshal(responseBody, &responseItems) == nil && responseItems.IsSuccess() {
 		logger.LogDebug(ctx, "updateVideoSingleTask parsed as new api response format: %+v", responseItems)
 		t := responseItems.Data
 		taskResult.TaskID = t.TaskID
@@ -482,8 +493,15 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	} else if taskResult, err = adaptor.ParseTaskResult(responseBody); err != nil {
 		return fmt.Errorf("parseTaskResult failed for task %s: %w", taskId, err)
 	}
+	if task.Platform == constant.TaskPlatformVolcengineVideo && taskResult.TaskID != taskId {
+		return fmt.Errorf("upstream task id does not match task %s", taskId)
+	}
 
-	task.Data = redactVideoResponseBody(responseBody)
+	if task.Platform == constant.TaskPlatformVolcengineVideo {
+		task.Data = append(task.Data[:0:0], responseBody...)
+	} else {
+		task.Data = redactVideoResponseBody(responseBody)
+	}
 
 	logger.LogDebug(ctx, "updateVideoSingleTask taskResult: %+v", taskResult)
 
@@ -566,8 +584,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		won, err := task.UpdateWithStatus(snap.Status)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("UpdateWithStatus failed for task %s: %s", task.TaskID, err.Error()))
-			shouldRefund = false
-			shouldSettle = false
+			return err
 		} else if !won {
 			logger.LogWarn(ctx, fmt.Sprintf("Task %s already transitioned by another process, skip billing", task.TaskID))
 			shouldRefund = false
@@ -576,6 +593,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	} else if !snap.Equal(task.Snapshot()) {
 		if _, err := task.UpdateWithStatus(snap.Status); err != nil {
 			logger.LogError(ctx, fmt.Sprintf("Failed to update task %s: %s", task.TaskID, err.Error()))
+			return err
 		}
 	} else {
 		// No changes, skip update

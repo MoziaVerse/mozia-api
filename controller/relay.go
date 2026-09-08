@@ -504,7 +504,7 @@ func RelayTask(c *gin.Context) {
 	model.CaptureRequestBodyLog(c)
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, &dto.TaskError{
+		respondTaskError(c, &dto.TaskError{
 			Code:       "gen_relay_info_failed",
 			Message:    err.Error(),
 			StatusCode: http.StatusInternalServerError,
@@ -632,6 +632,14 @@ func RelayTask(c *gin.Context) {
 		task.Action = relayInfo.Action
 		if insertErr := task.Insert(); insertErr != nil {
 			common.SysError("insert task error: " + insertErr.Error())
+			if result.Platform == constant.TaskPlatformVolcengineVideo {
+				common.SysError(fmt.Sprintf("native video task persistence failed: user=%d channel=%d upstream_task=%s", task.UserId, task.ChannelId, result.UpstreamTaskID))
+				respondTaskError(c, service.TaskErrorWrapperLocal(errors.New("failed to save the accepted upstream task"), "task_persist_failed", http.StatusInternalServerError))
+				return
+			}
+		}
+		if result.Platform == constant.TaskPlatformVolcengineVideo {
+			c.Data(http.StatusOK, "application/json", result.TaskData)
 		}
 	}
 
@@ -642,6 +650,14 @@ func RelayTask(c *gin.Context) {
 
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
+	if c.Request != nil && (c.Request.URL.Path == constant.VolcengineVideoTaskPath || strings.HasPrefix(c.Request.URL.Path, constant.VolcengineVideoTaskPath+"/")) {
+		if taskErr.Data != nil {
+			c.JSON(taskErr.StatusCode, gin.H{"error": taskErr.Data})
+		} else {
+			c.JSON(taskErr.StatusCode, gin.H{"error": gin.H{"code": taskErr.Code, "message": taskErr.Message}})
+		}
+		return
+	}
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}

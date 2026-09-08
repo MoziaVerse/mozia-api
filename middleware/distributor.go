@@ -191,11 +191,13 @@ func Distribute() func(c *gin.Context) {
 }
 
 // channelSupportsRequestPath reports whether a channel can serve the request path.
-// Only Advanced Custom (type 58) channels are path-checked; all other channel types
-// always pass. A type-58 channel is usable only when one of its routes matches.
+// Native Ark requires a supported provider; Advanced Custom requires a matching route.
 func channelSupportsRequestPath(channel *model.Channel, requestPath string) bool {
 	if channel == nil {
 		return false
+	}
+	if requestPath == constant.VolcengineVideoTaskPath {
+		return common.SupportsVolcengineVideo(channel.Type)
 	}
 	if channel.Type != constant.ChannelTypeAdvancedCustom {
 		return true
@@ -362,6 +364,14 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			modelRequest.Model = getTaskOriginModelName(c)
 		}
 		c.Set("relay_mode", relayMode)
+	} else if c.Request.URL.Path == constant.VolcengineVideoTaskPath {
+		req, err := getModelFromRequest(c)
+		if err != nil {
+			return nil, false, err
+		}
+		modelRequest.Model = req.Model
+		c.Set("platform", string(constant.TaskPlatformVolcengineVideo))
+		c.Set("relay_mode", relayconstant.RelayModeVideoSubmit)
 	} else if strings.Contains(c.Request.URL.Path, "/v1/video/generations") {
 		relayMode := relayconstant.RelayModeUnknown
 		if c.Request.Method == http.MethodPost {
