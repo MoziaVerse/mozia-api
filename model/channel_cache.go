@@ -202,9 +202,8 @@ func GetRandomSatisfiedChannel(group string, model string, retry int, requestPat
 	return nil, errors.New("channel not found")
 }
 
-// filterChannelsByRequestPath restricts candidates by request path. Only Advanced
-// Custom (type 58) channels are path-checked: they are kept only when one of their
-// configured routes matches requestPath. All other channel types always pass.
+// filterChannelsByRequestPath restricts native Ark to supported providers and
+// Advanced Custom to channels with a matching route.
 // When requestPath is empty (non-relay callers) filtering is skipped.
 // Caller must hold channelSyncLock (read lock). The cached slice is never mutated.
 func filterChannelsByRequestPath(channels []int, requestPath string) []int {
@@ -217,6 +216,9 @@ func filterChannelsByRequestPath(channels []int, requestPath string) []int {
 		if !ok {
 			// keep it so the downstream consistency error is raised as before
 			filtered = append(filtered, channelId)
+			continue
+		}
+		if requestPath == constant.VolcengineVideoTaskPath && !common.SupportsVolcengineVideo(channel.Type) {
 			continue
 		}
 		if channel.Type != constant.ChannelTypeAdvancedCustom {

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/taskbilling"
@@ -44,6 +46,26 @@ type TaskSubmitResult struct {
 func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
 	// 检测 remix action
 	path := c.Request.URL.Path
+	if path == constant.VolcengineVideoTaskPath {
+		storage, err := common.GetBodyStorage(c)
+		if err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
+		}
+		body, err := storage.Bytes()
+		if err != nil {
+			return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
+		}
+		for _, item := range gjson.GetBytes(body, "content").Array() {
+			if item.Get("type").String() != "draft_task" {
+				continue
+			}
+			id := item.Get("draft_task.id")
+			if id.Type != gjson.String || strings.TrimSpace(id.String()) == "" || info.OriginTaskID != "" {
+				return service.TaskErrorWrapperLocal(errors.New("exactly one draft_task.id is required"), "invalid_request", http.StatusBadRequest)
+			}
+			info.OriginTaskID = id.String()
+		}
+	}
 	if strings.Contains(path, "/v1/videos/") && strings.HasSuffix(path, "/remix") {
 		info.Action = constant.TaskActionRemix
 	}
@@ -66,7 +88,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 	if err != nil {
 		return service.TaskErrorWrapper(err, "get_origin_task_failed", http.StatusInternalServerError)
 	}
-	if !exist {
+	if !exist || (path == constant.VolcengineVideoTaskPath && originTask.Platform != constant.TaskPlatformVolcengineVideo) {
 		return service.TaskErrorWrapperLocal(errors.New("task_origin_not_exist"), "task_not_exist", http.StatusBadRequest)
 	}
 
@@ -94,6 +116,18 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		return service.TaskErrorWrapperLocal(errors.New("the channel of the origin task is disabled"), "task_channel_disable", http.StatusBadRequest)
 	}
 	info.LockedChannel = ch
+	if path == constant.VolcengineVideoTaskPath {
+		// Draft IDs belong to the original upstream credential, including on retries.
+		if originTask.PrivateData.Key != "" {
+			ch.Key = originTask.PrivateData.Key
+			ch.ChannelInfo.IsMultiKey = false
+		}
+		if apiErr := middleware.SetupContextForSelectedChannel(c, ch, info.OriginModelName); apiErr != nil {
+			return service.TaskErrorFromAPIError(apiErr)
+		}
+		info.InitChannelMeta(c)
+		return nil
+	}
 
 	if originTask.ChannelId != info.ChannelId {
 		key, _, newAPIError := ch.GetNextEnabledKey()
@@ -293,7 +327,17 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 	if resp != nil && resp.StatusCode != http.StatusOK {
 		responseBody, _ := io.ReadAll(resp.Body)
-		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		_ = resp.Body.Close()
+		taskErr := service.TaskErrorWrapper(fmt.Errorf("%s", string(responseBody)), "fail_to_fetch_task", resp.StatusCode)
+		if platform == constant.TaskPlatformVolcengineVideo {
+			var errorResponse struct {
+				Error json.RawMessage `json:"error"`
+			}
+			if common.Unmarshal(responseBody, &errorResponse) == nil && common.GetJsonType(errorResponse.Error) == "object" {
+				taskErr.Data = errorResponse.Error
+			}
+		}
+		return nil, taskErr
 	}
 
 	// 10. 返回 OtherRatios 给下游（header 必须在 DoResponse 写 body 之前设置）

@@ -1,6 +1,19 @@
 package common
 
-import "github.com/QuantumNous/new-api/constant"
+import (
+	"strings"
+
+	"github.com/QuantumNous/new-api/constant"
+)
+
+func SupportsVolcengineVideo(channelType int) bool {
+	switch channelType {
+	case constant.ChannelTypeMoziaArtsapi, constant.ChannelTypeDoubaoVideo, constant.ChannelTypeVolcEngine:
+		return true
+	default:
+		return false
+	}
+}
 
 // GetEndpointTypesByChannelType 获取渠道最优先端点类型（所有的渠道都支持 OpenAI 端点）
 func GetEndpointTypesByChannelType(channelType int, modelName string) []constant.EndpointType {
@@ -30,12 +43,17 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI, constant.EndpointTypeOpenAIResponse}
 	case constant.ChannelTypeSora, constant.ChannelTypeMoziaSeedanceGen, constant.ChannelTypeMoziaSeedanceVideos, constant.ChannelTypeMoziaH3:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIVideo}
+	case constant.ChannelTypeMoziaArtsapi, constant.ChannelTypeDoubaoVideo:
+		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIVideo, constant.EndpointTypeVolcengineVideo}
 	default:
 		if IsOpenAIResponseOnlyModel(modelName) {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse}
 		} else {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
 		}
+	}
+	if channelType == constant.ChannelTypeVolcEngine && strings.Contains(strings.ToLower(modelName), "seedance") {
+		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIVideo, constant.EndpointTypeVolcengineVideo}
 	}
 	if IsImageGenerationModel(modelName) {
 		// add to first

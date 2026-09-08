@@ -145,6 +145,8 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 	//	return &aiproxy.Adaptor{}
 	case constant.TaskPlatformSuno:
 		return &suno.TaskAdaptor{}
+	case constant.TaskPlatformVolcengineVideo:
+		return &taskdoubao.NativeTaskAdaptor{}
 	}
 	if channelType, err := strconv.ParseInt(string(platform), 10, 64); err == nil {
 		// Mozia 私有 task 渠道见 relay_adaptor_mozia.go；命中则直接返回。

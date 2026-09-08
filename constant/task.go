@@ -2,6 +2,10 @@ package constant
 
 type TaskPlatform string
 
+const TaskPlatformVolcengineVideo TaskPlatform = "volcengine-video"
+
+const VolcengineVideoTaskPath = "/api/v3/contents/generations/tasks"
+
 const (
 	TaskPlatformSuno       TaskPlatform = "suno"
 	TaskPlatformMidjourney              = "mj"
