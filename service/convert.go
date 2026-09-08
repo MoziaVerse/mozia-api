@@ -70,18 +70,14 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			requiresStringAssistantContent = true
 			// Kimi K3 always thinks; its OpenAI endpoint does not accept `thinking`.
 			if model != "kimi-k3" && claudeRequest.Thinking != nil {
-				thinkingType := claudeRequest.Thinking.Type
-				if thinkingType == "adaptive" {
-					thinkingType = "enabled"
+				switch claudeRequest.Thinking.Type {
+				case "enabled", "adaptive":
+					openAIRequest.THINKING = json.RawMessage(`{"type":"enabled"}`)
+				case "disabled":
+					openAIRequest.THINKING = json.RawMessage(`{"type":"disabled"}`)
+				default:
+					return nil, fmt.Errorf("unsupported thinking type: %q", claudeRequest.Thinking.Type)
 				}
-				if thinkingType != "enabled" && thinkingType != "disabled" {
-					return nil, fmt.Errorf("unsupported thinking type: %q", thinkingType)
-				}
-				thinkingJSON, err := common.Marshal(dto.Thinking{Type: thinkingType})
-				if err != nil {
-					return nil, fmt.Errorf("failed to marshal thinking: %w", err)
-				}
-				openAIRequest.THINKING = thinkingJSON
 			}
 			if model == "kimi-k3" || claudeRequest.Thinking == nil || claudeRequest.Thinking.Type != "disabled" {
 				effort := claudeRequest.GetEfforts()
