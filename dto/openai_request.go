@@ -141,9 +141,16 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		tokenCountMeta.MaxTokens = int(maxTokens)
 	}
 
+	var dynamicTools []ToolCallRequest
 	for _, message := range r.Messages {
 		tokenCountMeta.MessagesCount++
 		texts = append(texts, message.Role)
+		if len(message.Tools) > 0 {
+			var messageTools []ToolCallRequest
+			if err := common.Unmarshal(message.Tools, &messageTools); err == nil {
+				dynamicTools = append(dynamicTools, messageTools...)
+			}
+		}
 		if message.Content != nil {
 			if message.Name != nil {
 				tokenCountMeta.NameCount++
@@ -175,8 +182,8 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		}
 	}
 
-	if r.Tools != nil {
-		openaiTools := r.Tools
+	if len(r.Tools) > 0 || len(dynamicTools) > 0 {
+		openaiTools := append(dynamicTools, r.Tools...)
 		for _, tool := range openaiTools {
 			tokenCountMeta.ToolsCount++
 			texts = append(texts, tool.Function.Name)
@@ -293,8 +300,50 @@ type Message struct {
 	Reasoning        *string         `json:"reasoning,omitempty"`
 	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
 	ToolCallId       string          `json:"tool_call_id,omitempty"`
-	parsedContent    []MediaContent
+	// Kimi K3 can declare tools on a system message during a conversation.
+	Tools         json.RawMessage `json:"tools,omitempty"`
+	parsedContent []MediaContent
 	//parsedStringContent *string
+}
+
+func (r GeneralOpenAIRequest) MarshalJSON() ([]byte, error) {
+	type Alias GeneralOpenAIRequest
+	hasToolLoadingMessage := false
+	for _, message := range r.Messages {
+		if len(message.Tools) > 0 && message.Content == nil {
+			hasToolLoadingMessage = true
+			break
+		}
+	}
+	if !hasToolLoadingMessage {
+		return common.Marshal((*Alias)(&r))
+	}
+
+	// Kimi K3 dynamic tool loading: a system message that carries tools must not
+	// carry a content key at all, otherwise the upstream rejects it. Only those
+	// messages drop the key; every other message keeps emitting "content": null.
+	type toolLoadingMessage struct {
+		Message
+		Content any `json:"content,omitempty"`
+	}
+	messages := make([]json.RawMessage, 0, len(r.Messages))
+	for _, message := range r.Messages {
+		var encoded []byte
+		var err error
+		if len(message.Tools) > 0 && message.Content == nil {
+			encoded, err = common.Marshal(toolLoadingMessage{Message: message})
+		} else {
+			encoded, err = common.Marshal(message)
+		}
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, encoded)
+	}
+	return common.Marshal(struct {
+		*Alias
+		Messages []json.RawMessage `json:"messages,omitempty"`
+	}{Alias: (*Alias)(&r), Messages: messages})
 }
 
 type MediaContent struct {
