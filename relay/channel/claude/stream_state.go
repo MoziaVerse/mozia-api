@@ -32,12 +32,6 @@ func (s *ClaudeToChatStreamState) ConvertChunk(claudeResponse *dto.ClaudeRespons
 	if claudeResponse == nil {
 		return nil, nil
 	}
-	if s.toolIndexByContentBlock == nil {
-		s.toolIndexByContentBlock = make(map[int]int)
-	}
-	if s.blockTypeByContentBlock == nil {
-		s.blockTypeByContentBlock = make(map[int]string)
-	}
 
 	converted := *claudeResponse
 	switch claudeResponse.Type {

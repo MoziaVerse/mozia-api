@@ -273,8 +273,6 @@ func (s *ChatToResponsesStreamState) appendTextDelta(delta string) []ChatToRespo
 				Content: []dto.ResponsesOutputContent{},
 			},
 		}))
-	}
-	if s.text.Len() == 0 {
 		events = append(events, s.event("response.content_part.added", dto.ResponsesStreamResponse{
 			OutputIndex: intPtr(s.textOutputIndex), ContentIndex: intPtr(0), ItemID: s.messageID(),
 			Part: &dto.ResponsesOutputContent{Type: "output_text", Text: "", Annotations: []interface{}{}},
@@ -306,8 +304,6 @@ func (s *ChatToResponsesStreamState) appendReasoningDelta(delta string) []ChatTo
 				Content: []dto.ResponsesOutputContent{},
 			},
 		}))
-	}
-	if s.reasoning.Len() == 0 {
 		events = append(events, s.event("response.reasoning_summary_part.added", dto.ResponsesStreamResponse{
 			OutputIndex: intPtr(s.reasoningIndex), SummaryIndex: intPtr(0), ItemID: s.reasoningID(),
 			Part: &dto.ResponsesReasoningSummaryPart{Type: "summary_text", Text: ""},

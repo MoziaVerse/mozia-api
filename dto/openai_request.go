@@ -327,23 +327,17 @@ func (r GeneralOpenAIRequest) MarshalJSON() ([]byte, error) {
 		Message
 		Content any `json:"content,omitempty"`
 	}
-	messages := make([]json.RawMessage, 0, len(r.Messages))
-	for _, message := range r.Messages {
-		var encoded []byte
-		var err error
+	messages := make([]any, len(r.Messages))
+	for i, message := range r.Messages {
 		if len(message.Tools) > 0 && message.Content == nil {
-			encoded, err = common.Marshal(toolLoadingMessage{Message: message})
+			messages[i] = toolLoadingMessage{Message: message}
 		} else {
-			encoded, err = common.Marshal(message)
+			messages[i] = message
 		}
-		if err != nil {
-			return nil, err
-		}
-		messages = append(messages, encoded)
 	}
 	return common.Marshal(struct {
 		*Alias
-		Messages []json.RawMessage `json:"messages,omitempty"`
+		Messages []any `json:"messages,omitempty"`
 	}{Alias: (*Alias)(&r), Messages: messages})
 }
 
