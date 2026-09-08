@@ -320,12 +320,21 @@ func responsesRequestToolsToChat(raw json.RawMessage) ([]dto.ToolCallRequest, er
 	for _, tool := range tools {
 		toolType := strings.TrimSpace(common.Interface2String(tool["type"]))
 		if toolType == "function" {
+			var strict *bool
+			if raw, exists := tool["strict"]; exists {
+				value, ok := raw.(bool)
+				if !ok {
+					return nil, fmt.Errorf("function tool strict must be a boolean")
+				}
+				strict = &value
+			}
 			out = append(out, dto.ToolCallRequest{
 				Type: "function",
 				Function: dto.FunctionRequest{
 					Name:        strings.TrimSpace(common.Interface2String(tool["name"])),
 					Description: common.Interface2String(tool["description"]),
 					Parameters:  tool["parameters"],
+					Strict:      strict,
 				},
 			})
 			continue

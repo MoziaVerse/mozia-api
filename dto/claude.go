@@ -171,6 +171,7 @@ func (c *ClaudeMessage) ParseContent() ([]ClaudeMediaMessage, error) {
 }
 
 type Tool struct {
+	Strict      *bool                  `json:"strict,omitempty"`
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	InputSchema map[string]interface{} `json:"input_schema"`

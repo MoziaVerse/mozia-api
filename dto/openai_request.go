@@ -251,6 +251,7 @@ type ToolCallRequest struct {
 }
 
 type FunctionRequest struct {
+	Strict      *bool  `json:"strict,omitempty"`
 	Description string `json:"description,omitempty"`
 	Name        string `json:"name"`
 	Parameters  any    `json:"parameters,omitempty"`
@@ -620,6 +621,9 @@ func (m *Message) ParseContent() []MediaContent {
 	// 尝试解析为数组
 	//var arrayContent []map[string]interface{}
 
+	if content, ok := m.Content.([]MediaContent); ok {
+		return content
+	}
 	arrayContent, ok := m.Content.([]any)
 	if !ok {
 		return contentList
@@ -641,6 +645,7 @@ func (m *Message) ParseContent() []MediaContent {
 			continue
 		}
 
+		previousLen := len(contentList)
 		switch contentType {
 		case ContentTypeText:
 			if text, ok := contentItem["text"].(string); ok {
@@ -721,6 +726,9 @@ func (m *Message) ParseContent() []MediaContent {
 					},
 				})
 			}
+		}
+		if len(contentList) > previousLen && contentItem["cache_control"] != nil {
+			contentList[len(contentList)-1].CacheControl, _ = common.Marshal(contentItem["cache_control"])
 		}
 	}
 

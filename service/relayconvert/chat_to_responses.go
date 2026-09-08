@@ -297,6 +297,9 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 					"description": tool.Function.Description,
 					"parameters":  tool.Function.Parameters,
 				})
+				if tool.Function.Strict != nil {
+					tools[len(tools)-1]["strict"] = *tool.Function.Strict
+				}
 			default:
 				// Best-effort: keep original tool shape for unknown types.
 				var m map[string]any
