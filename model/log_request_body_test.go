@@ -59,6 +59,22 @@ func TestCaptureRequestBodyLogOmitsOversizedBody(t *testing.T) {
 	assert.Equal(t, int64(len(body)), requestBody["_size_bytes"])
 }
 
+func TestCaptureRequestBodyLogCaptures320786ByteBody(t *testing.T) {
+	const size = 320786
+	body := `{"prompt":"` + strings.Repeat("a", size-len(`{"prompt":""}`)) + `"}`
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	CaptureRequestBodyLog(c)
+	other := map[string]interface{}{}
+	attachRequestBodyLog(c, other)
+
+	requestBody, ok := other["request_body"].(map[string]any)
+	require.True(t, ok)
+	assert.Len(t, requestBody["prompt"], size-len(`{"prompt":""}`))
+}
+
 func TestFormatUserLogsRemovesAdminRequestBody(t *testing.T) {
 	logs := []*Log{{
 		Other: common.MapToJsonStr(map[string]interface{}{
