@@ -56,10 +56,13 @@ func BuildPricingDisplay(pricing Pricing, customerRatio float64) *PricingDisplay
 	}
 	var items []PricingDisplayItem
 	if pricing.BillingMode == billing_setting.BillingModeTieredExpr && strings.TrimSpace(pricing.BillingExpr) != "" {
-		items = []PricingDisplayItem{{
-			Key: "dynamic", Item: "动态计费", Unit: "dynamic",
-			Condition: "按请求内容、参数与实际用量", Note: "以实际账单为准",
-		}}
+		items = buildTimePricingItems(pricing.BillingExpr, customerRatio)
+		if len(items) == 0 {
+			items = []PricingDisplayItem{{
+				Key: "dynamic", Item: "动态计费", Unit: "dynamic",
+				Condition: "按请求内容、参数与实际用量", Note: "以实际账单为准",
+			}}
+		}
 	} else if pricing.TaskBilling != nil && pricing.TaskBilling.Mode == taskbilling.ModeTokenParametric {
 		items = buildTokenParametricPricingItems(pricing.TaskBilling, customerRatio)
 	} else if pricing.QuotaType == 1 {
