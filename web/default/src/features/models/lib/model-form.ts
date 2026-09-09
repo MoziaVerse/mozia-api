@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
+
 import type { Model } from '../types'
 import { parseModelTags as parseTagsFromUtils } from './model-utils'
 
@@ -33,6 +34,9 @@ export const modelFormSchema = z.object({
   description: z.string().default(''),
   icon: z.string().default(''),
   tags: z.array(z.string()).default([]),
+  function_tags: z.string().default(''),
+  max_prompt_tokens: z.number().int().positive().optional(),
+  max_completion_tokens: z.number().int().positive().optional(),
   vendor_id: z.number().optional(),
   endpoints: z.string().default(''),
   name_rule: z.number().min(0).max(3).default(0),
@@ -75,6 +79,9 @@ export function transformModelToFormDefaults(model: Model): ModelFormValues {
     description: model.description || '',
     icon: model.icon || '',
     tags: parseTagsFromUtils(model.tags),
+    function_tags: model.function_tags || '',
+    max_prompt_tokens: model.max_prompt_tokens ?? undefined,
+    max_completion_tokens: model.max_completion_tokens ?? undefined,
     vendor_id: model.vendor_id,
     endpoints: model.endpoints || '',
     name_rule: model.name_rule || 0,
@@ -97,6 +104,9 @@ export function transformFormDataToModelPayload(
     description: formData.description || '',
     icon: formData.icon || '',
     tags: formatTagsArray(formData.tags),
+    function_tags: formData.function_tags || '',
+    max_prompt_tokens: formData.max_prompt_tokens ?? null,
+    max_completion_tokens: formData.max_completion_tokens ?? null,
     vendor_id: formData.vendor_id,
     endpoints: formData.endpoints || '',
     name_rule: formData.name_rule,

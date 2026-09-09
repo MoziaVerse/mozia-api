@@ -39,6 +39,9 @@ export interface Model {
   description?: string
   icon?: string
   tags?: string
+  function_tags?: string
+  max_prompt_tokens?: number | null
+  max_completion_tokens?: number | null
   vendor_id?: number
   endpoints?: string
   status: number
@@ -233,6 +236,9 @@ export const modelFormSchema = z.object({
   description: z.string().default(''),
   icon: z.string().default(''),
   tags: z.array(z.string()).default([]),
+  function_tags: z.string().default(''),
+  max_prompt_tokens: z.number().int().positive().optional(),
+  max_completion_tokens: z.number().int().positive().optional(),
   vendor_id: z.number().optional(),
   endpoints: z.string().default(''),
   name_rule: z.number().min(0).max(3).default(0),

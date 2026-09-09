@@ -5320,6 +5320,15 @@
     "Fallback mode": "Fallback mode",
     "Thinking disabled": "Thinking disabled",
     "Always": "Always",
-    "Standard fallback": "Standard fallback"
+    "Standard fallback": "Standard fallback",
+    "Comma-separated capability tags": "Comma-separated capability tags",
+    "Function Calling,Reasoning,Vision": "Function Calling,Reasoning,Vision",
+    "Function Tags": "Function Tags",
+    "Max Completion": "Max Completion",
+    "Max Completion Tokens": "Max Completion Tokens",
+    "Max Prompt": "Max Prompt",
+    "Max Prompt Tokens": "Max Prompt Tokens",
+    "Maximum input context length": "Maximum input context length",
+    "Maximum output completion length": "Maximum output completion length"
   }
 }

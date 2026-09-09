@@ -5262,6 +5262,15 @@
     "Fallback mode": "Chế độ chuyển đổi",
     "Thinking disabled": "Đã tắt suy luận",
     "Always": "Luôn luôn",
-    "Standard fallback": "Chuyển đổi thông thường"
+    "Standard fallback": "Chuyển đổi thông thường",
+    "Comma-separated capability tags": "Thẻ khả năng, phân cách bằng dấu phẩy",
+    "Function Calling,Reasoning,Vision": "Function Calling,Reasoning,Vision",
+    "Function Tags": "Thẻ khả năng",
+    "Max Completion": "Hoàn thành tối đa",
+    "Max Completion Tokens": "Token hoàn thành tối đa",
+    "Max Prompt": "Prompt tối đa",
+    "Max Prompt Tokens": "Token prompt tối đa",
+    "Maximum input context length": "Độ dài ngữ cảnh đầu vào tối đa",
+    "Maximum output completion length": "Độ dài hoàn thành đầu ra tối đa"
   }
 }

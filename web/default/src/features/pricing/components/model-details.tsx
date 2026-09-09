@@ -489,6 +489,39 @@ function ModelBackendProviderSection(props: { model: PricingModel }) {
     )
   }
 
+  if (model.function_tags) {
+    cells.push(
+      <CatalogInfoCell key='function_tags' label={t('Function Tags')}>
+        <CatalogPillList
+          items={model.function_tags
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean)}
+        />
+      </CatalogInfoCell>
+    )
+  }
+
+  if (model.max_prompt_tokens) {
+    cells.push(
+      <CatalogInfoCell key='max_prompt_tokens' label={t('Max Prompt')}>
+        <CatalogTextValue>
+          {formatCatalogTokenCount(model.max_prompt_tokens)}
+        </CatalogTextValue>
+      </CatalogInfoCell>
+    )
+  }
+
+  if (model.max_completion_tokens) {
+    cells.push(
+      <CatalogInfoCell key='max_completion_tokens' label={t('Max Completion')}>
+        <CatalogTextValue>
+          {formatCatalogTokenCount(model.max_completion_tokens)}
+        </CatalogTextValue>
+      </CatalogInfoCell>
+    )
+  }
+
   if (model.parameter_count) {
     cells.push(
       <CatalogInfoCell key='parameters' label={t('Parameters')}>
@@ -837,13 +870,13 @@ function getDynamicPriceFields(
   tiers: DynamicPricingTier[],
   options: DynamicPriceOptions
 ) {
-  return Array.from(
-    new Map(
+  return [
+    ...new Map(
       tiers
         .flatMap((tier) => getDynamicPriceEntries(tier, options))
         .map((entry) => [entry.field, entry])
-    ).values()
-  )
+    ).values(),
+  ]
 }
 
 function getDynamicFormattedPricesByTier(
@@ -890,19 +923,24 @@ function GroupPricingSection(props: {
 
   const extraPriceTypes = useMemo(() => {
     const types: { label: string; type: PriceType }[] = []
-    if (props.model.cache_ratio != null)
+    if (props.model.cache_ratio != null) {
       types.push({ label: t('Cache'), type: 'cache' })
-    if (props.model.create_cache_ratio != null)
+    }
+    if (props.model.create_cache_ratio != null) {
       types.push({ label: t('Cache Write'), type: 'create_cache' })
-    if (props.model.image_ratio != null)
+    }
+    if (props.model.image_ratio != null) {
       types.push({ label: t('Image'), type: 'image' })
-    if (props.model.audio_ratio != null)
+    }
+    if (props.model.audio_ratio != null) {
       types.push({ label: t('Audio In'), type: 'audio_input' })
+    }
     if (
       props.model.audio_ratio != null &&
       props.model.audio_completion_ratio != null
-    )
+    ) {
       types.push({ label: t('Audio Out'), type: 'audio_output' })
+    }
     return types
   }, [props.model, t])
 
@@ -1297,14 +1335,16 @@ export function ModelDetails() {
             <Skeleton className='h-4 w-full max-w-md' />
           </div>
           <div className='mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4'>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className='h-16 w-full' />
-            ))}
+            <Skeleton className='h-16 w-full' />
+            <Skeleton className='h-16 w-full' />
+            <Skeleton className='h-16 w-full' />
+            <Skeleton className='h-16 w-full' />
           </div>
           <div className='mt-6 space-y-3'>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className='h-24 w-full' />
-            ))}
+            <Skeleton className='h-24 w-full' />
+            <Skeleton className='h-24 w-full' />
+            <Skeleton className='h-24 w-full' />
+            <Skeleton className='h-24 w-full' />
           </div>
         </div>
       </PublicLayout>

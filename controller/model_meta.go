@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 )
 
 // GetAllModelsMeta 获取模型列表（分页）
@@ -115,7 +116,7 @@ func UpdateModelMeta(c *gin.Context) {
 	statusOnly := c.Query("status_only") == "true"
 
 	var m model.Model
-	if err := c.ShouldBindJSON(&m); err != nil {
+	if err := c.ShouldBindBodyWith(&m, binding.JSON); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -145,7 +146,19 @@ func UpdateModelMeta(c *gin.Context) {
 			return
 		}
 
-		if err := m.Update(); err != nil {
+		var providedFields map[string]json.RawMessage
+		if err := c.ShouldBindBodyWith(&providedFields, binding.JSON); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		// Older clients omit these fields; only an explicit value or null may replace them.
+		var omittedFields []string
+		for _, field := range []string{"function_tags", "max_prompt_tokens", "max_completion_tokens"} {
+			if _, present := providedFields[field]; !present {
+				omittedFields = append(omittedFields, field)
+			}
+		}
+		if err := m.Update(omittedFields...); err != nil {
 			common.ApiError(c, err)
 			return
 		}

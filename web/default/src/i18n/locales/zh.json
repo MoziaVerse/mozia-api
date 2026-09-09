@@ -5319,7 +5319,16 @@
     "Fallback mode": "降级模式",
     "Thinking disabled": "关闭思考时",
     "Always": "始终",
-    "Standard fallback": "普通降级"
+    "Standard fallback": "普通降级",
+    "Comma-separated capability tags": "逗号分隔的能力标签",
+    "Function Calling,Reasoning,Vision": "Function Calling,Reasoning,Vision",
+    "Function Tags": "能力标签",
+    "Max Completion": "最大输出",
+    "Max Completion Tokens": "最大输出 Token",
+    "Max Prompt": "最大输入",
+    "Max Prompt Tokens": "最大输入 Token",
+    "Maximum input context length": "最大输入上下文长度",
+    "Maximum output completion length": "最大输出补全长度"
   },
   "Hide Reasoning When Disabled": "关闭思考时隐藏推理内容",
   "Strip reasoning_content from responses when the client sends reasoning_effort=none or thinking.type=disabled but the upstream still returns it": "当客户端传 reasoning_effort=none 或 thinking.type=disabled 但上游仍返回推理内容时，从响应中剥掉 reasoning_content"

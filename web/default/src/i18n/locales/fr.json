@@ -5262,6 +5262,15 @@
     "Fallback mode": "Mode de repli",
     "Thinking disabled": "Raisonnement désactivé",
     "Always": "Toujours",
-    "Standard fallback": "Repli standard"
+    "Standard fallback": "Repli standard",
+    "Comma-separated capability tags": "Balises de capacité séparées par des virgules",
+    "Function Calling,Reasoning,Vision": "Function Calling,Reasoning,Vision",
+    "Function Tags": "Balises de capacité",
+    "Max Completion": "Complétion max",
+    "Max Completion Tokens": "Tokens de complétion max",
+    "Max Prompt": "Prompt max",
+    "Max Prompt Tokens": "Tokens de prompt max",
+    "Maximum input context length": "Longueur maximale du contexte d'entrée",
+    "Maximum output completion length": "Longueur maximale de la complétion"
   }
 }
