@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/mozia_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -119,6 +120,27 @@ func GetPricing(c *gin.Context) {
 		displayUserId = id
 	}
 	pricing = attachPricingDisplay(pricing, groupRatio, displayUserId)
+	if c.Query("include_performance") == "true" && len(pricing) > 0 {
+		summary, err := perfmetrics.QuerySummaryAll(24, lo.Keys(usableGroup))
+		if err != nil {
+			// Performance data is optional; an unavailable metrics store must not
+			// prevent customers from viewing prices or choosing a model.
+			common.SysError("failed to load catalog performance metrics: " + err.Error())
+		} else {
+			byModel := make(map[string]model.PricingPerformance, len(summary.Models))
+			for _, metric := range summary.Models {
+				byModel[metric.ModelName] = model.PricingPerformance{
+					WindowHours: 24, AvgLatencyMs: metric.AvgLatencyMs,
+					SuccessRate: metric.SuccessRate, AvgTps: metric.AvgTps,
+				}
+			}
+			for i := range pricing {
+				if metric, ok := byModel[pricing[i].ModelName]; ok {
+					pricing[i].Performance = &metric
+				}
+			}
+		}
+	}
 
 	c.JSON(200, gin.H{
 		"success":            true,

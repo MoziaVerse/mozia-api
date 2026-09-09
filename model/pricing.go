@@ -40,7 +40,17 @@ type Pricing struct {
 	TaskBilling             *taskbilling.Config     `json:"task_billing,omitempty"`
 	Access                  *PricingAccess          `json:"access,omitempty"`
 	DisplayPricing          *PricingDisplay         `json:"display_pricing,omitempty"`
+	Performance             *PricingPerformance     `json:"performance,omitempty"`
 	customerPriceMultiplier float64
+}
+
+// PricingPerformance contains aggregate public metrics, without request counts
+// or channel details. It is attached after the customer's catalog is filtered.
+type PricingPerformance struct {
+	WindowHours  int     `json:"window_hours"`
+	AvgLatencyMs int64   `json:"avg_latency_ms"`
+	SuccessRate  float64 `json:"success_rate"`
+	AvgTps       float64 `json:"avg_tps"`
 }
 
 type PricingAccess struct {

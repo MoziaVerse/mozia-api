@@ -5,9 +5,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -17,6 +19,83 @@ import (
 type pricingResponse struct {
 	Success bool            `json:"success"`
 	Data    []model.Pricing `json:"data"`
+}
+
+func TestGetPricingIncludesOnlyVisiblePerformanceAndSurvivesMetricsFailure(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(
+		&model.PerfMetric{}, &model.MoziaWalletBalance{}, &model.MoziaWalletTransaction{},
+		&model.MoziaModelQuotaPolicy{}, &model.UserSubscription{},
+	))
+	groups := setting.UserUsableGroups2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(groups))
+		model.InvalidatePricingCache()
+	})
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default"}`))
+	const userID = 1060
+	require.NoError(t, db.Create(&model.User{
+		Id: userID, Username: "performance-customer", Group: "default", Status: common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.UserSSO{UserId: userID, SSOSub: "performance-subject"}).Error)
+	agency := model.Reseller{
+		Name: "Performance Agency", Status: model.ResellerStatusActive,
+		ModelAccess: model.ResellerModelAccess{Restricted: true, Models: []string{"perf-visible", "perf-no-data"}},
+	}
+	require.NoError(t, db.Create(&agency).Error)
+	require.NoError(t, db.Create(&model.ResellerCustomer{
+		ResellerId: agency.Id, Subject: "performance-subject", Status: model.ResellerCustomerStatusActive,
+	}).Error)
+	for i, name := range []string{"perf-visible", "perf-no-data", "perf-hidden"} {
+		require.NoError(t, db.Create(&model.Ability{Group: "default", Model: name, ChannelId: i + 1, Enabled: true}).Error)
+	}
+	now := time.Now().Truncate(time.Hour)
+	require.NoError(t, db.Create(&[]model.PerfMetric{
+		{ModelName: "perf-visible", Group: "default", BucketTs: now.Add(-time.Hour).Unix(), RequestCount: 2, SuccessCount: 1, TotalLatencyMs: 6000, OutputTokens: 300, GenerationMs: 1500},
+		{ModelName: "perf-visible", Group: "default", BucketTs: now.Add(-2 * time.Hour).Unix(), RequestCount: 8, SuccessCount: 7, TotalLatencyMs: 34000, OutputTokens: 700, GenerationMs: 3500},
+		{ModelName: "perf-visible", Group: "private", BucketTs: now.Add(-time.Hour).Unix(), RequestCount: 100, SuccessCount: 100, TotalLatencyMs: 1000, OutputTokens: 1000, GenerationMs: 1000},
+		{ModelName: "perf-visible", Group: "default", BucketTs: now.Add(-48 * time.Hour).Unix(), RequestCount: 100, SuccessCount: 100, TotalLatencyMs: 1000},
+		{ModelName: "perf-hidden", Group: "default", BucketTs: now.Add(-time.Hour).Unix(), RequestCount: 10, SuccessCount: 10},
+	}).Error)
+	model.InvalidatePricingCache()
+
+	for _, include := range []bool{true, false} {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		path := "/api/sso/pricing?include_inaccessible=true"
+		if include {
+			path += "&include_performance=true"
+		}
+		ctx.Request = httptest.NewRequest(http.MethodGet, path, nil)
+		ctx.Set("id", userID)
+		GetPricing(ctx)
+		pricing := pricingByModelName(decodePricingResponse(t, recorder))
+		require.Contains(t, pricing, "perf-visible")
+		require.Contains(t, pricing, "perf-no-data")
+		assert.NotContains(t, pricing, "perf-hidden")
+		assert.Nil(t, pricing["perf-no-data"].Performance)
+		if include {
+			assert.Equal(t, &model.PricingPerformance{WindowHours: 24, AvgLatencyMs: 4000, SuccessRate: 80, AvgTps: 200}, pricing["perf-visible"].Performance)
+		} else {
+			assert.Nil(t, pricing["perf-visible"].Performance)
+		}
+		for _, field := range []string{`"request_count"`, `"success_count"`, `"total_latency_ms"`} {
+			assert.NotContains(t, recorder.Body.String(), field)
+		}
+	}
+	for _, pricing := range model.GetPricing() {
+		assert.Nil(t, pricing.Performance, "customer metrics must not mutate the cached catalog")
+	}
+
+	require.NoError(t, db.Migrator().DropTable(&model.PerfMetric{}))
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/sso/pricing?include_inaccessible=true&include_performance=true", nil)
+	ctx.Set("id", userID)
+	GetPricing(ctx)
+	pricing := pricingByModelName(decodePricingResponse(t, recorder))
+	require.Contains(t, pricing, "perf-visible")
+	assert.Nil(t, pricing["perf-visible"].Performance)
 }
 
 func decodePricingResponse(t *testing.T, recorder *httptest.ResponseRecorder) []model.Pricing {
