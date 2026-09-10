@@ -5262,6 +5262,15 @@
     "Fallback mode": "フォールバックモード",
     "Thinking disabled": "思考無効",
     "Always": "常時",
-    "Standard fallback": "通常フォールバック"
+    "Standard fallback": "通常フォールバック",
+    "Comma-separated capability tags": "カンマ区切りの機能タグ",
+    "Function Calling,Reasoning,Vision": "Function Calling,Reasoning,Vision",
+    "Function Tags": "機能タグ",
+    "Max Completion": "最大出力",
+    "Max Completion Tokens": "最大出力トークン数",
+    "Max Prompt": "最大入力",
+    "Max Prompt Tokens": "最大入力トークン数",
+    "Maximum input context length": "最大入力コンテキスト長",
+    "Maximum output completion length": "最大出力補完長"
   }
 }

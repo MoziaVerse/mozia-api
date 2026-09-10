@@ -1,7 +1,9 @@
 package artsapi
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -22,9 +24,11 @@ type TaskAdaptor struct {
 }
 
 type taskRequest struct {
-	Prompt   string `json:"prompt"`
-	Model    string `json:"model,omitempty"`
-	Duration *int   `json:"duration,omitempty"`
+	Prompt   string                        `json:"prompt"`
+	Model    string                        `json:"model,omitempty"`
+	Duration *int                          `json:"duration,omitempty"`
+	Size     string                        `json:"size,omitempty"`
+	Content  []relaycommon.TaskContentItem `json:"content,omitempty"`
 }
 
 type taskUsageResponse struct {
@@ -54,9 +58,20 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 	if err := common.UnmarshalBodyReusable(c, &input); err != nil {
 		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
 	}
-	if strings.TrimSpace(input.Prompt) == "" {
+	req := relaycommon.TaskSubmitReq{
+		Prompt:  input.Prompt,
+		Model:   input.Model,
+		Size:    input.Size,
+		Content: input.Content,
+	}
+	summary, err := req.ParseVideoContent()
+	if err != nil {
+		return service.TaskErrorWrapperLocal(err, "invalid_request", http.StatusBadRequest)
+	}
+	if summary.Prompt == "" {
 		return service.TaskErrorWrapperLocal(fmt.Errorf("prompt is required"), "invalid_request", http.StatusBadRequest)
 	}
+	req.Prompt = summary.Prompt
 
 	if input.Duration == nil || *input.Duration <= 0 {
 		return service.TaskErrorWrapperLocal(
@@ -66,15 +81,44 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		)
 	}
 
-	req := relaycommon.TaskSubmitReq{
-		Prompt:   input.Prompt,
-		Model:    input.Model,
-		Duration: *input.Duration,
-	}
+	req.Duration = *input.Duration
 
 	info.Action = "generate"
 	c.Set("task_request", req)
 	return nil
+}
+
+func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayInfo) (io.Reader, error) {
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil, err
+	}
+	body, err := a.TaskAdaptor.BuildRequestBody(c, info)
+	if err != nil || len(req.Content) == 0 {
+		return body, err
+	}
+
+	var payload map[string]any
+	if err := common.DecodeJson(body, &payload); err != nil {
+		return nil, err
+	}
+	// ArtsAPI forwards native content as a whole; keep the effective prompt in
+	// that array instead of mixing it with the simplified prompt/images form.
+	content := []relaycommon.TaskContentItem{{Type: "text", Text: req.Prompt}}
+	for _, item := range req.Content {
+		if strings.TrimSpace(item.Type) != "text" {
+			content = append(content, item)
+		}
+	}
+	payload["content"] = content
+	for _, key := range []string{"prompt", "image", "images", "image_urls", "videos", "audios"} {
+		delete(payload, key)
+	}
+	data, err := common.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.NewReader(data), nil
 }
 
 func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {

@@ -102,6 +102,9 @@ const extendedModelFormSchema = z.object({
   description: z.string(),
   icon: z.string(),
   tags: z.array(z.string()),
+  function_tags: z.string(),
+  max_prompt_tokens: z.string(),
+  max_completion_tokens: z.string(),
   vendor_id: z.number().optional(),
   endpoints: z.string(),
   name_rule: z.number(),
@@ -268,6 +271,9 @@ export function ModelMutateDrawer({
       description: '',
       icon: '',
       tags: [],
+      function_tags: '',
+      max_prompt_tokens: '',
+      max_completion_tokens: '',
       vendor_id: undefined,
       endpoints: '',
       name_rule: 0,
@@ -328,6 +334,9 @@ export function ModelMutateDrawer({
         description: model.description || '',
         icon: model.icon || '',
         tags: parseModelTags(model.tags),
+        function_tags: model.function_tags || '',
+        max_prompt_tokens: model.max_prompt_tokens?.toString() || '',
+        max_completion_tokens: model.max_completion_tokens?.toString() || '',
         vendor_id: model.vendor_id,
         endpoints: model.endpoints || '',
         name_rule: model.name_rule || 0,
@@ -432,6 +441,9 @@ export function ModelMutateDrawer({
         description: '',
         icon: '',
         tags: [],
+        function_tags: '',
+        max_prompt_tokens: '',
+        max_completion_tokens: '',
         vendor_id: undefined,
         endpoints: '',
         name_rule: 0,
@@ -458,6 +470,12 @@ export function ModelMutateDrawer({
           tags: Array.isArray(values.tags) ? values.tags.join(',') : '',
           status: values.status ? 1 : 0,
           sync_official: values.sync_official ? 1 : 0,
+          max_prompt_tokens: values.max_prompt_tokens
+            ? Number(values.max_prompt_tokens)
+            : null,
+          max_completion_tokens: values.max_completion_tokens
+            ? Number(values.max_completion_tokens)
+            : null,
         }
 
         // Remove ratio fields from model data (they're stored in system settings)
@@ -855,6 +873,77 @@ export function ModelMutateDrawer({
                   )}
                 />
               </SideDrawerSection>
+            )}
+
+            {canManageModels && (
+              <div className='grid gap-4 sm:grid-cols-3'>
+                <FormField
+                  control={form.control}
+                  name='function_tags'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Function Tags')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder={t('Function Calling,Reasoning,Vision')}
+                          maxLength={512}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription className='text-xs'>
+                        {t('Comma-separated capability tags')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='max_prompt_tokens'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Max Prompt Tokens')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          max={Number.MAX_SAFE_INTEGER}
+                          step={1}
+                          placeholder='128000'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription className='text-xs'>
+                        {t('Maximum input context length')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='max_completion_tokens'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Max Completion Tokens')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={1}
+                          max={Number.MAX_SAFE_INTEGER}
+                          step={1}
+                          placeholder='16384'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription className='text-xs'>
+                        {t('Maximum output completion length')}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             )}
 
             {/* Matching Configuration */}

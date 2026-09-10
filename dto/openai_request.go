@@ -441,6 +441,30 @@ const (
 	//ContentTypeAudioUrl   = "audio_url"
 )
 
+// IsThinkingDisabled reports whether the client explicitly asked to turn
+// thinking off, using any of the common vendor spellings:
+//   - OpenAI:        "reasoning_effort": "none"
+//   - Claude/Doubao: "thinking": {"type": "disabled"}
+//   - Qwen:          "enable_thinking": false
+func (r *GeneralOpenAIRequest) IsThinkingDisabled() bool {
+	if r == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(r.ReasoningEffort), "none") {
+		return true
+	}
+	if len(r.THINKING) > 0 {
+		var thinking Thinking
+		if err := json.Unmarshal(r.THINKING, &thinking); err == nil && strings.EqualFold(thinking.Type, "disabled") {
+			return true
+		}
+	}
+	if len(r.EnableThinking) > 0 && strings.TrimSpace(string(r.EnableThinking)) == "false" {
+		return true
+	}
+	return false
+}
+
 func (m *Message) GetReasoningContent() string {
 	if m.ReasoningContent == nil && m.Reasoning == nil {
 		return ""

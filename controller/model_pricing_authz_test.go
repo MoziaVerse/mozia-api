@@ -73,45 +73,22 @@ func TestGetModelPricingOptionsExposesOnlyPricingKeys(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.Success)
-	foundTaskBilling := false
-	foundVideoInputRatio := false
-	foundReferenceVideoPrice := false
-	foundBillingMode := false
-	foundBillingExpr := false
-	foundOfficialPricing := false
+	values := make(map[string]string, len(response.Data))
 	for _, option := range response.Data {
 		assert.NotEqual(t, "SMTPToken", option.Key)
 		assert.NotEqual(t, "must-not-leak", option.Value)
-		if option.Key == "billing_setting.task_billing" {
-			foundTaskBilling = true
-			assert.JSONEq(t, `{ "video-test": { "version": 1, "mode": "per_request" } }`, option.Value)
-		}
-		if option.Key == "VideoInputRatio" {
-			foundVideoInputRatio = true
-			assert.JSONEq(t, `{ "video-test": 0.6 }`, option.Value)
-		}
-		if option.Key == "ReferenceVideoPrice" {
-			foundReferenceVideoPrice = true
-			assert.JSONEq(t, `{ "video-test": 0.08 }`, option.Value)
-		}
-		if option.Key == "billing_setting.billing_mode" {
-			foundBillingMode = true
-			assert.JSONEq(t, `{ "tiered-test": "tiered_expr" }`, option.Value)
-		}
-		if option.Key == "billing_setting.billing_expr" {
-			foundBillingExpr = true
-			assert.JSONEq(t, `{ "tiered-test": "tier(\"base\", p * 1.5 + c * 6)" }`, option.Value)
-		}
-		if option.Key == billing_setting.OfficialPricingOptionKey {
-			foundOfficialPricing = true
-		}
+		values[option.Key] = option.Value
 	}
-	assert.True(t, foundTaskBilling)
-	assert.True(t, foundVideoInputRatio)
-	assert.True(t, foundReferenceVideoPrice)
-	assert.True(t, foundBillingMode)
-	assert.True(t, foundBillingExpr)
-	assert.True(t, foundOfficialPricing)
+	for key, expected := range map[string]string{
+		"billing_setting.task_billing": `{ "video-test": { "version": 1, "mode": "per_request" } }`,
+		"VideoInputRatio":              `{ "video-test": 0.6 }`,
+		"ReferenceVideoPrice":          `{ "video-test": 0.08 }`,
+		"billing_setting.billing_mode": `{ "tiered-test": "tiered_expr" }`,
+		"billing_setting.billing_expr": `{ "tiered-test": "tier(\"base\", p * 1.5 + c * 6)" }`,
+	} {
+		assert.JSONEq(t, expected, values[key])
+	}
+	assert.Contains(t, values, billing_setting.OfficialPricingOptionKey)
 }
 
 func TestUpdateModelPricingOptionRejectsInvalidBillingExpression(t *testing.T) {

@@ -5262,6 +5262,15 @@
     "Fallback mode": "Режим переключения",
     "Thinking disabled": "Рассуждение отключено",
     "Always": "Всегда",
-    "Standard fallback": "Обычное переключение"
+    "Standard fallback": "Обычное переключение",
+    "Comma-separated capability tags": "Теги возможностей через запятую",
+    "Function Calling,Reasoning,Vision": "Function Calling,Reasoning,Vision",
+    "Function Tags": "Теги возможностей",
+    "Max Completion": "Макс. завершение",
+    "Max Completion Tokens": "Макс. токенов завершения",
+    "Max Prompt": "Макс. промпт",
+    "Max Prompt Tokens": "Макс. токенов промпта",
+    "Maximum input context length": "Максимальная длина входного контекста",
+    "Maximum output completion length": "Максимальная длина завершения"
   }
 }

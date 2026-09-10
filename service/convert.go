@@ -91,14 +91,53 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	// Convert messages
 	openAIMessages := make([]dto.Message, 0)
 
+	// 渠道级兼容开关，默认关闭。Claude Code 在带工具的请求里会把运行时上下文（它自己
+	// 生成的可用 agent 类型清单）作为 role="system" 的消息放进 messages —— Anthropic 的
+	// messages 规范里并没有这个角色。
+	//
+	// 默认原样透传：对接受中途 system 的上游，把它提前会把「自此生效」变成「全程生效」，
+	// 改变提示词作用范围。只有强制 system 必须在首条的上游（自建 Qwen 推理服务等）才
+	// 需要开启，否则它们会直接回 400 "System message must be at the beginning."。
+	mergeInlineSystem := info.ChannelOtherSettings.MergeInlineSystemMessage
+	inlineSystem := ""
+	if mergeInlineSystem {
+		inlineParts := make([]string, 0, len(claudeRequest.Messages))
+		for _, m := range claudeRequest.Messages {
+			if m.Role != "system" {
+				continue
+			}
+			if m.IsStringContent() {
+				if text := m.GetStringContent(); text != "" {
+					inlineParts = append(inlineParts, text)
+				}
+				continue
+			}
+			// 与下方消息循环同样的处理：解析失败是请求本身有问题，不能吞掉
+			contents, err := m.ParseContent()
+			if err != nil {
+				return nil, err
+			}
+			for _, c := range contents {
+				if c.Type != "text" && c.Type != "input_text" {
+					continue
+				}
+				if text := c.GetText(); text != "" {
+					inlineParts = append(inlineParts, text)
+				}
+			}
+		}
+		inlineSystem = strings.Join(inlineParts, "\n")
+	}
+
 	// Add system message if present
 	if claudeRequest.System != nil {
 		if claudeRequest.IsStringSystem() && claudeRequest.GetStringSystem() != "" {
 			openAIMessage := dto.Message{
 				Role: "system",
 			}
-			openAIMessage.SetStringContent(claudeRequest.GetStringSystem())
+			openAIMessage.SetStringContent(joinSystemText(claudeRequest.GetStringSystem(), inlineSystem))
 			openAIMessages = append(openAIMessages, openAIMessage)
+			inlineSystem = ""
 		} else {
 			systems := claudeRequest.ParseSystem()
 			if len(systems) > 0 {
@@ -116,6 +155,12 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 						}
 						systemMediaMessages = append(systemMediaMessages, message)
 					}
+					if inlineSystem != "" {
+						systemMediaMessages = append(systemMediaMessages, dto.MediaContent{
+							Type: "text",
+							Text: inlineSystem,
+						})
+					}
 					openAIMessage.SetMediaContent(systemMediaMessages)
 				} else {
 					systemStr := ""
@@ -124,13 +169,26 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 							systemStr += *system.Text
 						}
 					}
-					openAIMessage.SetStringContent(systemStr)
+					openAIMessage.SetStringContent(joinSystemText(systemStr, inlineSystem))
 				}
 				openAIMessages = append(openAIMessages, openAIMessage)
+				inlineSystem = ""
 			}
 		}
 	}
+
+	// System 缺省、或非空却解析不出任何内容时，上面两条装配路径都不会执行；
+	// 此时中途 system 仍要落到首条，否则内容会被静默丢弃。
+	if inlineSystem != "" {
+		sysMsg := dto.Message{Role: "system"}
+		sysMsg.SetStringContent(inlineSystem)
+		openAIMessages = append(openAIMessages, sysMsg)
+	}
 	for _, claudeMessage := range claudeRequest.Messages {
+		// 已并入首条，跳过；开关关闭时保持原样透传
+		if mergeInlineSystem && claudeMessage.Role == "system" {
+			continue
+		}
 		openAIMessage := dto.Message{
 			Role: claudeMessage.Role,
 		}
@@ -216,6 +274,17 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	return &openAIRequest, nil
 }
 
+// joinSystemText 拼接两段 system 文本，任一为空时不引入多余分隔符。
+func joinSystemText(base, extra string) string {
+	if base == "" {
+		return extra
+	}
+	if extra == "" {
+		return base
+	}
+	return base + "\n" + extra
+}
+
 func generateStopBlock(index int) *dto.ClaudeResponse {
 	return &dto.ClaudeResponse{
 		Type:  "content_block_stop",
@@ -232,8 +301,22 @@ func buildClaudeUsageFromOpenAIUsage(oaiUsage *dto.Usage) *dto.ClaudeUsage {
 		oaiUsage.ClaudeCacheCreation5mTokens,
 		oaiUsage.ClaudeCacheCreation1hTokens,
 	)
+	// 两种协议对 input 的口径不同：OpenAI 的 prompt_tokens 是**总量**（含 cached_tokens），
+	// Anthropic 的 input_tokens 只算**未命中缓存**的部分，缓存命中单独放在
+	// cache_read_input_tokens。上游按 OpenAI 口径回来时，直接把 prompt_tokens 填进
+	// input_tokens 再另报 cache_read，客户端一相加就把命中缓存的部分算了两遍——
+	// Claude Code 用这个和估算上下文占用，命中率一高就被高估近一倍，触发反复自动压缩
+	// （"Autocompact is thrashing"）。这里按 Anthropic 口径把缓存部分从 input 里扣掉。
+	// 反向转换（relay-claude.go 的 buildOpenAIStyleUsageFromClaudeUsage）做的是相加，两边对称。
+	inputTokens := oaiUsage.PromptTokens
+	if oaiUsage.UsageSemantic != "anthropic" {
+		inputTokens = lo.Max([]int{
+			oaiUsage.PromptTokens - oaiUsage.PromptTokensDetails.CachedTokens - oaiUsage.PromptTokensDetails.CachedCreationTokens,
+			0,
+		})
+	}
 	usage := &dto.ClaudeUsage{
-		InputTokens:              oaiUsage.PromptTokens,
+		InputTokens:              inputTokens,
 		OutputTokens:             oaiUsage.CompletionTokens,
 		CacheCreationInputTokens: oaiUsage.PromptTokensDetails.CachedCreationTokens,
 		CacheReadInputTokens:     oaiUsage.PromptTokensDetails.CachedTokens,
@@ -330,6 +413,12 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 					toolCall = dto.ToolCallResponse{}
 				}
 			}
+			// 首块就是工具调用：本段以它的 index 为基准，后续并行工具（index 1、2…）才能落到相邻块
+			info.ClaudeConvertInfo.ToolCallSegmentFirstIndex = 0
+			if toolCall.Index != nil {
+				info.ClaudeConvertInfo.ToolCallSegmentFirstIndex = *toolCall.Index
+			}
+			info.ClaudeConvertInfo.ToolCallSegmentFirstIndexSet = true
 			resp := &dto.ClaudeResponse{
 				Type: "content_block_start",
 				ContentBlock: &dto.ClaudeMediaMessage{
@@ -483,6 +572,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 				stopOpenBlocksAndAdvance()
 				info.ClaudeConvertInfo.ToolCallBaseIndex = info.ClaudeConvertInfo.Index
 				info.ClaudeConvertInfo.ToolCallMaxIndexOffset = 0
+				info.ClaudeConvertInfo.ToolCallSegmentFirstIndexSet = false
 			}
 			info.ClaudeConvertInfo.LastMessagesType = relaycommon.LastMessageTypeTools
 			base := info.ClaudeConvertInfo.ToolCallBaseIndex
@@ -491,7 +581,15 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 			for i, toolCall := range toolCalls {
 				offset := 0
 				if toolCall.Index != nil {
-					offset = *toolCall.Index
+					// index 按整条消息累计，本段内相对首个 tool_call 归零（见 ClaudeConvertInfo 注释）
+					if !info.ClaudeConvertInfo.ToolCallSegmentFirstIndexSet {
+						info.ClaudeConvertInfo.ToolCallSegmentFirstIndex = *toolCall.Index
+						info.ClaudeConvertInfo.ToolCallSegmentFirstIndexSet = true
+					}
+					offset = *toolCall.Index - info.ClaudeConvertInfo.ToolCallSegmentFirstIndex
+					if offset < 0 {
+						offset = 0
+					}
 				} else {
 					offset = i
 				}
