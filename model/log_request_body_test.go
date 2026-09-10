@@ -44,7 +44,8 @@ func TestCaptureRequestBodyLogRedactsSecretsAndInlineData(t *testing.T) {
 }
 
 func TestCaptureRequestBodyLogOmitsOversizedBody(t *testing.T) {
-	body := `{"prompt":"` + strings.Repeat("a", int(requestBodyLogLimit)) + `"}`
+	const size = 1536*1024 + 1
+	body := `{"prompt":"` + strings.Repeat("a", size-len(`{"prompt":""}`)) + `"}`
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -55,12 +56,12 @@ func TestCaptureRequestBodyLogOmitsOversizedBody(t *testing.T) {
 
 	requestBody, ok := other["request_body"].(map[string]any)
 	require.True(t, ok)
-	assert.Contains(t, requestBody["_omitted"], "exceeds")
+	assert.Equal(t, "request body exceeds 1572864 byte log limit", requestBody["_omitted"])
 	assert.Equal(t, int64(len(body)), requestBody["_size_bytes"])
 }
 
-func TestCaptureRequestBodyLogCaptures320786ByteBody(t *testing.T) {
-	const size = 320786
+func TestCaptureRequestBodyLogCapturesBodyAtSizeLimit(t *testing.T) {
+	const size = 1536 * 1024
 	body := `{"prompt":"` + strings.Repeat("a", size-len(`{"prompt":""}`)) + `"}`
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
