@@ -11,7 +11,7 @@ import (
 
 const (
 	requestBodyLogContextKey = "request_body_log_snapshot"
-	requestBodyLogLimit      = int64(512 * 1024)
+	requestBodyLogLimit      = int64(1536 * 1024)
 )
 
 // CaptureRequestBodyLog captures the original client JSON before relay
