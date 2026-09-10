@@ -8,10 +8,13 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 const resellerTaskDefaultPage = 1
@@ -27,50 +30,63 @@ type resellerUsageResponse struct {
 	SubagentSpend []resellerSubagentSpendResponse `json:"subagent_spend"`
 }
 
+type resellerUsageEarningsResponse struct {
+	WholesaleQuota        string `json:"wholesale_quota"`
+	WholesaleQuotaDisplay string `json:"wholesale_quota_display"`
+	MarginQuota           string `json:"margin_quota"`
+	MarginQuotaDisplay    string `json:"margin_quota_display"`
+	MarginRate            string `json:"margin_rate"`
+}
+
 type resellerDailySpendResponse struct {
 	Date          string `json:"date"`
 	CustomerQuota string `json:"customer_quota"`
 }
 
 type resellerSubagentSpendResponse struct {
-	SubagentMemberId     int    `json:"subagent_member_id"`
-	RequestCount         string `json:"request_count"`
-	TotalTokens          string `json:"total_tokens"`
-	CustomerQuota        string `json:"customer_quota"`
-	CustomerQuotaDisplay string `json:"customer_quota_display"`
+	Earnings             *resellerUsageEarningsResponse `json:"earnings,omitempty"`
+	SubagentMemberId     int                            `json:"subagent_member_id"`
+	RequestCount         string                         `json:"request_count"`
+	TotalTokens          string                         `json:"total_tokens"`
+	CustomerQuota        string                         `json:"customer_quota"`
+	CustomerQuotaDisplay string                         `json:"customer_quota_display"`
 }
 
 type resellerCustomerSpendResponse struct {
-	CustomerId           int    `json:"customer_id"`
-	CustomerQuota        string `json:"customer_quota"`
-	CustomerQuotaDisplay string `json:"customer_quota_display"`
+	Earnings             *resellerUsageEarningsResponse `json:"earnings,omitempty"`
+	CustomerId           int                            `json:"customer_id"`
+	CustomerQuota        string                         `json:"customer_quota"`
+	CustomerQuotaDisplay string                         `json:"customer_quota_display"`
 }
 
 type resellerModelSpendResponse struct {
-	Model                string `json:"model"`
-	CustomerQuota        string `json:"customer_quota"`
-	CustomerQuotaDisplay string `json:"customer_quota_display"`
+	Earnings             *resellerUsageEarningsResponse `json:"earnings,omitempty"`
+	Model                string                         `json:"model"`
+	CustomerQuota        string                         `json:"customer_quota"`
+	CustomerQuotaDisplay string                         `json:"customer_quota_display"`
 }
 
 type resellerUsageSummaryResponse struct {
-	RequestCount         string `json:"request_count"`
-	PromptTokens         string `json:"prompt_tokens"`
-	CompletionTokens     string `json:"completion_tokens"`
-	TotalTokens          string `json:"total_tokens"`
-	CustomerQuota        string `json:"customer_quota"`
-	CustomerQuotaDisplay string `json:"customer_quota_display"`
-	ModelCount           int    `json:"model_count"`
+	Earnings             *resellerUsageEarningsResponse `json:"earnings,omitempty"`
+	RequestCount         string                         `json:"request_count"`
+	PromptTokens         string                         `json:"prompt_tokens"`
+	CompletionTokens     string                         `json:"completion_tokens"`
+	TotalTokens          string                         `json:"total_tokens"`
+	CustomerQuota        string                         `json:"customer_quota"`
+	CustomerQuotaDisplay string                         `json:"customer_quota_display"`
+	ModelCount           int                            `json:"model_count"`
 }
 
 type resellerUsageItemResponse struct {
-	CustomerId           int    `json:"customer_id"`
-	Model                string `json:"model"`
-	RequestCount         string `json:"request_count"`
-	PromptTokens         string `json:"prompt_tokens"`
-	CompletionTokens     string `json:"completion_tokens"`
-	TotalTokens          string `json:"total_tokens"`
-	CustomerQuota        string `json:"customer_quota"`
-	CustomerQuotaDisplay string `json:"customer_quota_display"`
+	Earnings             *resellerUsageEarningsResponse `json:"earnings,omitempty"`
+	CustomerId           int                            `json:"customer_id"`
+	Model                string                         `json:"model"`
+	RequestCount         string                         `json:"request_count"`
+	PromptTokens         string                         `json:"prompt_tokens"`
+	CompletionTokens     string                         `json:"completion_tokens"`
+	TotalTokens          string                         `json:"total_tokens"`
+	CustomerQuota        string                         `json:"customer_quota"`
+	CustomerQuotaDisplay string                         `json:"customer_quota_display"`
 }
 
 func GetResellerManagementUsage(c *gin.Context) {
@@ -106,7 +122,7 @@ func GetResellerManagementUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	response, err := resellerUsageResponseFor(resellerContext.ResellerId, customerId, startTimestamp, endTimestamp, modelName, subagentMemberId)
+	response, err := resellerUsageResponseFor(resellerContext.ResellerId, customerId, startTimestamp, endTimestamp, modelName, subagentMemberId, resellerManagementWriteAllowed(resellerContext.Role))
 	if err != nil {
 		handleResellerUsageError(c, err)
 		return
@@ -142,7 +158,7 @@ func GetResellerPlatformUsage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	response, err := resellerUsageResponseFor(resellerId, customerId, startTimestamp, endTimestamp, modelName, nil)
+	response, err := resellerUsageResponseFor(resellerId, customerId, startTimestamp, endTimestamp, modelName, nil, true)
 	if err != nil {
 		handleResellerUsageError(c, err)
 		return
@@ -150,13 +166,14 @@ func GetResellerPlatformUsage(c *gin.Context) {
 	writeResellerAdminSuccess(c, http.StatusOK, response)
 }
 
-func resellerUsageResponseFor(resellerId int, customerId *int, startTimestamp *int64, endTimestamp *int64, modelName *string, subagentMemberId *int) (*resellerUsageResponse, error) {
+func resellerUsageResponseFor(resellerId int, customerId *int, startTimestamp *int64, endTimestamp *int64, modelName *string, subagentMemberId *int, includeEarnings bool) (*resellerUsageResponse, error) {
 	result, err := model.ListResellerUsage(resellerId, customerId, startTimestamp, endTimestamp, modelName, subagentMemberId)
 	if err != nil {
 		return nil, err
 	}
 	return &resellerUsageResponse{
 		Summary: resellerUsageSummaryResponse{
+			Earnings:             resellerUsageEarnings(result.Summary.CustomerQuota, result.Summary.WholesaleQuota, includeEarnings),
 			RequestCount:         strconv.FormatInt(result.Summary.RequestCount, 10),
 			PromptTokens:         strconv.FormatInt(result.Summary.PromptTokens, 10),
 			CompletionTokens:     strconv.FormatInt(result.Summary.CompletionTokens, 10),
@@ -165,11 +182,11 @@ func resellerUsageResponseFor(resellerId int, customerId *int, startTimestamp *i
 			CustomerQuotaDisplay: formatResellerUsageQuota(result.Summary.CustomerQuota),
 			ModelCount:           result.Summary.ModelCount,
 		},
-		Items:         resellerUsageItemsResponse(result.Items),
+		Items:         resellerUsageItemsResponse(result.Items, includeEarnings),
 		DailySpend:    resellerDailySpendResponses(result.DailySpend),
-		CustomerSpend: resellerCustomerSpendResponseFromItems(result.Items),
-		ModelSpend:    resellerModelSpendResponseFromItems(result.Items),
-		SubagentSpend: resellerSubagentSpendResponses(result.SubagentSpend),
+		CustomerSpend: resellerCustomerSpendResponseFromItems(result.Items, includeEarnings),
+		ModelSpend:    resellerModelSpendResponseFromItems(result.Items, includeEarnings),
+		SubagentSpend: resellerSubagentSpendResponses(result.SubagentSpend, includeEarnings),
 	}, nil
 }
 
@@ -257,10 +274,11 @@ func resellerUsageSubagentMemberID(c *gin.Context, resellerContext *model.Resell
 	return requested, true
 }
 
-func resellerSubagentSpendResponses(items []model.ResellerSubagentUsageSpend) []resellerSubagentSpendResponse {
+func resellerSubagentSpendResponses(items []model.ResellerSubagentUsageSpend, includeEarnings bool) []resellerSubagentSpendResponse {
 	response := make([]resellerSubagentSpendResponse, 0, len(items))
 	for _, item := range items {
 		response = append(response, resellerSubagentSpendResponse{
+			Earnings:             resellerUsageEarnings(item.CustomerQuota, item.WholesaleQuota, includeEarnings),
 			SubagentMemberId:     item.SubagentMemberId,
 			RequestCount:         strconv.FormatInt(item.RequestCount, 10),
 			TotalTokens:          strconv.FormatInt(item.TotalTokens, 10),
@@ -271,10 +289,11 @@ func resellerSubagentSpendResponses(items []model.ResellerSubagentUsageSpend) []
 	return response
 }
 
-func resellerUsageItemsResponse(items []model.ResellerUsageItem) []resellerUsageItemResponse {
+func resellerUsageItemsResponse(items []model.ResellerUsageItem, includeEarnings bool) []resellerUsageItemResponse {
 	response := make([]resellerUsageItemResponse, 0, len(items))
 	for _, item := range items {
 		response = append(response, resellerUsageItemResponse{
+			Earnings:             resellerUsageEarnings(item.CustomerQuota, item.WholesaleQuota, includeEarnings),
 			CustomerId:           item.CustomerId,
 			Model:                item.Model,
 			RequestCount:         strconv.FormatInt(item.RequestCount, 10),
@@ -288,14 +307,19 @@ func resellerUsageItemsResponse(items []model.ResellerUsageItem) []resellerUsage
 	return response
 }
 
-func resellerCustomerSpendResponseFromItems(items []model.ResellerUsageItem) []resellerCustomerSpendResponse {
-	totals := make(map[int]int64)
+func resellerCustomerSpendResponseFromItems(items []model.ResellerUsageItem, includeEarnings bool) []resellerCustomerSpendResponse {
+	totals := make(map[int]model.ResellerUsageSummary)
 	for _, item := range items {
-		totals[item.CustomerId] += item.CustomerQuota
+		total := totals[item.CustomerId]
+		total.CustomerQuota += item.CustomerQuota
+		total.WholesaleQuota += item.WholesaleQuota
+		totals[item.CustomerId] = total
 	}
 	response := make([]resellerCustomerSpendResponse, 0, len(totals))
-	for customerId, quota := range totals {
+	for customerId, total := range totals {
+		quota := total.CustomerQuota
 		response = append(response, resellerCustomerSpendResponse{
+			Earnings:             resellerUsageEarnings(total.CustomerQuota, total.WholesaleQuota, includeEarnings),
 			CustomerId:           customerId,
 			CustomerQuota:        strconv.FormatInt(quota, 10),
 			CustomerQuotaDisplay: formatResellerUsageQuota(quota),
@@ -312,14 +336,19 @@ func resellerCustomerSpendResponseFromItems(items []model.ResellerUsageItem) []r
 	return response
 }
 
-func resellerModelSpendResponseFromItems(items []model.ResellerUsageItem) []resellerModelSpendResponse {
-	totals := make(map[string]int64)
+func resellerModelSpendResponseFromItems(items []model.ResellerUsageItem, includeEarnings bool) []resellerModelSpendResponse {
+	totals := make(map[string]model.ResellerUsageSummary)
 	for _, item := range items {
-		totals[item.Model] += item.CustomerQuota
+		total := totals[item.Model]
+		total.CustomerQuota += item.CustomerQuota
+		total.WholesaleQuota += item.WholesaleQuota
+		totals[item.Model] = total
 	}
 	response := make([]resellerModelSpendResponse, 0, len(totals))
-	for modelName, quota := range totals {
+	for modelName, total := range totals {
+		quota := total.CustomerQuota
 		response = append(response, resellerModelSpendResponse{
+			Earnings:             resellerUsageEarnings(total.CustomerQuota, total.WholesaleQuota, includeEarnings),
 			Model:                modelName,
 			CustomerQuota:        strconv.FormatInt(quota, 10),
 			CustomerQuotaDisplay: formatResellerUsageQuota(quota),
@@ -398,11 +427,37 @@ func optionalSafeQueryText(c *gin.Context, name string) (*string, bool) {
 	return &value, true
 }
 
+// resellerUsageEarnings reports the frozen usage-price spread, not cash profit or a payable balance.
+func resellerUsageEarnings(customerQuota int64, wholesaleQuota int64, allowed bool) *resellerUsageEarningsResponse {
+	if !allowed {
+		return nil
+	}
+	margin := customerQuota - wholesaleQuota
+	rate := "—"
+	if customerQuota > 0 {
+		rate = decimal.NewFromInt(margin).Mul(decimal.NewFromInt(100)).Div(decimal.NewFromInt(customerQuota)).StringFixed(2) + "%"
+	}
+	return &resellerUsageEarningsResponse{
+		WholesaleQuota:        strconv.FormatInt(wholesaleQuota, 10),
+		WholesaleQuotaDisplay: formatResellerUsageQuota(wholesaleQuota),
+		MarginQuota:           strconv.FormatInt(margin, 10),
+		MarginQuotaDisplay:    formatResellerUsageQuota(margin),
+		MarginRate:            rate,
+	}
+}
+
 func formatResellerUsageQuota(quota int64) string {
-	if int64(int(quota)) != quota {
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		return strconv.FormatInt(quota, 10)
 	}
-	return logger.FormatQuota(int(quota))
+	value := decimal.NewFromInt(quota).Div(decimal.NewFromFloat(common.QuotaPerUnit))
+	symbol := "＄"
+	switch operation_setting.GetQuotaDisplayType() {
+	case operation_setting.QuotaDisplayTypeCNY, operation_setting.QuotaDisplayTypeCustom:
+		symbol = operation_setting.GetCurrencySymbol()
+	}
+	value = value.Mul(decimal.NewFromFloat(operation_setting.GetUsdToCurrencyRate(operation_setting.USDExchangeRate)))
+	return symbol + value.StringFixed(6)
 }
 
 func handleResellerUsageError(c *gin.Context, err error) {
