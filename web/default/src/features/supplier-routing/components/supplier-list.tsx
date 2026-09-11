@@ -25,7 +25,6 @@ import {
   type ColumnDef,
 } from '@tanstack/react-table'
 import { useMemo } from 'react'
-import { useFormContext, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -47,16 +46,13 @@ type SupplierRow = SupplierConfigValues['suppliers'][number] & {
 }
 
 export function SupplierList(props: {
+  config: SupplierConfigValues
   readOnly: boolean
   onEdit: (id: number) => void
   onDelete: (id: number) => void
 }) {
   const { t } = useTranslation()
-  const { control } = useFormContext<SupplierConfigValues>()
-  const [suppliers, pools, bindings, rules] = useWatch({
-    control,
-    name: ['suppliers', 'pools', 'bindings', 'rules'],
-  })
+  const { suppliers, pools, bindings, rules } = props.config
   const data = useMemo(
     () =>
       suppliers.map((supplier) => {

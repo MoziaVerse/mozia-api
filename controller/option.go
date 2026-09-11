@@ -98,7 +98,7 @@ func GetOptions(c *gin.Context) {
 			strings.HasSuffix(k, "Key") ||
 			strings.HasSuffix(k, "secret") ||
 			strings.HasSuffix(k, "api_key")
-		if isSensitiveKey || k == model.SupplierRoutingOptionKey {
+		if isSensitiveKey || (k == model.SupplierRoutingOptionKey || k == model.SupplierResourceStateKey || k == model.SupplierRoutingSettingsKey) {
 			continue
 		}
 		options = append(options, &model.Option{
@@ -298,7 +298,7 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
-	if option.Key == model.SupplierRoutingOptionKey {
+	if option.Key == model.SupplierRoutingOptionKey || option.Key == model.SupplierResourceStateKey || option.Key == model.SupplierRoutingSettingsKey {
 		common.ApiErrorMsg(c, "Supplier routing must use its dedicated publication endpoint")
 		return
 	}

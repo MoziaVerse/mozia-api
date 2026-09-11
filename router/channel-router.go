@@ -17,6 +17,7 @@ type permissionRoute struct {
 }
 
 func registerChannelRoutes(apiRouter *gin.RouterGroup) {
+	registerSupplierRoutes(apiRouter)
 	channelRoute := apiRouter.Group("/channel")
 	channelRoute.Use(middleware.AdminAuth())
 	channelRoute.GET("/supplier-routing/models/:id", middleware.RequirePermission(authz.ChannelOperate), controller.PreviewSupplierModels)

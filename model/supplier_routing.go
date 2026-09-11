@@ -17,6 +17,7 @@ import (
 const SupplierRoutingOptionKey = "SupplierRoutingPublication"
 
 type Supplier struct {
+	SupplierResourceMeta
 	ID         int64  `json:"id" gorm:"primaryKey"`
 	Name       string `json:"name" gorm:"type:varchar(191)"`
 	Region     string `json:"region" gorm:"type:varchar(191)"`
@@ -43,6 +44,7 @@ type SupplierModelSpec struct {
 }
 
 type SupplierPool struct {
+	SupplierResourceMeta
 	ID                  int64               `json:"id" gorm:"primaryKey"`
 	SupplierID          int64               `json:"supplier_id" gorm:"index"`
 	Name                string              `json:"name" gorm:"type:varchar(191)"`
@@ -57,9 +59,12 @@ type SupplierPool struct {
 }
 
 type SupplierBinding struct {
-	ChannelID int    `json:"channel_id"`
-	Model     string `json:"model"`
-	PoolID    int64  `json:"pool_id"`
+	SupplierResourceMeta
+	ID        int64   `json:"id" gorm:"primaryKey"`
+	ActiveKey *string `json:"-" gorm:"type:varchar(64);uniqueIndex"`
+	ChannelID int     `json:"channel_id" gorm:"index"`
+	Model     string  `json:"model"`
+	PoolID    int64   `json:"pool_id" gorm:"index"`
 }
 
 type SupplierTarget struct {
@@ -77,16 +82,19 @@ type SupplierHealthPolicy struct {
 }
 
 type SupplierRoutingRule struct {
+	SupplierResourceMeta
+	TargetsJSON        string               `json:"-" gorm:"type:text"`
+	HealthJSON         string               `json:"-" gorm:"type:text"`
 	MaxSupplierPercent int64                `json:"max_supplier_percent"`
-	ID                 string               `json:"id"`
+	ID                 string               `json:"id" gorm:"primaryKey;type:varchar(96)"`
 	Model              string               `json:"model"`
 	Group              string               `json:"group"`
 	UserID             int                  `json:"user_id"`
 	Mode               string               `json:"mode"`
-	Targets            []SupplierTarget     `json:"targets"`
+	Targets            []SupplierTarget     `json:"targets" gorm:"-"`
 	MaxAttempts        int                  `json:"max_attempts"`
 	TimeoutSeconds     int64                `json:"timeout_seconds"`
-	Health             SupplierHealthPolicy `json:"health"`
+	Health             SupplierHealthPolicy `json:"health" gorm:"-"`
 }
 
 type SupplierRoutingConfig struct {
@@ -101,10 +109,13 @@ type SupplierRoutingConfig struct {
 }
 
 type RoutingRevision struct {
-	ID         int64  `json:"id" gorm:"primaryKey"`
-	CreatedBy  int    `json:"created_by"`
-	CreatedAt  int64  `json:"created_at"`
-	ConfigJSON string `json:"config_json" gorm:"type:text"`
+	ResourceKind string `json:"resource_kind" gorm:"type:varchar(32)"`
+	ResourceID   string `json:"resource_id" gorm:"type:varchar(96)"`
+	AppliedAt    int64  `json:"applied_at"`
+	ID           int64  `json:"id" gorm:"primaryKey"`
+	CreatedBy    int    `json:"created_by"`
+	CreatedAt    int64  `json:"created_at"`
+	ConfigJSON   string `json:"config_json"`
 }
 
 type SupplierAttempt struct {
@@ -141,7 +152,7 @@ type SupplierAttempt struct {
 
 func ReadSupplierRoutingConfig() (*SupplierRoutingConfig, error) {
 	var option Option
-	err := DB.Where(commonKeyCol+" = ?", SupplierRoutingOptionKey).First(&option).Error
+	err := DB.Where(&Option{Key: SupplierRoutingOptionKey}).First(&option).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return &SupplierRoutingConfig{}, nil
 	}
@@ -156,6 +167,10 @@ func ReadSupplierRoutingConfig() (*SupplierRoutingConfig, error) {
 }
 
 func ValidateSupplierRoutingConfig(cfg *SupplierRoutingConfig) error {
+	return ValidateSupplierRoutingConfigWithDB(DB, cfg)
+}
+
+func ValidateSupplierRoutingConfigWithDB(db *gorm.DB, cfg *SupplierRoutingConfig) error {
 	if len(cfg.Suppliers) > 128 || len(cfg.Pools) > 128 || len(cfg.Bindings) > 256 || len(cfg.Rules) > 128 {
 		return errors.New("supplier routing configuration is too large")
 	}
@@ -207,7 +222,7 @@ func ValidateSupplierRoutingConfig(cfg *SupplierRoutingConfig) error {
 			return errors.New("binding must reference one existing pool per channel/model")
 		}
 		var ch Channel
-		if err := DB.First(&ch, b.ChannelID).Error; err != nil {
+		if err := db.First(&ch, b.ChannelID).Error; err != nil {
 			return fmt.Errorf("binding channel: %w", err)
 		}
 		if ch.Type != constant.ChannelTypeOpenAI {
@@ -285,6 +300,13 @@ func ValidateSupplierRoutingConfig(cfg *SupplierRoutingConfig) error {
 // compare-and-swap. A stale editor cannot overwrite a concurrent publication.
 func PublishSupplierRouting(ctx context.Context, cfg *SupplierRoutingConfig, expected int64, userID int) error {
 	return DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var migrated int64
+		if err := tx.Model(&Option{}).Where(commonKeyCol+" = ?", SupplierResourceStateKey).Count(&migrated).Error; err != nil {
+			return err
+		}
+		if migrated > 0 {
+			return errors.New("whole configuration writes are retired; use supplier resource endpoints")
+		}
 		var current Option
 		err := tx.Where(commonKeyCol+" = ?", SupplierRoutingOptionKey).First(&current).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

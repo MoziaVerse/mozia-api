@@ -39,7 +39,6 @@ export function SuppliersPage() {
   if (config.data) {
     return (
       <SupplierConfigEditor
-        key={config.data.config.revision}
         data={config.data}
         canPublish={hasPermission(user, 'supplier_routing', 'publish')}
         canPreview={hasPermission(user, 'channel', 'operate')}

@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -67,13 +68,18 @@ func TestSupplierDatabaseCompatibility(t *testing.T) {
 					_ = sqlDB.Close()
 				}
 			})
-			tables := []any{&Channel{}, &Option{}, &Supplier{}, &SupplierPool{}, &RoutingRevision{}, &SupplierAttempt{}}
+			tables := []any{&Channel{}, &Option{}, &Supplier{}, &SupplierPool{}, &SupplierBinding{}, &SupplierRoutingRule{}, &RoutingRevision{}, &SupplierAttempt{}}
 			require.NoError(t, db.Migrator().DropTable(tables...))
 			require.NoError(t, db.AutoMigrate(tables...))
 			require.NoError(t, db.AutoMigrate(tables...))
 			channel := Channel{Name: "supplier-db", Type: constant.ChannelTypeOpenAI, Models: "test", Status: common.ChannelStatusEnabled}
 			require.NoError(t, db.Create(&channel).Error)
 			cfg := SupplierRoutingConfig{Suppliers: []Supplier{{ID: 1, Name: "A", Enabled: true}}, Pools: []SupplierPool{{ID: 1, SupplierID: 1, Name: "P", FailureDomain: "dc-a", Enabled: true, Limits: SupplierLimits{Concurrency: 2, RPM: 10, TPM: 10000}, MaxExecutionSeconds: 60, InputSafetyPercent: 110, Acceptance: "verified-test", Models: []SupplierModelSpec{{Name: "test", Version: "v1", ContextTokens: 1000, MaxOutputTokens: 100}}}}, Bindings: []SupplierBinding{{ChannelID: channel.Id, Model: "test", PoolID: 1}}}
+			// The bounded supplier graph can exceed MySQL TEXT's 64 KiB limit.
+			for id := int64(101); id < 106; id++ {
+				cfg.Suppliers = append(cfg.Suppliers, Supplier{ID: id, Name: "large profile", Terms: strings.Repeat("x", 16000)})
+			}
+
 			require.NoError(t, ValidateSupplierRoutingConfig(&cfg))
 			require.NoError(t, PublishSupplierRouting(context.Background(), &cfg, 0, 1))
 			first := cfg.Revision
@@ -93,6 +99,7 @@ func TestSupplierDatabaseCompatibility(t *testing.T) {
 			assert.Error(t, db.Create(&duplicate).Error)
 			cfg.Bindings = nil
 			assert.ErrorContains(t, PublishSupplierRouting(context.Background(), &cfg, cfg.Revision, 1), "pending")
+			verifySupplierResourceMigration(t, db)
 		})
 	}
 }

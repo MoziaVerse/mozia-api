@@ -33,6 +33,11 @@ export type SupplierConfig = {
 
 export type SupplierRoutingData = {
   config: SupplierConfig
+  settings: SupplierResource & {
+    enabled: boolean
+    shadow: boolean
+    canary_percent: number
+  }
   revisions: { id: number; created_at: number; created_by: number }[]
   channels: { id: number; name: string; models: string; type: number }[]
 }
@@ -96,29 +101,6 @@ export async function getSupplierRouting(): Promise<SupplierRoutingData> {
   return response.data.data
 }
 
-export async function saveSupplierRouting(
-  config: SupplierConfig,
-  validate = false
-): Promise<SupplierConfig> {
-  const payload = { expected_revision: config.revision, config }
-  const response = validate
-    ? await api.post<Envelope<SupplierConfig>>(`${base}/validate`, payload)
-    : await api.put<Envelope<SupplierConfig>>(base, payload)
-  if (!response.data.success) throw new Error(response.data.message)
-  return response.data.data
-}
-
-export async function rollbackSupplierRouting(
-  expectedRevision: number,
-  rollbackRevision: number
-): Promise<void> {
-  const response = await api.put<Envelope<unknown>>(base, {
-    expected_revision: expectedRevision,
-    rollback_revision: rollbackRevision,
-  })
-  if (!response.data.success) throw new Error(response.data.message)
-}
-
 export async function getSupplierAttempts(): Promise<SupplierAttempt[]> {
   const response = await api.get<Envelope<SupplierAttempt[]>>(
     `${base}/attempts`
@@ -149,6 +131,145 @@ export async function reconcileSupplierAttempt(
 
 export async function previewSupplierModels(id: number): Promise<unknown> {
   const response = await api.get<Envelope<unknown>>(`${base}/models/${id}`)
+  if (!response.data.success) throw new Error(response.data.message)
+  return response.data.data
+}
+
+export type SupplierResourceKind =
+  | 'supplier'
+  | 'pool'
+  | 'binding'
+  | 'rule'
+  | 'settings'
+export type SupplierResource = {
+  id?: number | string
+  version: number
+  runtime_revision: number
+} & Record<string, unknown>
+export type SupplierResourceResult = {
+  resource: SupplierResource
+  application: 'not_required' | 'applied' | 'pending'
+  revision: number
+  replayed: boolean
+}
+export type SupplierResourceStatus = {
+  target_revision: number
+  applied_revision: number
+  application: 'applied' | 'pending'
+}
+export type SupplierRevision = {
+  id: number
+  resource_kind: string
+  resource_id: string
+  created_at: number
+  applied_at: number
+}
+
+export function supplierResourcePath(
+  kind: SupplierResourceKind,
+  id?: string | number,
+  supplierId?: number
+): string {
+  if (kind === 'settings') return '/api/supplier-routing/settings'
+  if (kind === 'pool' && id === undefined) {
+    return `/api/suppliers/${supplierId}/pools`
+  }
+  const paths = {
+    supplier: '/api/suppliers',
+    pool: '/api/supplier-pools',
+    binding: '/api/supplier-bindings',
+    rule: '/api/supplier-routing/rules',
+  }
+  return id === undefined
+    ? paths[kind]
+    : `${paths[kind]}/${encodeURIComponent(id)}`
+}
+
+export function supplierResourceETag(
+  kind: SupplierResourceKind,
+  resource: SupplierResource
+): string {
+  return `"${kind}-${resource.id ?? 'settings'}-v${resource.version}"`
+}
+
+export async function getSupplierResource(
+  kind: SupplierResourceKind,
+  id?: number | string
+): Promise<SupplierResource> {
+  const response = await api.get<Envelope<SupplierResource>>(
+    supplierResourcePath(kind, id)
+  )
+  if (!response.data.success) throw new Error(response.data.message)
+  return response.data.data
+}
+
+export async function saveSupplierResource(input: {
+  kind: SupplierResourceKind
+  resource?: SupplierResource
+  supplierId?: number
+  payload: unknown
+  idempotencyKey: string
+}): Promise<SupplierResourceResult> {
+  const path = supplierResourcePath(
+    input.kind,
+    input.resource?.id,
+    input.supplierId
+  )
+  const response = input.resource
+    ? await api.patch<Envelope<SupplierResourceResult>>(path, input.payload, {
+        headers: {
+          'If-Match': supplierResourceETag(input.kind, input.resource),
+        },
+      })
+    : await api.post<Envelope<SupplierResourceResult>>(path, input.payload, {
+        headers: { 'Idempotency-Key': input.idempotencyKey },
+      })
+  if (!response.data.success) throw new Error(response.data.message)
+  return response.data.data
+}
+
+export async function deleteSupplierResource(
+  kind: SupplierResourceKind,
+  resource: SupplierResource
+): Promise<SupplierResourceResult> {
+  const response = await api.delete<Envelope<SupplierResourceResult>>(
+    supplierResourcePath(kind, resource.id),
+    { headers: { 'If-Match': supplierResourceETag(kind, resource) } }
+  )
+  if (!response.data.success) throw new Error(response.data.message)
+  return response.data.data
+}
+
+export async function getSupplierResourceStatus(): Promise<SupplierResourceStatus> {
+  const response = await api.get<Envelope<SupplierResourceStatus>>(
+    '/api/supplier-routing/status'
+  )
+  if (!response.data.success) throw new Error(response.data.message)
+  return response.data.data
+}
+
+export async function getSupplierRevisions(
+  kind: SupplierResourceKind,
+  id: string | number
+): Promise<SupplierRevision[]> {
+  const response = await api.get<Envelope<SupplierRevision[]>>(
+    '/api/supplier-routing/revisions',
+    { params: { resource_kind: kind, resource_id: id } }
+  )
+  if (!response.data.success) throw new Error(response.data.message)
+  return response.data.data ?? []
+}
+
+export async function restoreSupplierResource(
+  kind: SupplierResourceKind,
+  resource: SupplierResource,
+  revision: number
+): Promise<SupplierResourceResult> {
+  const response = await api.post<Envelope<SupplierResourceResult>>(
+    `${supplierResourcePath(kind, resource.id)}/restore`,
+    { revision },
+    { headers: { 'If-Match': supplierResourceETag(kind, resource) } }
+  )
   if (!response.data.success) throw new Error(response.data.message)
   return response.data.data
 }

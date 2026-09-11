@@ -20,13 +20,9 @@ import { useFieldArray, useFormContext, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { FieldSet, FieldLegend } from '@/components/ui/field'
 
-import {
-  newSupplierRule,
-  type SupplierConfigValues,
-} from '../lib/config-schema'
+import type { SupplierConfigValues } from '../lib/config-schema'
 import { ConfigField } from './config-fields'
 
 function RuleTargets(props: { index: number }) {
@@ -115,19 +111,17 @@ function RuleTargets(props: { index: number }) {
   )
 }
 
-export function RulesEditor() {
+export function RuleFields(props: { index: number }) {
   const { t } = useTranslation()
   const form = useFormContext<SupplierConfigValues>()
-  const list = useFieldArray({
+  const i = props.index
+  const [rules, bindings] = useWatch({
     control: form.control,
-    name: 'rules',
-    keyName: 'formKey',
+    name: ['rules', 'bindings'],
   })
-  const [rules, suppliers, bindings] = useWatch({
-    control: form.control,
-    name: ['rules', 'suppliers', 'bindings'],
-  })
-  const models = [...new Set(bindings.map((b) => b.model).filter(Boolean))]
+  const models = [
+    ...new Set(bindings.map((binding) => binding.model).filter(Boolean)),
+  ]
   const descriptions = {
     capacity: t(
       'Prefer pools with lower shared capacity usage within the eligible priority tier.'
@@ -140,137 +134,90 @@ export function RulesEditor() {
     ),
   }
   return (
-    <div className='space-y-4'>
-      <p className='text-muted-foreground text-sm'>
-        {t(
-          'Rules match model, group and customer. Customer rules take precedence over group rules, followed by model rules.'
-        )}
-      </p>
-      {list.fields.map((item, i) => (
-        <Card key={item.formKey}>
-          <CardHeader className='flex-row items-center justify-between'>
-            <CardTitle>{rules[i]?.id || t('New routing rule')}</CardTitle>
-            <Button
-              type='button'
-              variant='ghost'
-              size='sm'
-              onClick={() => list.remove(i)}
-            >
-              {t('Delete')}
-            </Button>
-          </CardHeader>
-          <CardContent className='space-y-5'>
-            <div className='grid gap-4 sm:grid-cols-2'>
-              <ConfigField name={`rules.${i}.id`} label={t('Rule name')} />
-              <ConfigField
-                name={`rules.${i}.model`}
-                label={t('Model')}
-                options={models.map((m) => ({ value: m, label: m }))}
-              />
-              <ConfigField
-                name={`rules.${i}.group`}
-                label={t('Group')}
-                description={t('Leave blank to match all groups.')}
-              />
-              <ConfigField
-                name={`rules.${i}.user_id`}
-                type='number'
-                min={0}
-                label={t('Customer ID')}
-                description={t('Zero matches all customers.')}
-              />
-            </div>
+    <div className='space-y-5'>
+      <div className='grid gap-4 sm:grid-cols-2'>
+        <ConfigField
+          name={`rules.${i}.model`}
+          label={t('Model')}
+          options={models.map((m) => ({ value: m, label: m }))}
+        />
+        <ConfigField
+          name={`rules.${i}.group`}
+          label={t('Group')}
+          description={t('Leave blank to match all groups.')}
+        />
+        <ConfigField
+          name={`rules.${i}.user_id`}
+          type='number'
+          min={0}
+          label={t('Customer ID')}
+          description={t('Zero matches all customers.')}
+        />
+      </div>
+      <ConfigField
+        name={`rules.${i}.mode`}
+        label={t('Routing strategy')}
+        options={[
+          { value: 'capacity', label: t('Capacity balancing') },
+          { value: 'share', label: t('Supplier target shares') },
+          { value: 'failover', label: t('Primary and backup') },
+        ]}
+        description={descriptions[rules[i]?.mode ?? 'capacity']}
+      />
+      <RuleTargets index={i} />
+      <div className='grid gap-4 sm:grid-cols-3'>
+        <ConfigField
+          name={`rules.${i}.max_attempts`}
+          type='number'
+          min={1}
+          max={10}
+          label={t('Maximum attempts')}
+          description={t('Includes the first attempt and all retries.')}
+        />
+        <ConfigField
+          name={`rules.${i}.timeout_seconds`}
+          type='number'
+          min={1}
+          max={3600}
+          label={t('Total timeout (seconds)')}
+        />
+        <ConfigField
+          name={`rules.${i}.max_supplier_percent`}
+          type='number'
+          min={0}
+          max={100}
+          label={t('Supplier concentration cap (%)')}
+          description={t(
+            'Zero adds no cap. A strict cap can reject requests when alternatives are unavailable.'
+          )}
+        />
+      </div>
+      <details>
+        <summary className='cursor-pointer text-sm font-medium'>
+          {t('Health and recovery thresholds')}
+        </summary>
+        <div className='mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+          {(
+            [
+              ['window_seconds', t('Health window (seconds)'), 10, 3600],
+              ['min_samples', t('Minimum samples'), 1, 10000],
+              ['failure_percent', t('Failure threshold (%)'), 1, 100],
+              ['max_ttft_ms', t('First-token threshold (ms)'), 1, undefined],
+              ['cooldown_seconds', t('Cooldown (seconds)'), 1, 3600],
+              ['trial_percent', t('Recovery trial percentage'), 1, 100],
+            ] as const
+          ).map(([name, label, min, max]) => (
             <ConfigField
-              name={`rules.${i}.mode`}
-              label={t('Routing strategy')}
-              options={[
-                { value: 'capacity', label: t('Capacity balancing') },
-                { value: 'share', label: t('Supplier target shares') },
-                { value: 'failover', label: t('Primary and backup') },
-              ]}
-              description={descriptions[rules[i]?.mode ?? 'capacity']}
+              key={name}
+              name={`rules.${i}.health.${name}`}
+              type='number'
+              min={min}
+              max={max}
+              label={label}
             />
-            <RuleTargets index={i} />
-            <div className='grid gap-4 sm:grid-cols-3'>
-              <ConfigField
-                name={`rules.${i}.max_attempts`}
-                type='number'
-                min={1}
-                max={10}
-                label={t('Maximum attempts')}
-                description={t('Includes the first attempt and all retries.')}
-              />
-              <ConfigField
-                name={`rules.${i}.timeout_seconds`}
-                type='number'
-                min={1}
-                max={3600}
-                label={t('Total timeout (seconds)')}
-              />
-              <ConfigField
-                name={`rules.${i}.max_supplier_percent`}
-                type='number'
-                min={0}
-                max={100}
-                label={t('Supplier concentration cap (%)')}
-                description={t(
-                  'Zero adds no cap. A strict cap can reject requests when alternatives are unavailable.'
-                )}
-              />
-            </div>
-            <details>
-              <summary className='cursor-pointer text-sm font-medium'>
-                {t('Health and recovery thresholds')}
-              </summary>
-              <div className='mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-                {(
-                  [
-                    ['window_seconds', t('Health window (seconds)'), 10, 3600],
-                    ['min_samples', t('Minimum samples'), 1, 10000],
-                    ['failure_percent', t('Failure threshold (%)'), 1, 100],
-                    [
-                      'max_ttft_ms',
-                      t('First-token threshold (ms)'),
-                      1,
-                      undefined,
-                    ],
-                    ['cooldown_seconds', t('Cooldown (seconds)'), 1, 3600],
-                    ['trial_percent', t('Recovery trial percentage'), 1, 100],
-                  ] as const
-                ).map(([name, label, min, max]) => (
-                  <ConfigField
-                    key={name}
-                    name={`rules.${i}.health.${name}`}
-                    type='number'
-                    min={min}
-                    max={max}
-                    label={label}
-                  />
-                ))}
-              </div>
-            </details>
-          </CardContent>
-        </Card>
-      ))}
-      <Button
-        type='button'
-        variant='outline'
-        disabled={
-          !suppliers.length || !models.length || list.fields.length >= 128
-        }
-        onClick={() => {
-          let n = rules.length + 1
-          while (rules.some((r) => r.id === `rule-${n}`)) n++
-          list.append(newSupplierRule(`rule-${n}`, suppliers[0].id, models[0]))
-        }}
-      >
-        {t('Add routing rule')}
-      </Button>
-      {(!suppliers.length || !models.length) && (
-        <p className='text-muted-foreground text-sm'>
-          {t('Add suppliers and channel bindings before creating a rule.')}
-        </p>
-      )}
+          ))}
+        </div>
+      </details>
     </div>
   )
 }

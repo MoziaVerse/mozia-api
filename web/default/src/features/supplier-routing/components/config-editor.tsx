@@ -16,58 +16,51 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { isAxiosError } from 'axios'
 import { useState } from 'react'
-import { FormProvider, useForm, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { ZodError } from 'zod'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
   sideDrawerContentClassName,
   sideDrawerHeaderClassName,
   sideDrawerFormClassName,
-  sideDrawerFooterClassName,
 } from '@/components/drawer-layout'
 import { SectionPageLayout } from '@/components/layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
   SheetDescription,
-  SheetFooter,
 } from '@/components/ui/sheet'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
-import { FormNavigationGuard } from '@/features/system-settings/components/form-navigation-guard'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import {
+  deleteSupplierResource,
+  getSupplierResourceStatus,
   previewSupplierModels,
-  rollbackSupplierRouting,
-  saveSupplierRouting,
+  type SupplierResource,
+  type SupplierResourceKind,
   type SupplierRoutingData,
-  type SupplierConfig,
 } from '../api'
 import {
-  parseSupplierConfigJSON,
-  parseSupplierDraftJSON,
-  supplierConfigSchema,
+  supplierRoutingMode,
   type SupplierConfigValues,
 } from '../lib/config-schema'
-import { BindingsEditor } from './bindings-editor'
-import { PoolsEditor } from './pools-editor'
-import { RoutingControls } from './routing-controls'
-import { RulesEditor } from './rules-editor'
+import { ResourceEditor, type ResourceSelection } from './resource-editor'
 import { SupplierList } from './supplier-list'
-import { SupplierFields } from './suppliers-editor'
+
+type Workspace = {
+  supplierId?: number
+  section: 'basic' | 'pools' | 'bindings' | 'rules' | 'settings'
+  resource?: ResourceSelection
+}
 
 export function SupplierConfigEditor(props: {
   data: SupplierRoutingData
@@ -76,542 +69,511 @@ export function SupplierConfigEditor(props: {
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const config = props.data.config
-  const form = useForm<SupplierConfigValues>({
-    resolver: zodResolver(supplierConfigSchema, undefined, { raw: true }),
-    reValidateMode: 'onSubmit',
-    defaultValues: {
-      ...config,
-      suppliers: config.suppliers ?? [],
-      pools: config.pools ?? [],
-      bindings: config.bindings ?? [],
-      rules: config.rules ?? [],
-    },
-  })
-  const [suppliers, pools, bindings] = useWatch({
-    control: form.control,
-    name: ['suppliers', 'pools', 'bindings'],
-  })
-  const [editor, setEditor] = useState('visual')
-  const [jsonDraft, setJSONDraft] = useState<string | null>(null)
-  const [jsonError, setJSONError] = useState('')
-  const [supplierId, setSupplierId] = useState<number | null>(null)
-  const [supplierTab, setSupplierTab] = useState('basic')
-  const [routingTab, setRoutingTab] = useState<string | null>(null)
-  const [discard, setDiscard] = useState(false)
-  const [deleteId, setDeleteId] = useState<number | null>(null)
-  const preview = useMutation({ mutationFn: previewSupplierModels })
-  const save = useMutation({
-    mutationFn: (next: SupplierConfig) => saveSupplierRouting(next),
-    onSuccess: (next) => {
-      toast.success(t('Supplier routing published'))
-      form.reset({
-        ...next,
-        suppliers: next.suppliers ?? [],
-        pools: next.pools ?? [],
-        bindings: next.bindings ?? [],
-        rules: next.rules ?? [],
-      })
-      setJSONDraft(null)
-      setJSONError('')
-      setSupplierId(null)
-      setRoutingTab(null)
-      void queryClient.invalidateQueries({ queryKey: ['supplier-routing'] })
-    },
-    onError: (error) => form.setError('root', { message: error.message }),
-  })
-  const rollback = useMutation({
-    mutationFn: (id: number) => rollbackSupplierRouting(config.revision, id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['supplier-routing'] })
-    },
-    onError: (error) => form.setError('root', { message: error.message }),
-  })
-  const dirty = form.formState.isDirty || jsonDraft !== null
-  const readOnly = !props.canPublish || save.isPending || rollback.isPending
-  const visualReadOnly = readOnly || jsonDraft !== null
-  const supplierIndex = suppliers.findIndex(
-    (supplier) => supplier.id === supplierId
-  )
-  const selectedSupplier = suppliers[supplierIndex]
-  const editSupplier = (id: number) => {
-    setSupplierId(id)
-    setSupplierTab('basic')
-    preview.reset()
+  const [workspace, setWorkspace] = useState<Workspace | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const [navigation, setNavigation] = useState<{
+    next: Workspace | null
+  } | null>(null)
+  const [deleting, setDeleting] = useState<{
+    kind: SupplierResourceKind
+    resource: SupplierResource
+    name: string
+  } | null>(null)
+  const config: SupplierConfigValues = {
+    ...props.data.config,
+    suppliers: props.data.config.suppliers ?? [],
+    pools: props.data.config.pools ?? [],
+    bindings: props.data.config.bindings ?? [],
+    rules: props.data.config.rules ?? [],
   }
-  const publish = () => {
-    if (readOnly) return
-    form.clearErrors()
-    setJSONError('')
-    if (jsonDraft !== null) {
-      try {
-        save.mutate({
-          ...parseSupplierConfigJSON(jsonDraft),
-          revision: config.revision,
-        })
-      } catch (error) {
-        setJSONError(
-          error instanceof ZodError
-            ? t('Check JSON configuration at {{path}}.', {
-                path: error.issues[0].path.join('.') || t('Configuration'),
-              })
-            : t('Enter valid JSON before publishing.')
-        )
-        setEditor('json')
-      }
+  const status = useQuery({
+    queryKey: ['supplier-status'],
+    queryFn: getSupplierResourceStatus,
+    refetchInterval: 5000,
+  })
+  const remove = useMutation({
+    mutationFn: (value: NonNullable<typeof deleting>) =>
+      deleteSupplierResource(value.kind, value.resource),
+    onSuccess: (result) => {
+      setDeleting(null)
+      toast.success(
+        result.application === 'pending'
+          ? t('Saved. Waiting for routing to apply.')
+          : t('Record deleted.')
+      )
+      void queryClient.invalidateQueries({ queryKey: ['supplier-routing'] })
+      void queryClient.invalidateQueries({ queryKey: ['supplier-status'] })
+    },
+    onError: (error) => {
+      toast.error(
+        isAxiosError(error)
+          ? (error.response?.data?.message ?? error.message)
+          : error.message
+      )
+      setDeleting(null)
+      void queryClient.invalidateQueries({ queryKey: ['supplier-routing'] })
+    },
+  })
+  const preview = useMutation({ mutationFn: previewSupplierModels })
+  const navigate = (next: Workspace | null) => {
+    if (dirty) {
+      setNavigation({ next })
       return
     }
-    void form.handleSubmit(
-      (values) => save.mutate({ ...values, revision: config.revision }),
-      (errors) => {
-        const values = form.getValues()
-        const invalidSupplier = values.suppliers.findIndex(
-          (_s, i) => errors.suppliers?.[i]
-        )
-        const invalidPool = values.pools.findIndex((_p, i) => errors.pools?.[i])
-        const invalidBinding = values.bindings.findIndex(
-          (_b, i) => errors.bindings?.[i]
-        )
-        let owner: number | undefined
-        let tab = 'basic'
-        if (invalidSupplier >= 0) owner = values.suppliers[invalidSupplier].id
-        else if (invalidPool >= 0) {
-          owner = values.pools[invalidPool].supplier_id
-          tab = 'capacity'
-        } else if (invalidBinding >= 0) {
-          owner = values.pools.find(
-            (pool) => pool.id === values.bindings[invalidBinding].pool_id
-          )?.supplier_id
-          tab = 'bindings'
-        }
-        if (
-          owner !== undefined &&
-          values.suppliers.some((supplier) => supplier.id === owner)
-        ) {
-          setRoutingTab(null)
-          setSupplierId(owner)
-          setSupplierTab(tab)
-        } else if (
-          errors.rules ||
-          errors.enabled ||
-          errors.shadow ||
-          errors.canary_percent
-        ) {
-          setSupplierId(null)
-          setRoutingTab(errors.rules ? 'rules' : 'controls')
-        } else {
-          setSupplierId(null)
-          setRoutingTab(null)
-          setEditor('json')
-        }
-        form.setError('root', {
-          message: t('Review the highlighted fields before publishing.'),
-        })
-      }
-    )()
+    setWorkspace(next)
+    setDirty(false)
+    preview.reset()
   }
-  const errorNotice = form.formState.errors.root && (
-    <p role='alert' className='text-destructive text-sm'>
-      {form.formState.errors.root.message}
-    </p>
+  const askDelete = (
+    kind: SupplierResourceKind,
+    resource: unknown,
+    name: string
+  ) => setDeleting({ kind, resource: resource as SupplierResource, name })
+  const supplier = config.suppliers.find(
+    (supplier) => supplier.id === workspace?.supplierId
   )
+  const pools = config.pools.filter(
+    (pool) => pool.supplier_id === workspace?.supplierId
+  )
+  const bindings = config.bindings.filter((binding) =>
+    pools.some((pool) => pool.id === binding.pool_id)
+  )
+  const modes = {
+    legacy: t('Original channel routing'),
+    observe: t('Observe without switching traffic'),
+    canary: t('Gradual customer rollout'),
+    active: t('Dynamic routing for all matched customers'),
+  }
+  const isSupplier =
+    workspace?.section === 'basic' ||
+    workspace?.section === 'pools' ||
+    workspace?.section === 'bindings'
+  const busy = remove.isPending
+  const listActions = (
+    kind: SupplierResourceKind,
+    item: { id?: number | string },
+    label: string
+  ) => (
+    <div className='flex gap-2'>
+      <Button
+        variant='outline'
+        size='sm'
+        onClick={() =>
+          navigate({
+            ...(workspace ?? { section: 'rules' }),
+            resource: { kind, id: item.id, supplierId: workspace?.supplierId },
+          })
+        }
+      >
+        {t('Edit')}
+      </Button>
+      {props.canPublish && (
+        <Button
+          variant='ghost'
+          size='sm'
+          disabled={busy}
+          onClick={() => askDelete(kind, item, label)}
+        >
+          {t('Delete')}
+        </Button>
+      )}
+    </div>
+  )
+  const onSaved = (resource: SupplierResource) => {
+    setDirty(false)
+    if (!workspace) return
+    if (
+      workspace.resource?.kind === 'supplier' &&
+      workspace.resource.id === undefined
+    ) {
+      const id = Number(resource.id)
+      setWorkspace({ supplierId: id, section: 'pools' })
+    } else if (
+      workspace.resource?.kind !== 'supplier' &&
+      workspace.resource?.kind !== 'settings'
+    ) {
+      setWorkspace({ ...workspace, resource: undefined })
+    }
+  }
   return (
-    <FormProvider {...form}>
-      <FormNavigationGuard when={dirty} />
+    <>
       <SectionPageLayout>
         <SectionPageLayout.Title>{t('Suppliers')}</SectionPageLayout.Title>
-        <SectionPageLayout.Actions>
-          <Button variant='outline' render={<Link to='/supplier-monitor' />}>
-            {t('Open supplier monitoring')}
-          </Button>
-          <Button variant='outline' onClick={() => setRoutingTab('controls')}>
-            {t('Routing policies')}
-          </Button>
-          <Button
-            disabled={
-              visualReadOnly || editor === 'json' || suppliers.length >= 128
-            }
-            onClick={() => {
-              const id =
-                Math.max(0, ...suppliers.map((supplier) => supplier.id)) + 1
-              form.setValue(
-                'suppliers',
-                [
-                  ...suppliers,
-                  {
-                    id,
-                    name: '',
-                    enabled: false,
-                    region: '',
-                    contact: '',
-                    terms: '',
-                    data_policy: '',
-                  },
-                ],
-                { shouldDirty: true }
-              )
-              editSupplier(id)
-            }}
-          >
-            {t('Create supplier')}
-          </Button>
-        </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
-          <div className='space-y-5'>
-            <p className='text-muted-foreground text-sm'>
-              {t(
-                'Manage partner suppliers here. Open a supplier to configure its capacity, models and channels.'
-              )}
-            </p>
-            <div className='flex flex-wrap items-center gap-3 rounded-lg border p-3'>
-              <Badge variant={dirty ? 'outline' : 'secondary'}>
-                {dirty ? t('Unpublished changes') : t('Published')}
+          <div className='space-y-4'>
+            <div className='flex flex-wrap items-center gap-3'>
+              <Badge variant='secondary'>
+                {modes[supplierRoutingMode(config)]}
               </Badge>
-              <span className='text-muted-foreground flex-1 text-sm'>
-                {t(
-                  'Closing a drawer keeps this page draft. Save and publish applies all current changes.'
-                )}
+              <span className='text-muted-foreground text-sm'>
+                {t('Routing revision')} #
+                {status.data?.applied_revision ?? config.revision}
               </span>
-              {dirty && (
+              <div className='ml-auto flex gap-2'>
                 <Button
-                  variant='ghost'
-                  disabled={readOnly}
-                  onClick={() => setDiscard(true)}
-                >
-                  {t('Discard changes')}
-                </Button>
-              )}
-              {props.canPublish && (
-                <Button disabled={readOnly || !dirty} onClick={publish}>
-                  {save.isPending ? t('Saving...') : t('Save and publish')}
-                </Button>
-              )}
-            </div>
-            {errorNotice}
-            <Tabs
-              value={editor}
-              onValueChange={(value) => {
-                if (value === 'visual' && jsonDraft !== null) {
-                  try {
-                    const next = parseSupplierDraftJSON(jsonDraft)
-                    form.reset(
-                      { ...next, revision: config.revision },
-                      { keepDefaultValues: true }
-                    )
-                    setJSONDraft(null)
-                  } catch {
-                    /* Preserve raw JSON until the user publishes or discards it. */
+                  variant='outline'
+                  onClick={() =>
+                    navigate({
+                      section: 'settings',
+                      resource: { kind: 'settings' },
+                    })
                   }
-                }
-                setJSONError('')
-                setEditor(String(value))
+                >
+                  {t('Routing policies')}
+                </Button>
+                {props.canPublish && (
+                  <Button
+                    onClick={() =>
+                      navigate({
+                        section: 'basic',
+                        resource: { kind: 'supplier' },
+                      })
+                    }
+                  >
+                    {t('Create supplier')}
+                  </Button>
+                )}
+              </div>
+            </div>
+            {status.data?.application === 'pending' && (
+              <Alert>
+                <AlertDescription>
+                  {t('Saved. Waiting for routing to apply.')} #
+                  {status.data.target_revision}
+                </AlertDescription>
+              </Alert>
+            )}
+            {status.error && <p role='alert'>{status.error.message}</p>}
+            <SupplierList
+              config={config}
+              readOnly={!props.canPublish || busy}
+              onEdit={(id) =>
+                navigate({
+                  supplierId: id,
+                  section: 'basic',
+                  resource: { kind: 'supplier', id },
+                })
+              }
+              onDelete={(id) => {
+                const record = config.suppliers.find((item) => item.id === id)
+                if (record) askDelete('supplier', record, record.name)
               }}
-            >
-              <TabsList>
-                <TabsTrigger value='visual'>
-                  {t('Visual configuration')}
-                </TabsTrigger>
-                <TabsTrigger value='json'>{t('Advanced JSON')}</TabsTrigger>
-              </TabsList>
-              <TabsContent value='visual' className='space-y-4'>
-                {jsonDraft !== null && (
-                  <Alert>
-                    <AlertDescription>
-                      {t(
-                        'JSON draft preserved. This list shows the last displayable draft; edit or discard JSON to resume visual editing.'
-                      )}
-                      <div className='mt-2 flex gap-2'>
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          onClick={() => setEditor('json')}
-                        >
-                          {t('Advanced JSON')}
-                        </Button>
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          disabled={readOnly}
-                          onClick={() => {
-                            setJSONDraft(null)
-                            setJSONError('')
-                          }}
-                        >
-                          {t('Discard JSON edits')}
-                        </Button>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                )}
-                <SupplierList
-                  readOnly={visualReadOnly}
-                  onEdit={editSupplier}
-                  onDelete={setDeleteId}
-                />
-              </TabsContent>
-              <TabsContent value='json' className='space-y-3'>
-                <Label htmlFor='supplier-config-json'>
-                  {t('Complete routing configuration')}
-                </Label>
-                <p className='text-muted-foreground text-sm'>
-                  {t(
-                    'Switch editors freely while drafting. Configuration is validated when you save and publish.'
-                  )}
-                </p>
-                <Textarea
-                  id='supplier-config-json'
-                  rows={24}
-                  spellCheck={false}
-                  className='font-mono text-xs'
-                  value={jsonDraft ?? JSON.stringify(form.getValues(), null, 2)}
-                  readOnly={readOnly}
-                  onChange={(event) => setJSONDraft(event.target.value)}
-                  aria-invalid={Boolean(jsonError)}
-                />
-                {jsonError && (
-                  <p role='alert' className='text-destructive text-sm'>
-                    {jsonError}
-                  </p>
-                )}
-              </TabsContent>
-            </Tabs>
+            />
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
       <Sheet
-        open={supplierIndex >= 0}
+        open={workspace !== null}
         onOpenChange={(open) => {
-          if (!open) setSupplierId(null)
+          if (!open) navigate(null)
         }}
       >
         <SheetContent className={sideDrawerContentClassName('sm:max-w-3xl')}>
           <SheetHeader className={sideDrawerHeaderClassName()}>
             <SheetTitle>
-              {selectedSupplier?.name || t('New supplier')}
+              {isSupplier
+                ? supplier?.name || t('Create supplier')
+                : t('Routing policies')}
             </SheetTitle>
             <SheetDescription>
               {t(
-                'Closing a drawer keeps this page draft. Save and publish applies all current changes.'
+                'Save the supplier first, then configure each pool and channel binding separately.'
               )}
             </SheetDescription>
           </SheetHeader>
           <div className={sideDrawerFormClassName()}>
-            {errorNotice}
-            {selectedSupplier && (
-              <Tabs
-                value={supplierTab}
-                onValueChange={(value) => setSupplierTab(String(value))}
-              >
-                <TabsList variant='line' className='max-w-full flex-wrap'>
-                  <TabsTrigger value='basic'>
-                    {t('Basic information')}
-                  </TabsTrigger>
-                  <TabsTrigger value='capacity'>
-                    {t('Capacity and models')}
-                  </TabsTrigger>
-                  <TabsTrigger value='bindings'>
-                    {t('Channel bindings')}
-                  </TabsTrigger>
-                </TabsList>
-                <TabsContent value='basic'>
-                  <fieldset disabled={visualReadOnly}>
-                    <SupplierFields index={supplierIndex} />
-                  </fieldset>
-                </TabsContent>
-                <TabsContent value='capacity'>
-                  <fieldset disabled={visualReadOnly}>
-                    <PoolsEditor
-                      key={selectedSupplier.id}
-                      supplierId={selectedSupplier.id}
-                    />
-                  </fieldset>
-                </TabsContent>
-                <TabsContent value='bindings' className='space-y-5'>
-                  <fieldset disabled={visualReadOnly}>
-                    <BindingsEditor
-                      key={selectedSupplier.id}
-                      supplierId={selectedSupplier.id}
-                      channels={props.data.channels}
-                    />
-                  </fieldset>
-                  {props.canPreview && (
-                    <details>
-                      <summary className='cursor-pointer text-sm'>
-                        {t('Preview supplier model declarations')}
-                      </summary>
-                      <p className='text-muted-foreground my-2 text-sm'>
-                        {t(
-                          'Declarations are proposals. Confirm model versions, capabilities and load-test results before publishing.'
-                        )}
-                      </p>
-                      <div className='flex flex-wrap gap-2'>
-                        {props.data.channels
-                          .filter((channel) =>
-                            bindings.some(
-                              (binding) =>
-                                binding.channel_id === channel.id &&
-                                pools.some(
-                                  (pool) =>
-                                    pool.id === binding.pool_id &&
-                                    pool.supplier_id === selectedSupplier.id
-                                )
-                            )
-                          )
-                          .map((channel) => (
-                            <Button
-                              key={channel.id}
-                              variant='outline'
-                              size='sm'
-                              disabled={preview.isPending}
-                              onClick={() => preview.mutate(channel.id)}
-                            >
-                              {channel.name} · {channel.id}
-                            </Button>
-                          ))}
-                      </div>
-                      {preview.error && (
-                        <p role='alert'>{preview.error.message}</p>
-                      )}
-                      {preview.data !== undefined && (
-                        <pre className='mt-2 max-h-80 overflow-auto rounded border p-3 text-xs'>
-                          {JSON.stringify(preview.data, null, 2)}
-                        </pre>
-                      )}
-                    </details>
-                  )}
-                </TabsContent>
-              </Tabs>
-            )}
-          </div>
-          <SheetFooter className={sideDrawerFooterClassName()}>
-            <Button variant='outline' onClick={() => setSupplierId(null)}>
-              {t('Return to list')}
-            </Button>
-            {props.canPublish && (
-              <Button disabled={visualReadOnly || !dirty} onClick={publish}>
-                {t('Save and publish')}
-              </Button>
-            )}
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
-      <Sheet
-        open={routingTab !== null}
-        onOpenChange={(open) => {
-          if (!open) setRoutingTab(null)
-        }}
-      >
-        <SheetContent className={sideDrawerContentClassName('sm:max-w-3xl')}>
-          <SheetHeader className={sideDrawerHeaderClassName()}>
-            <SheetTitle>{t('Routing policies')}</SheetTitle>
-            <SheetDescription>
-              {t(
-                'Choose how platform traffic reaches suppliers. Save and publish applies all current changes.'
-              )}
-            </SheetDescription>
-          </SheetHeader>
-          <div className={sideDrawerFormClassName()}>
-            {errorNotice}
-            <Tabs
-              value={routingTab ?? 'controls'}
-              onValueChange={(value) => setRoutingTab(String(value))}
-            >
-              <TabsList variant='line'>
-                <TabsTrigger value='controls'>
-                  {t('Traffic routing')}
-                </TabsTrigger>
-                <TabsTrigger value='rules'>
-                  {t('Supplier routing rules')}
-                </TabsTrigger>
-                <TabsTrigger value='versions'>
-                  {t('Routing versions')}
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value='controls'>
-                <fieldset disabled={visualReadOnly}>
-                  <RoutingControls />
-                </fieldset>
-              </TabsContent>
-              <TabsContent value='rules'>
-                <fieldset disabled={visualReadOnly}>
-                  <RulesEditor />
-                </fieldset>
-              </TabsContent>
-              <TabsContent value='versions' className='space-y-4'>
-                <p className='text-muted-foreground text-sm'>
-                  {t(
-                    'Rollback preserves current resource limits and in-flight reservations.'
-                  )}
-                </p>
-                {dirty && (
-                  <p className='text-muted-foreground text-sm'>
-                    {t(
-                      'Publish or discard the draft before restoring a version.'
+            {workspace && (
+              <>
+                <Tabs
+                  value={workspace.section}
+                  onValueChange={(value) => {
+                    const section = String(value) as Workspace['section']
+                    let resource: ResourceSelection | undefined
+                    if (section === 'basic') {
+                      resource = { kind: 'supplier', id: workspace.supplierId }
+                    }
+                    if (section === 'settings') resource = { kind: 'settings' }
+                    navigate({
+                      supplierId: workspace.supplierId,
+                      section,
+                      resource,
+                    })
+                  }}
+                >
+                  <TabsList variant='line'>
+                    {isSupplier ? (
+                      <>
+                        <TabsTrigger value='basic'>
+                          {t('Basic information')}
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value='pools'
+                          disabled={workspace.supplierId === undefined}
+                        >
+                          {t('Capacity and models')}
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value='bindings'
+                          disabled={workspace.supplierId === undefined}
+                        >
+                          {t('Channel bindings')}
+                        </TabsTrigger>
+                      </>
+                    ) : (
+                      <>
+                        <TabsTrigger value='settings'>
+                          {t('Traffic routing')}
+                        </TabsTrigger>
+                        <TabsTrigger value='rules'>
+                          {t('Supplier routing rules')}
+                        </TabsTrigger>
+                      </>
                     )}
-                  </p>
-                )}
-                <div className='flex flex-wrap gap-2'>
-                  {props.data.revisions.map((revision) => (
+                  </TabsList>
+                </Tabs>
+                {workspace.resource &&
+                  workspace.resource.kind !== 'supplier' &&
+                  workspace.resource.kind !== 'settings' && (
                     <Button
-                      key={revision.id}
-                      variant='outline'
-                      size='sm'
-                      disabled={
-                        readOnly || dirty || revision.id === config.revision
+                      className='my-3'
+                      variant='ghost'
+                      onClick={() =>
+                        navigate({ ...workspace, resource: undefined })
                       }
-                      onClick={() => rollback.mutate(revision.id)}
                     >
-                      {t('Restore routing version')} {revision.id}
+                      {t('Return to list')}
                     </Button>
-                  ))}
-                </div>
-              </TabsContent>
-            </Tabs>
-          </div>
-          <SheetFooter className={sideDrawerFooterClassName()}>
-            <Button variant='outline' onClick={() => setRoutingTab(null)}>
-              {t('Return to list')}
-            </Button>
-            {props.canPublish && (
-              <Button disabled={visualReadOnly || !dirty} onClick={publish}>
-                {t('Save and publish')}
-              </Button>
+                  )}
+                {workspace.resource ? (
+                  <ResourceEditor
+                    key={`${workspace.resource.kind}:${workspace.resource.id ?? 'new'}:${workspace.supplierId ?? ''}`}
+                    selection={workspace.resource}
+                    data={props.data}
+                    canPublish={props.canPublish}
+                    onDirtyChange={setDirty}
+                    onSaved={onSaved}
+                  />
+                ) : (
+                  <div className='space-y-4 py-4'>
+                    {workspace.section === 'pools' && (
+                      <>
+                        <p className='text-muted-foreground text-sm'>
+                          {t(
+                            'A resource pool represents shared capacity in a supplier cluster. Channels and keys using that cluster share the same limits.'
+                          )}
+                        </p>
+                        {pools.map((pool) => (
+                          <div
+                            className='flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4'
+                            key={pool.id}
+                          >
+                            <div>
+                              <p className='font-medium'>{pool.name}</p>
+                              <p className='text-muted-foreground text-sm'>
+                                {pool.limits.rpm} RPM · {pool.limits.tpm} TPM ·{' '}
+                                {pool.models
+                                  .map((model) => model.name)
+                                  .join(', ')}
+                              </p>
+                              <Badge variant='outline'>
+                                {pool.enabled ? t('Enabled') : t('Disabled')}
+                              </Badge>
+                            </div>
+                            {listActions('pool', pool, pool.name)}
+                          </div>
+                        ))}
+                        {props.canPublish && (
+                          <Button
+                            variant='outline'
+                            onClick={() =>
+                              navigate({
+                                ...workspace,
+                                resource: {
+                                  kind: 'pool',
+                                  supplierId: workspace.supplierId,
+                                },
+                              })
+                            }
+                          >
+                            {t('Add resource pool')}
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    {workspace.section === 'bindings' && (
+                      <>
+                        <p className='text-muted-foreground text-sm'>
+                          {t(
+                            'Bind an existing OpenAI-compatible channel and model to its resource pool. Each channel/model pair belongs to one pool.'
+                          )}
+                        </p>
+                        {bindings.map((binding) => {
+                          const record = binding as typeof binding & {
+                            id: number
+                          }
+                          const channel = props.data.channels.find(
+                            (channel) => channel.id === binding.channel_id
+                          )
+                          return (
+                            <div
+                              className='flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4'
+                              key={record.id}
+                            >
+                              <div>
+                                <p className='font-medium'>
+                                  {channel?.name ?? binding.channel_id} ·{' '}
+                                  {binding.model}
+                                </p>
+                                <p className='text-muted-foreground text-sm'>
+                                  {
+                                    pools.find(
+                                      (pool) => pool.id === binding.pool_id
+                                    )?.name
+                                  }
+                                </p>
+                              </div>
+                              {listActions('binding', record, binding.model)}
+                            </div>
+                          )
+                        })}
+                        {props.canPublish && (
+                          <Button
+                            variant='outline'
+                            disabled={!pools.length}
+                            onClick={() =>
+                              navigate({
+                                ...workspace,
+                                resource: {
+                                  kind: 'binding',
+                                  supplierId: workspace.supplierId,
+                                },
+                              })
+                            }
+                          >
+                            {t('Add channel binding')}
+                          </Button>
+                        )}
+                        {!pools.length && (
+                          <p className='text-muted-foreground text-sm'>
+                            {t(
+                              'Create a resource pool and an OpenAI-compatible channel first.'
+                            )}
+                          </p>
+                        )}
+                        {props.canPreview && (
+                          <details>
+                            <summary className='cursor-pointer text-sm'>
+                              {t('Preview supplier model declarations')}
+                            </summary>
+                            <div className='my-3 flex flex-wrap gap-2'>
+                              {props.data.channels
+                                .filter((channel) =>
+                                  bindings.some(
+                                    (binding) =>
+                                      binding.channel_id === channel.id
+                                  )
+                                )
+                                .map((channel) => (
+                                  <Button
+                                    key={channel.id}
+                                    variant='outline'
+                                    disabled={preview.isPending}
+                                    onClick={() => preview.mutate(channel.id)}
+                                  >
+                                    {channel.name}
+                                  </Button>
+                                ))}
+                            </div>
+                            {preview.error && (
+                              <p role='alert'>{preview.error.message}</p>
+                            )}
+                            {preview.data !== undefined && (
+                              <pre className='max-h-80 overflow-auto rounded border p-3 text-xs'>
+                                {JSON.stringify(preview.data, null, 2)}
+                              </pre>
+                            )}
+                          </details>
+                        )}
+                      </>
+                    )}
+                    {workspace.section === 'rules' && (
+                      <>
+                        {config.rules.map((rule) => (
+                          <div
+                            className='flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4'
+                            key={rule.id}
+                          >
+                            <div>
+                              <p className='font-medium'>
+                                {rule.model} · {rule.group || t('All groups')}
+                              </p>
+                              <p className='text-muted-foreground text-sm'>
+                                {rule.id}
+                              </p>
+                            </div>
+                            {listActions('rule', rule, rule.model)}
+                          </div>
+                        ))}
+                        {props.canPublish && (
+                          <Button
+                            variant='outline'
+                            disabled={!config.bindings.length}
+                            onClick={() =>
+                              navigate({
+                                ...workspace,
+                                resource: { kind: 'rule' },
+                              })
+                            }
+                          >
+                            {t('Add routing rule')}
+                          </Button>
+                        )}
+                        {!config.bindings.length && (
+                          <p className='text-muted-foreground text-sm'>
+                            {t(
+                              'Add suppliers and channel bindings before creating a rule.'
+                            )}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
             )}
-          </SheetFooter>
+          </div>
         </SheetContent>
       </Sheet>
       <ConfirmDialog
-        open={discard}
-        onOpenChange={setDiscard}
-        title={t('Discard changes')}
+        open={navigation !== null}
+        onOpenChange={(open) => {
+          if (!open) setNavigation(null)
+        }}
+        title={t('Discard unsaved changes?')}
         desc={t(
-          'Discard all unpublished changes and return to the loaded configuration?'
+          'Only the current record has unsaved changes. Stay here to save it, or discard this draft.'
         )}
-        destructive
+        confirmText={t('Discard changes')}
         handleConfirm={() => {
-          form.reset()
-          setJSONDraft(null)
-          setJSONError('')
-          setDiscard(false)
+          if (navigation) setWorkspace(navigation.next)
+          setNavigation(null)
+          setDirty(false)
         }}
       />
       <ConfirmDialog
-        open={deleteId !== null}
+        open={deleting !== null}
         onOpenChange={(open) => {
-          if (!open) setDeleteId(null)
+          if (!open) setDeleting(null)
         }}
-        title={t('Delete supplier')}
-        desc={t('The supplier will be removed when you save and publish.')}
+        title={t('Delete')}
+        desc={deleting?.name ?? ''}
         destructive
+        isLoading={busy}
+        confirmText={t('Delete')}
         handleConfirm={() => {
-          form.setValue(
-            'suppliers',
-            suppliers.filter((supplier) => supplier.id !== deleteId),
-            { shouldDirty: true }
-          )
-          setDeleteId(null)
+          if (deleting) remove.mutate(deleting)
         }}
       />
-    </FormProvider>
+    </>
   )
 }

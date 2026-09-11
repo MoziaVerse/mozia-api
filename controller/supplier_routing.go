@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,15 +12,13 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
 	"github.com/shopspring/decimal"
 )
 
 func GetSupplierRouting(c *gin.Context) {
-	cfg, err := model.ReadSupplierRoutingConfig()
+	cfg, err := model.ReadSupplierResources(model.DB)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -41,7 +38,12 @@ func GetSupplierRouting(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"config": cfg, "revisions": revisions, "channels": channels})
+	var settings model.SupplierRoutingSettings
+	if err := model.ReadSupplierOption(model.DB, model.SupplierRoutingSettingsKey, &settings); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"config": cfg, "settings": settings, "revisions": revisions, "channels": channels})
 }
 
 type supplierPublicationRequest struct {
@@ -65,99 +67,7 @@ func ValidateSupplierRouting(c *gin.Context) {
 }
 
 func PublishSupplierRouting(c *gin.Context) {
-	var request supplierPublicationRequest
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2*1024*1024)
-	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
-		common.ApiErrorMsg(c, "Invalid supplier routing configuration")
-		return
-	}
-	if request.RollbackRevision > 0 {
-		var revision model.RoutingRevision
-		if err := model.DB.First(&revision, request.RollbackRevision).Error; err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		var old model.SupplierRoutingConfig
-		if err := common.UnmarshalJsonStr(revision.ConfigJSON, &old); err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		current, err := model.ReadSupplierRoutingConfig()
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		// Rollback only policy behavior; keep today's hard capacity and bindings.
-		current.Rules = old.Rules
-		current.Enabled = old.Enabled
-		current.Shadow = old.Shadow
-		current.CanaryPercent = old.CanaryPercent
-		request.Config = *current
-	}
-	if err := model.ValidateSupplierRoutingConfig(&request.Config); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if !common.RedisEnabled || common.RDB == nil {
-		common.ApiErrorMsg(c, "Shared Redis is required for supplier routing")
-		return
-	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
-	defer cancel()
-	lockID := common.NewRequestId()
-	locked, err := common.RDB.SetNX(ctx, "supplier-routing:publish-lock", lockID, 30*time.Second).Result()
-	if err != nil || !locked {
-		common.ApiErrorMsg(c, "Another publication is active or Redis is unavailable")
-		return
-	}
-	defer func() {
-		_ = redis.NewScript(`if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end return 0`).Run(context.Background(), common.RDB, []string{"supplier-routing:publish-lock"}, lockID).Err()
-	}()
-	previous, err := common.RDB.Get(ctx, "supplier-routing:config").Result()
-	if errors.Is(err, redis.Nil) {
-		// A lost Redis database must not be treated as empty capacity while an
-		// earlier request could still be executing at the supplier.
-		var pending int64
-		if err := model.DB.WithContext(ctx).Model(&model.SupplierAttempt{}).Where("status IN ? OR (created_at >= ? AND kind <> ? AND status <> ?)", []string{"pending", "unknown"}, time.Now().Unix()-61, "shadow", "cancelled").Count(&pending).Error; err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		if pending > 0 {
-			common.ApiErrorMsg(c, "Reconcile uncertain supplier calls and wait 61 seconds without supplier traffic before restoring Redis state")
-			return
-		}
-	} else if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if err := common.RDB.Set(ctx, "supplier-routing:config", `{"blocked":true}`, 0).Err(); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if err := model.PublishSupplierRouting(ctx, &request.Config, request.ExpectedRevision, c.GetInt("id")); err != nil {
-		if previous != "" {
-			_ = redis.NewScript(`if redis.call('GET',KEYS[1])==ARGV[1] then redis.call('SET',KEYS[2],ARGV[2]); return 1 end return 0`).Run(ctx, common.RDB, []string{"supplier-routing:publish-lock", "supplier-routing:config"}, lockID, previous).Err()
-		}
-		common.ApiError(c, err)
-		return
-	}
-	data, err := common.Marshal(service.BuildSupplierRuntime(&request.Config))
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	err = redis.NewScript(`if redis.call('GET',KEYS[1])~=ARGV[1] then return redis.error_reply('publication lease lost') end redis.call('SET',KEYS[2],ARGV[2]); return 1`).Run(ctx, common.RDB, []string{"supplier-routing:publish-lock", "supplier-routing:config"}, lockID, string(data)).Err()
-	if err != nil {
-		common.ApiErrorMsg(c, "Configuration saved; admission remains paused until publication is restored")
-		return
-	}
-	common.OptionMapRWMutex.Lock()
-	configData, _ := common.Marshal(&request.Config)
-	common.OptionMap[model.SupplierRoutingOptionKey] = string(configData)
-	common.OptionMapRWMutex.Unlock()
-	model.InitChannelCache()
-	recordManageAudit(c, "supplier_routing.publish", map[string]interface{}{"revision": request.Config.Revision, "rollback_revision": request.RollbackRevision, "enabled": request.Config.Enabled, "shadow": request.Config.Shadow, "canary_percent": request.Config.CanaryPercent})
-	common.ApiSuccess(c, request.Config)
+	c.JSON(http.StatusGone, gin.H{"success": false, "code": "whole_configuration_write_retired", "message": "Whole configuration writes are retired. Refresh the page and save each supplier, pool, binding or rule individually."})
 }
 
 func GetSupplierAttempts(c *gin.Context) {
