@@ -18,15 +18,17 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
+import type { SupplierConfigValues } from './lib/config-schema'
+
 export type SupplierConfig = {
   revision: number
   enabled: boolean
   shadow: boolean
   canary_percent: number
-  suppliers: Record<string, unknown>[] | null
-  pools: Record<string, unknown>[] | null
-  bindings: Record<string, unknown>[] | null
-  rules: Record<string, unknown>[] | null
+  suppliers: SupplierConfigValues['suppliers'] | null
+  pools: SupplierConfigValues['pools'] | null
+  bindings: SupplierConfigValues['bindings'] | null
+  rules: SupplierConfigValues['rules'] | null
 }
 
 export type SupplierRoutingData = {
@@ -37,6 +39,7 @@ export type SupplierRoutingData = {
 
 export type SupplierAttempt = {
   id: number
+  created_at: number
   request_id: string
   attempt: number
   supplier_id: number
