@@ -25,7 +25,6 @@ import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
 import { RoutingReliabilitySection } from './routing-reliability-section'
-import { SupplierRoutingSection } from './supplier-routing-section'
 
 function formatJsonForEditor(value: string, fallback: string) {
   const raw = (value ?? '').toString().trim()
@@ -38,11 +37,6 @@ function formatJsonForEditor(value: string, fallback: string) {
 }
 
 const MODELS_SECTIONS = [
-  {
-    id: 'supplier-routing',
-    titleKey: 'Supplier routing',
-    build: () => <SupplierRoutingSection />,
-  },
   {
     id: 'global',
     titleKey: 'Global Model Configuration',

@@ -142,7 +142,7 @@ function PoolModels(props: { poolIndex: number; poolId: number }) {
   )
 }
 
-export function PoolsEditor() {
+export function PoolsEditor({ supplierId }: { supplierId: number }) {
   const { t } = useTranslation()
   const form = useFormContext<SupplierConfigValues>()
   const list = useFieldArray({
@@ -150,9 +150,9 @@ export function PoolsEditor() {
     name: 'pools',
     keyName: 'formKey',
   })
-  const [suppliers, pools, bindings] = useWatch({
+  const [pools, bindings] = useWatch({
     control: form.control,
-    name: ['suppliers', 'pools', 'bindings'],
+    name: ['pools', 'bindings'],
   })
   return (
     <div className='space-y-4'>
@@ -162,6 +162,7 @@ export function PoolsEditor() {
         )}
       </p>
       {list.fields.map((item, i) => {
+        if (pools[i]?.supplier_id !== supplierId) return null
         const used = bindings.some((b) => b.pool_id === item.id)
         return (
           <Card key={item.formKey}>
@@ -187,15 +188,6 @@ export function PoolsEditor() {
             <CardContent className='space-y-5'>
               <div className='grid gap-4 sm:grid-cols-2'>
                 <ConfigField name={`pools.${i}.name`} label={t('Pool name')} />
-                <ConfigField
-                  name={`pools.${i}.supplier_id`}
-                  type='number'
-                  label={t('Supplier')}
-                  options={suppliers.map((s) => ({
-                    value: s.id,
-                    label: s.name || `#${s.id}`,
-                  }))}
-                />
                 <ConfigField
                   name={`pools.${i}.failure_domain`}
                   label={t('Failure domain')}
@@ -275,11 +267,11 @@ export function PoolsEditor() {
       <Button
         type='button'
         variant='outline'
-        disabled={!suppliers.length || list.fields.length >= 128}
+        disabled={list.fields.length >= 128}
         onClick={() =>
           list.append({
             id: Math.max(0, ...pools.map((p) => p.id)) + 1,
-            supplier_id: suppliers[0].id,
+            supplier_id: supplierId,
             name: '',
             failure_domain: '',
             enabled: false,
@@ -293,11 +285,6 @@ export function PoolsEditor() {
       >
         {t('Add resource pool')}
       </Button>
-      {!suppliers.length && (
-        <p className='text-muted-foreground text-sm'>
-          {t('Add a supplier first.')}
-        </p>
-      )}
     </div>
   )
 }

@@ -45,7 +45,6 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { hasPermission } from '@/lib/admin-permissions'
-import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -135,18 +134,9 @@ export function SupplierMonitor() {
         >
           {t('Refresh')}
         </Button>
-        {user?.role === ROLE.SUPER_ADMIN && (
-          <Button
-            render={
-              <Link
-                to='/system-settings/models/$section'
-                params={{ section: 'supplier-routing' }}
-              />
-            }
-          >
-            {t('Configure routing')}
-          </Button>
-        )}
+        <Button render={<Link to='/suppliers' />}>
+          {t('Configure routing')}
+        </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='space-y-6'>

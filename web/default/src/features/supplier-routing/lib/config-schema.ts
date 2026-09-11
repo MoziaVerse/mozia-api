@@ -167,3 +167,21 @@ export function parseSupplierConfigJSON(text: string): SupplierConfigValues {
   supplierConfigSchema.parse(raw)
   return raw as SupplierConfigValues
 }
+
+// Business constraints apply at publication. Only reject drafts the form cannot render.
+export function parseSupplierDraftJSON(text: string): SupplierConfigValues {
+  const raw: unknown = JSON.parse(text)
+  const result = supplierConfigSchema.safeParse(raw)
+  if (
+    !result.success &&
+    result.error.issues.some(
+      (issue) =>
+        issue.code !== 'too_small' &&
+        issue.code !== 'too_big' &&
+        !(issue.code === 'invalid_type' && issue.expected === 'int')
+    )
+  ) {
+    throw result.error
+  }
+  return raw as SupplierConfigValues
+}

@@ -18,26 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
-import { ModelSettings } from '@/features/system-settings/models'
-import {
-  MODELS_DEFAULT_SECTION,
-  MODELS_SECTION_IDS,
-} from '@/features/system-settings/models/section-registry.tsx'
+import { SuppliersPage } from '@/features/supplier-routing'
+import { hasPermission } from '@/lib/admin-permissions'
+import { useAuthStore } from '@/stores/auth-store'
 
-export const Route = createFileRoute(
-  '/_authenticated/system-settings/models/$section'
-)({
-  beforeLoad: ({ params }) => {
-    if (params.section === 'supplier-routing') {
-      throw redirect({ to: '/suppliers' })
-    }
-    const validSections = MODELS_SECTION_IDS as unknown as string[]
-    if (!validSections.includes(params.section)) {
-      throw redirect({
-        to: '/system-settings/models/$section',
-        params: { section: MODELS_DEFAULT_SECTION },
-      })
+export const Route = createFileRoute('/_authenticated/suppliers/')({
+  beforeLoad: () => {
+    if (!hasPermission(useAuthStore.getState().auth.user, 'channel', 'read')) {
+      throw redirect({ to: '/403' })
     }
   },
-  component: ModelSettings,
+  component: SuppliersPage,
 })

@@ -130,6 +130,11 @@ export function useSidebarData(): SidebarData {
           ...(hasPermission(user, 'channel', 'read')
             ? [
                 {
+                  title: t('Suppliers'),
+                  url: '/suppliers',
+                  icon: Box,
+                },
+                {
                   title: t('Supplier monitoring'),
                   url: '/supplier-monitor',
                   icon: Activity,

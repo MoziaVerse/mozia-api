@@ -23,6 +23,7 @@ import {
   newSupplierModel,
   newSupplierRule,
   parseSupplierConfigJSON,
+  parseSupplierDraftJSON,
   supplierRoutingMode,
 } from './config-schema'
 
@@ -116,5 +117,64 @@ test('effective mode matches the backend switch and stable rollout precedence', 
       supplierRoutingMode({ enabled, shadow, canary_percent: percent }),
       expected
     )
+  }
+})
+
+test('unfinished JSON business fields can return to visual editing but cannot publish', () => {
+  const draft = {
+    revision: 1,
+    enabled: false,
+    shadow: true,
+    canary_percent: 10.5,
+    suppliers: [{ id: 1, name: '', enabled: false }],
+    pools: [
+      {
+        id: 1,
+        supplier_id: 1,
+        name: '',
+        failure_domain: '',
+        enabled: false,
+        limits: { concurrency: 0, rpm: 0, tpm: 0 },
+        max_execution_seconds: 0,
+        input_safety_percent: 90,
+        models: [newSupplierModel()],
+        metadata: { keep: true },
+      },
+    ],
+    bindings: [],
+    rules: [],
+    operator_metadata: { keep: true },
+  }
+  const text = JSON.stringify(draft)
+  assert.deepEqual(parseSupplierDraftJSON(text), draft)
+  assert.throws(() => parseSupplierConfigJSON(text))
+  const complete = {
+    ...draft,
+    canary_percent: 10,
+    suppliers: [{ id: 1, name: 'Supplier A', enabled: false }],
+    pools: [],
+  }
+  assert.deepEqual(parseSupplierConfigJSON(JSON.stringify(complete)), complete)
+})
+
+test('structurally incompatible drafts cannot replace the last displayable configuration', () => {
+  const base = {
+    revision: 0,
+    enabled: false,
+    shadow: true,
+    canary_percent: 0,
+    suppliers: [],
+    pools: [],
+    bindings: [],
+    rules: [],
+  }
+  for (const text of [
+    '{',
+    'null',
+    JSON.stringify({ ...base, suppliers: {} }),
+    JSON.stringify({ ...base, pools: [null] }),
+    JSON.stringify({ ...base, enabled: 'false' }),
+  ]) {
+    assert.throws(() => parseSupplierDraftJSON(text))
   }
 })

@@ -28,6 +28,7 @@ import { ConfigField } from './config-fields'
 
 export function BindingsEditor(props: {
   channels: SupplierRoutingData['channels']
+  supplierId: number
 }) {
   const { t } = useTranslation()
   const form = useFormContext<SupplierConfigValues>()
@@ -36,11 +37,24 @@ export function BindingsEditor(props: {
     name: 'bindings',
     keyName: 'formKey',
   })
-  const [pools, bindings] = useWatch({
+  const [allPools, bindings] = useWatch({
     control: form.control,
     name: ['pools', 'bindings'],
   })
-  const channels = props.channels.filter((channel) => channel.type === 1)
+  const pools = allPools.filter((pool) => pool.supplier_id === props.supplierId)
+  const channels = props.channels.filter(
+    (channel) =>
+      channel.type === 1 &&
+      !bindings.some(
+        (binding) =>
+          binding.channel_id === channel.id &&
+          allPools.some(
+            (pool) =>
+              pool.id === binding.pool_id &&
+              pool.supplier_id !== props.supplierId
+          )
+      )
+  )
   return (
     <div className='space-y-4'>
       <p className='text-muted-foreground text-sm'>
@@ -50,6 +64,7 @@ export function BindingsEditor(props: {
       </p>
       {list.fields.map((item, i) => {
         const binding = bindings[i]
+        if (!pools.some((pool) => pool.id === binding?.pool_id)) return null
         const channel = channels.find((c) => c.id === binding?.channel_id)
         const pool = pools.find((p) => p.id === binding?.pool_id)
         const models =

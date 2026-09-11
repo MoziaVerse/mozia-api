@@ -17,18 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
+import { SectionPageLayout } from '@/components/layout'
 import { getSupplierRouting } from '@/features/supplier-routing/api'
 import { SupplierConfigEditor } from '@/features/supplier-routing/components/config-editor'
 import { hasPermission } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { SettingsSection } from '../components/settings-section'
-
-export function SupplierRoutingSection() {
+export function SuppliersPage() {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
   const canRead = hasPermission(user, 'channel', 'read')
@@ -39,28 +36,26 @@ export function SupplierRoutingSection() {
     refetchOnWindowFocus: false,
   })
   if (!canRead) return null
+  if (config.data) {
+    return (
+      <SupplierConfigEditor
+        key={config.data.config.revision}
+        data={config.data}
+        canPublish={hasPermission(user, 'supplier_routing', 'publish')}
+        canPreview={hasPermission(user, 'channel', 'operate')}
+      />
+    )
+  }
   return (
-    <SettingsSection title={t('Supplier routing')}>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <p className='text-muted-foreground text-sm'>
-          {t(
-            'Configure suppliers, shared capacity and routing rules here. View traffic and call records in Supplier monitoring.'
-          )}
-        </p>
-        <Button variant='outline' render={<Link to='/supplier-monitor' />}>
-          {t('Open supplier monitoring')}
-        </Button>
-      </div>
-      {config.isPending && <p>{t('Loading...')}</p>}
-      {config.error && <p role='alert'>{config.error.message}</p>}
-      {config.data && (
-        <SupplierConfigEditor
-          key={config.data.config.revision}
-          data={config.data}
-          canPublish={hasPermission(user, 'supplier_routing', 'publish')}
-          canPreview={hasPermission(user, 'channel', 'operate')}
-        />
-      )}
-    </SettingsSection>
+    <SectionPageLayout>
+      <SectionPageLayout.Title>{t('Suppliers')}</SectionPageLayout.Title>
+      <SectionPageLayout.Content>
+        {config.error ? (
+          <p role='alert'>{config.error.message}</p>
+        ) : (
+          <p>{t('Loading...')}</p>
+        )}
+      </SectionPageLayout.Content>
+    </SectionPageLayout>
   )
 }

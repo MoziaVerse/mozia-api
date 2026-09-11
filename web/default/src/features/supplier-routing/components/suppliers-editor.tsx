@@ -16,115 +16,46 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useFieldArray, useFormContext, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-
-import type { SupplierConfigValues } from '../lib/config-schema'
 import { ConfigField, ConfigSwitch } from './config-fields'
 
-export function SuppliersEditor() {
+export function SupplierFields({ index }: { index: number }) {
   const { t } = useTranslation()
-  const form = useFormContext<SupplierConfigValues>()
-  const list = useFieldArray({
-    control: form.control,
-    name: 'suppliers',
-    keyName: 'formKey',
-  })
-  const [suppliers, pools, rules] = useWatch({
-    control: form.control,
-    name: ['suppliers', 'pools', 'rules'],
-  })
   return (
-    <div className='space-y-4'>
+    <div className='space-y-5'>
       <p className='text-muted-foreground text-sm'>
         {t(
-          'A supplier is a partner company. One supplier can own several resource pools and channels.'
+          'Start with a supplier name. Add capacity, models and channel bindings when ready to connect.'
         )}
       </p>
-      {list.fields.map((item, i) => {
-        const used =
-          pools.some((pool) => pool.supplier_id === item.id) ||
-          rules.some((rule) =>
-            rule.targets.some((target) => target.supplier_id === item.id)
-          )
-        return (
-          <Card key={item.formKey}>
-            <CardHeader className='flex-row items-center justify-between gap-3'>
-              <CardTitle>
-                {suppliers[i]?.name || t('New supplier')} · #{item.id}
-              </CardTitle>
-              <Button
-                type='button'
-                size='sm'
-                variant='ghost'
-                disabled={used}
-                title={
-                  used
-                    ? t('Remove references before deleting this item.')
-                    : undefined
-                }
-                onClick={() => list.remove(i)}
-              >
-                {t('Delete')}
-              </Button>
-            </CardHeader>
-            <CardContent className='space-y-4'>
-              <div className='grid gap-4 sm:grid-cols-2'>
-                <ConfigField
-                  name={`suppliers.${i}.name`}
-                  label={t('Supplier name')}
-                />
-                <ConfigField
-                  name={`suppliers.${i}.region`}
-                  label={t('Region')}
-                />
-                <ConfigField
-                  name={`suppliers.${i}.contact`}
-                  label={t('Contact')}
-                />
-                <ConfigField
-                  name={`suppliers.${i}.terms`}
-                  label={t('Contract reference')}
-                />
-              </div>
-              <ConfigField
-                name={`suppliers.${i}.data_policy`}
-                label={t('Data handling policy')}
-              />
-              <ConfigSwitch
-                name={`suppliers.${i}.enabled`}
-                label={t('Supplier available')}
-              />
-              {used && (
-                <p className='text-muted-foreground text-xs'>
-                  {t('Remove references before deleting this item.')}
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        )
-      })}
-      <Button
-        type='button'
-        variant='outline'
-        disabled={list.fields.length >= 128}
-        onClick={() =>
-          list.append({
-            id: Math.max(0, ...suppliers.map((s) => s.id)) + 1,
-            name: '',
-            enabled: false,
-            region: '',
-            contact: '',
-            data_policy: '',
-            terms: '',
-          })
-        }
-      >
-        {t('Add supplier')}
-      </Button>
+      <ConfigField
+        name={`suppliers.${index}.name`}
+        label={t('Supplier name')}
+      />
+      <div className='grid gap-4 sm:grid-cols-2'>
+        <ConfigField name={`suppliers.${index}.region`} label={t('Region')} />
+        <ConfigField name={`suppliers.${index}.contact`} label={t('Contact')} />
+      </div>
+      <ConfigSwitch
+        name={`suppliers.${index}.enabled`}
+        label={t('Supplier available')}
+      />
+      <details>
+        <summary className='cursor-pointer text-sm'>
+          {t('Contract and data policy')}
+        </summary>
+        <div className='mt-4 space-y-4'>
+          <ConfigField
+            name={`suppliers.${index}.terms`}
+            label={t('Contract reference')}
+          />
+          <ConfigField
+            name={`suppliers.${index}.data_policy`}
+            label={t('Data handling policy')}
+          />
+        </div>
+      </details>
     </div>
   )
 }
