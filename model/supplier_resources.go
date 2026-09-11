@@ -259,7 +259,73 @@ func ReadSupplierResource(db *gorm.DB, kind, id string) (any, error) {
 	if kind == "settings" {
 		return value, ReadSupplierOption(db, SupplierRoutingSettingsKey, value)
 	}
-	return value, db.Where("id = ?", id).First(value).Error
+	if err := db.Where("id = ?", id).First(value).Error; err != nil {
+		return nil, err
+	}
+	if pool, ok := value.(*SupplierPool); ok {
+		return pool, LoadSupplierPoolBindings(db, pool)
+	}
+	return value, nil
+}
+
+func LoadSupplierPoolBindings(db *gorm.DB, pool *SupplierPool) error {
+	pool.Bindings = []SupplierPoolBinding{}
+	return db.Model(&SupplierBinding{}).Select("channel_id", "model").Where("pool_id = ?", pool.ID).Order("id").Find(&pool.Bindings).Error
+}
+
+// Replace the selected pool's associations in the caller's publication transaction.
+// Unchanged associations retain their identity, version and capacity accounting.
+func ReplaceSupplierPoolBindings(tx *gorm.DB, pool *SupplierPool) (bool, error) {
+	if len(pool.Bindings) > 256 {
+		return false, SupplierFieldError("bindings", "at most 256 channel/model associations are supported")
+	}
+	selected := make(map[string]SupplierBinding, len(pool.Bindings))
+	for i, b := range pool.Bindings {
+		value := SupplierBinding{ChannelID: b.ChannelID, Model: b.Model, PoolID: pool.ID}
+		if err := ValidateSupplierResourceFields(&value); err != nil {
+			return false, SupplierFieldError(fmt.Sprintf("bindings.%d", i), err.Error())
+		}
+		key := SupplierBindingKey(&value)
+		if _, exists := selected[key]; exists {
+			return false, SupplierFieldError(fmt.Sprintf("bindings.%d", i), "duplicate channel/model association")
+		}
+		value.ActiveKey = &key
+		selected[key] = value
+	}
+	var prior []SupplierBinding
+	if err := tx.Where("pool_id = ?", pool.ID).Find(&prior).Error; err != nil {
+		return false, err
+	}
+	changed := false
+	for _, b := range prior {
+		key := SupplierBindingKey(&b)
+		if _, keep := selected[key]; keep {
+			delete(selected, key)
+			continue
+		}
+		changed = true
+		if err := tx.Model(&b).Updates(map[string]any{"active_key": nil, "version": b.Version + 1}).Error; err != nil {
+			return false, err
+		}
+		if err := tx.Delete(&b).Error; err != nil {
+			return false, err
+		}
+	}
+	for key, b := range selected {
+		var count int64
+		if err := tx.Model(&SupplierBinding{}).Where("active_key = ?", key).Count(&count).Error; err != nil {
+			return false, err
+		}
+		if count > 0 {
+			return false, SupplierResourceConflict("binding_exists", "this channel/model already belongs to another resource pool")
+		}
+		changed = true
+		b.Version = 1
+		if err := tx.Create(&b).Error; err != nil {
+			return false, err
+		}
+	}
+	return changed, nil
 }
 
 // PATCH merges objects, replaces arrays, and rejects unknown/read-only/null fields.

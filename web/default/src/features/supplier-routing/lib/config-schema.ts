@@ -71,6 +71,10 @@ export const supplierConfigSchema = z.object({
         input_safety_percent: z.number().int().min(100).max(200),
         acceptance: z.string().optional(),
         models: z.array(model).min(1).max(128),
+        bindings: z
+          .array(z.object({ channel_id: id, model: name }).strict())
+          .max(256)
+          .optional(),
       })
     )
     .max(128),

@@ -16,21 +16,37 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useFieldArray, useFormContext, useWatch } from 'react-hook-form'
+import { useId } from 'react'
+import {
+  Controller,
+  useFieldArray,
+  useFormContext,
+  useWatch,
+} from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import { FieldSet, FieldLegend } from '@/components/ui/field'
+import { Combobox } from '@/components/ui/combobox'
+import {
+  Field,
+  FieldLabel,
+  FieldDescription,
+  FieldSet,
+  FieldLegend,
+} from '@/components/ui/field'
 
+import type { SupplierRoutingData } from '../api'
 import {
   newSupplierModel,
   type SupplierConfigValues,
 } from '../lib/config-schema'
+import { ModelChannels } from './bindings-editor'
 import { ConfigField, ConfigSwitch } from './config-fields'
 
-function PoolModels(props: { poolIndex: number; poolId: number }) {
+function PoolModels(props: { poolIndex: number; data: SupplierRoutingData }) {
   const { t } = useTranslation()
   const form = useFormContext<SupplierConfigValues>()
+  const id = useId()
   const list = useFieldArray({
     control: form.control,
     name: `pools.${props.poolIndex}.models`,
@@ -38,16 +54,32 @@ function PoolModels(props: { poolIndex: number; poolId: number }) {
   })
   const [models, bindings] = useWatch({
     control: form.control,
-    name: [`pools.${props.poolIndex}.models`, 'bindings'],
+    name: [
+      `pools.${props.poolIndex}.models`,
+      `pools.${props.poolIndex}.bindings`,
+    ],
   })
+  const platformModels = [
+    ...new Set(
+      props.data.channels.flatMap((channel) =>
+        channel.models
+          .split(',')
+          .map((name) => name.trim())
+          .filter(Boolean)
+      )
+    ),
+  ].sort()
   return (
     <FieldSet>
-      <FieldLegend>{t('Verified models')}</FieldLegend>
+      <FieldLegend>{t('Models and channels')}</FieldLegend>
       {list.fields.map((item, i) => {
         const path = `pools.${props.poolIndex}.models.${i}` as const
-        const used = bindings.some(
-          (b) => b.pool_id === props.poolId && b.model === models[i]?.name
-        )
+        const options = platformModels
+          .filter(
+            (name) =>
+              !models.some((model, index) => index !== i && model.name === name)
+          )
+          .map((name) => ({ value: name, label: name }))
         return (
           <div className='space-y-4 rounded-lg border p-4' key={item.formKey}>
             <div className='flex items-center justify-between gap-2'>
@@ -58,74 +90,127 @@ function PoolModels(props: { poolIndex: number; poolId: number }) {
                 type='button'
                 variant='ghost'
                 size='sm'
-                disabled={list.fields.length === 1 || used}
-                onClick={() => list.remove(i)}
+                disabled={list.fields.length === 1}
+                onClick={() => {
+                  form.setValue(
+                    `pools.${props.poolIndex}.bindings`,
+                    (bindings ?? []).filter((b) => b.model !== models[i]?.name),
+                    { shouldDirty: true }
+                  )
+                  list.remove(i)
+                }}
               >
                 {t('Delete')}
               </Button>
             </div>
-            <div className='grid gap-4 sm:grid-cols-2'>
-              <ConfigField name={`${path}.name`} label={t('Model name')} />
-              <ConfigField
-                name={`${path}.version`}
-                label={t('Verified model version')}
-              />
-              <ConfigField
-                name={`${path}.context_tokens`}
-                type='number'
-                min={1}
-                max={10000000}
-                label={t('Context token limit')}
-              />
-              <ConfigField
-                name={`${path}.max_output_tokens`}
-                type='number'
-                min={1}
-                max={10000000}
-                label={t('Maximum output tokens')}
-              />
-              <ConfigSwitch
-                name={`${path}.tools`}
-                label={t('Tool calls supported')}
-              />
-              <ConfigSwitch
-                name={`${path}.json`}
-                label={t('Structured JSON output supported')}
-              />
-            </div>
-            <details>
-              <summary className='cursor-pointer text-sm'>
-                {t('Per-model capacity limits')}
-              </summary>
-              <p className='text-muted-foreground my-3 text-sm'>
-                {t(
-                  'Zero inherits the shared pool limit. Model limits cannot exceed the pool limits.'
+            <Field
+              data-invalid={Boolean(
+                form.getFieldState(`${path}.name`, form.formState).error
+              )}
+            >
+              <FieldLabel htmlFor={`${id}-${i}`}>
+                {t('1. Choose a platform model')}
+              </FieldLabel>
+              <Controller
+                control={form.control}
+                name={`${path}.name`}
+                render={({ field }) => (
+                  <Combobox
+                    id={`${id}-${i}`}
+                    options={options}
+                    value={field.value}
+                    placeholder={t('Search models from existing channels')}
+                    allowCustomValue={false}
+                    onValueChange={(name) => {
+                      if ((name ?? '') === field.value) return
+                      form.setValue(
+                        `pools.${props.poolIndex}.bindings`,
+                        (bindings ?? []).filter((b) => b.model !== field.value),
+                        { shouldDirty: true }
+                      )
+                      field.onChange(name ?? '')
+                    }}
+                  />
                 )}
-              </p>
-              <div className='grid gap-4 sm:grid-cols-3'>
+              />
+              {form.getFieldState(`${path}.name`, form.formState).error && (
+                <FieldDescription>
+                  {t('Check this value and its allowed range.')}
+                </FieldDescription>
+              )}
+            </Field>
+            <ModelChannels
+              key={models[i]?.name}
+              data={props.data}
+              poolIndex={props.poolIndex}
+              model={models[i]?.name ?? ''}
+            />
+            <FieldSet>
+              <FieldLegend variant='label'>
+                {t('3. Verified specifications')}
+              </FieldLegend>
+              <div className='grid gap-4 sm:grid-cols-2'>
                 <ConfigField
-                  name={`${path}.limits.concurrency`}
-                  type='number'
-                  min={0}
-                  max={10000}
-                  label={t('Concurrent requests')}
+                  name={`${path}.version`}
+                  label={t('Verified model version')}
                 />
                 <ConfigField
-                  name={`${path}.limits.rpm`}
+                  name={`${path}.context_tokens`}
                   type='number'
-                  min={0}
-                  max={100000}
-                  label='RPM'
+                  min={1}
+                  max={10000000}
+                  label={t('Context token limit')}
                 />
                 <ConfigField
-                  name={`${path}.limits.tpm`}
+                  name={`${path}.max_output_tokens`}
                   type='number'
-                  min={0}
-                  max={1000000000}
-                  label='TPM'
+                  min={1}
+                  max={10000000}
+                  label={t('Maximum output tokens')}
+                />
+                <ConfigSwitch
+                  name={`${path}.tools`}
+                  label={t('Tool calls supported')}
+                />
+                <ConfigSwitch
+                  name={`${path}.json`}
+                  label={t('Structured JSON output supported')}
                 />
               </div>
-            </details>
+              <details>
+                <summary className='cursor-pointer text-sm'>
+                  {t('Per-model capacity limits')}
+                </summary>
+                <p className='text-muted-foreground my-3 text-sm'>
+                  {t(
+                    'Zero inherits the shared pool limit. Model limits cannot exceed the pool limits.'
+                  )}
+                </p>
+                <div className='grid gap-4 sm:grid-cols-3'>
+                  <ConfigField
+                    name={`${path}.limits.concurrency`}
+                    type='number'
+                    min={0}
+                    max={10000}
+                    label={t('Concurrent requests')}
+                  />
+                  <ConfigField
+                    name={`${path}.limits.rpm`}
+                    type='number'
+                    min={0}
+                    max={100000}
+                    label='RPM'
+                  />
+                  <ConfigField
+                    name={`${path}.limits.tpm`}
+                    type='number'
+                    min={0}
+                    max={1000000000}
+                    label='TPM'
+                  />
+                </div>
+              </details>
+            </FieldSet>
           </div>
         )
       })}
@@ -135,19 +220,21 @@ function PoolModels(props: { poolIndex: number; poolId: number }) {
         disabled={list.fields.length >= 128}
         onClick={() => list.append(newSupplierModel())}
       >
-        {t('Add verified model')}
+        {t('Add another model to this shared capacity')}
       </Button>
     </FieldSet>
   )
 }
 
-export function PoolFields(props: { index: number }) {
+export function PoolFields(props: {
+  index: number
+  data: SupplierRoutingData
+}) {
   const { t } = useTranslation()
-  const form = useFormContext<SupplierConfigValues>()
   const i = props.index
-  const pool = useWatch({ control: form.control, name: `pools.${i}` })
   return (
     <div className='space-y-5'>
+      <PoolModels poolIndex={i} data={props.data} />
       <div className='grid gap-4 sm:grid-cols-2'>
         <ConfigField name={`pools.${i}.name`} label={t('Pool name')} />
         <ConfigField
@@ -214,7 +301,6 @@ export function PoolFields(props: { index: number }) {
           label={t('Input token safety margin (%)')}
         />
       </div>
-      <PoolModels poolIndex={i} poolId={pool.id} />
       <ConfigSwitch
         name={`pools.${i}.enabled`}
         label={t('Pool available')}

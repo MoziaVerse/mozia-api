@@ -162,6 +162,7 @@ func MutateSupplierResource(parent context.Context, request SupplierResourceMuta
 			return model.SupplierResourceConflict("configuration_apply_pending", "the saved configuration is awaiting application; retry after it is applied")
 		}
 		value := model.NewSupplierResource(request.Kind)
+		affectedPools := map[int64]bool{}
 		if value == nil {
 			return gorm.ErrRecordNotFound
 		}
@@ -173,6 +174,9 @@ func MutateSupplierResource(parent context.Context, request SupplierResourceMuta
 			}
 			if request.IfMatch != SupplierResourceETag(request.Kind, value) {
 				return &model.SupplierResourceError{Status: 412, Code: "resource_version_conflict", Message: "this record changed; reload it before saving"}
+			}
+			if b, ok := value.(*model.SupplierBinding); ok {
+				affectedPools[b.PoolID] = true
 			}
 		}
 		if request.RestoreRevision > 0 {
@@ -268,6 +272,27 @@ func MutateSupplierResource(parent context.Context, request SupplierResourceMuta
 		if metadataOnly {
 			return nil
 		}
+		bindingsChanged := request.Kind == "binding"
+		if b, ok := value.(*model.SupplierBinding); ok {
+			affectedPools[b.PoolID] = true
+		}
+		if pool, ok := value.(*model.SupplierPool); ok {
+			_, replaceBindings := fields["bindings"]
+			if request.Action == "delete" {
+				pool.Bindings = nil
+				replaceBindings = true
+			}
+			if replaceBindings {
+				var err error
+				bindingsChanged, err = model.ReplaceSupplierPoolBindings(tx, pool)
+				if err != nil {
+					return err
+				}
+			}
+			if err := model.LoadSupplierPoolBindings(tx, pool); err != nil {
+				return err
+			}
+		}
 		cfg, err := model.ReadSupplierResources(tx)
 		if err != nil {
 			return err
@@ -278,7 +303,7 @@ func MutateSupplierResource(parent context.Context, request SupplierResourceMuta
 			}
 			return model.SupplierFieldError("", err.Error())
 		}
-		if request.Kind == "binding" {
+		if bindingsChanged {
 			var pending int64
 			if err := tx.Model(&model.SupplierAttempt{}).Where("status IN ?", []string{"pending", "unknown"}).Count(&pending).Error; err != nil {
 				return err
@@ -305,6 +330,20 @@ func MutateSupplierResource(parent context.Context, request SupplierResourceMuta
 		}
 		result.Revision = cfg.Revision
 		result.Application = "pending"
+		// Pool editors include channel associations. An individual binding API write
+		// must invalidate those editors too, including both pools on reassignment.
+		for poolID := range affectedPools {
+			if err := tx.Model(&model.SupplierPool{}).Where("id = ?", poolID).UpdateColumns(map[string]any{
+				"version": gorm.Expr("version + 1"), "runtime_revision": cfg.Revision,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		if pool, ok := value.(*model.SupplierPool); ok && bindingsChanged {
+			if err := tx.Model(&model.SupplierBinding{}).Where("pool_id = ?", pool.ID).UpdateColumn("runtime_revision", cfg.Revision).Error; err != nil {
+				return err
+			}
+		}
 		if request.Action != "delete" {
 			if meta := model.SupplierResourceMetadata(value); meta != nil {
 				meta.RuntimeRevision = cfg.Revision
@@ -350,6 +389,11 @@ func findSupplierCreation(db *gorm.DB, kind, key, hash string) (*SupplierResourc
 	}
 	if meta.DeletedAt.Valid {
 		return nil, model.SupplierResourceConflict("resource_deleted", "the resource created by this request has been deleted")
+	}
+	if pool, ok := value.(*model.SupplierPool); ok {
+		if err := model.LoadSupplierPoolBindings(db, pool); err != nil {
+			return nil, err
+		}
 	}
 	application := "not_required"
 	if meta.RuntimeRevision > 0 {

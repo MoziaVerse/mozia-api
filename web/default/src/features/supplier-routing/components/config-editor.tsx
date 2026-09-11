@@ -58,7 +58,7 @@ import { SupplierList } from './supplier-list'
 
 type Workspace = {
   supplierId?: number
-  section: 'basic' | 'pools' | 'bindings' | 'rules' | 'settings'
+  section: 'basic' | 'pools' | 'rules' | 'settings'
   resource?: ResourceSelection
 }
 
@@ -145,9 +145,7 @@ export function SupplierConfigEditor(props: {
     active: t('Dynamic routing for all matched customers'),
   }
   const isSupplier =
-    workspace?.section === 'basic' ||
-    workspace?.section === 'pools' ||
-    workspace?.section === 'bindings'
+    workspace?.section === 'basic' || workspace?.section === 'pools'
   const busy = remove.isPending
   const listActions = (
     kind: SupplierResourceKind,
@@ -277,7 +275,7 @@ export function SupplierConfigEditor(props: {
             </SheetTitle>
             <SheetDescription>
               {t(
-                'Save the supplier first, then configure each pool and channel binding separately.'
+                'Save the supplier, then choose models, associate channels and set capacity in one form.'
               )}
             </SheetDescription>
           </SheetHeader>
@@ -310,13 +308,7 @@ export function SupplierConfigEditor(props: {
                           value='pools'
                           disabled={workspace.supplierId === undefined}
                         >
-                          {t('Capacity and models')}
-                        </TabsTrigger>
-                        <TabsTrigger
-                          value='bindings'
-                          disabled={workspace.supplierId === undefined}
-                        >
-                          {t('Channel bindings')}
+                          {t('Models and channels')}
                         </TabsTrigger>
                       </>
                     ) : (
@@ -375,6 +367,22 @@ export function SupplierConfigEditor(props: {
                                   .map((model) => model.name)
                                   .join(', ')}
                               </p>
+                              <p className='text-muted-foreground text-sm'>
+                                {t('Associated channels')}:{' '}
+                                {bindings
+                                  .filter((b) => b.pool_id === pool.id)
+                                  .map(
+                                    (b) =>
+                                      props.data.channels.find(
+                                        (c) => c.id === b.channel_id
+                                      )?.name ?? `#${b.channel_id}`
+                                  )
+                                  .filter(
+                                    (name, index, names) =>
+                                      names.indexOf(name) === index
+                                  )
+                                  .join(', ') || t('None')}
+                              </p>
                               <Badge variant='outline'>
                                 {pool.enabled ? t('Enabled') : t('Disabled')}
                               </Badge>
@@ -395,70 +403,8 @@ export function SupplierConfigEditor(props: {
                               })
                             }
                           >
-                            {t('Add resource pool')}
+                            {t('Add model configuration')}
                           </Button>
-                        )}
-                      </>
-                    )}
-                    {workspace.section === 'bindings' && (
-                      <>
-                        <p className='text-muted-foreground text-sm'>
-                          {t(
-                            'Bind an existing OpenAI-compatible channel and model to its resource pool. Each channel/model pair belongs to one pool.'
-                          )}
-                        </p>
-                        {bindings.map((binding) => {
-                          const record = binding as typeof binding & {
-                            id: number
-                          }
-                          const channel = props.data.channels.find(
-                            (channel) => channel.id === binding.channel_id
-                          )
-                          return (
-                            <div
-                              className='flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4'
-                              key={record.id}
-                            >
-                              <div>
-                                <p className='font-medium'>
-                                  {channel?.name ?? binding.channel_id} ·{' '}
-                                  {binding.model}
-                                </p>
-                                <p className='text-muted-foreground text-sm'>
-                                  {
-                                    pools.find(
-                                      (pool) => pool.id === binding.pool_id
-                                    )?.name
-                                  }
-                                </p>
-                              </div>
-                              {listActions('binding', record, binding.model)}
-                            </div>
-                          )
-                        })}
-                        {props.canPublish && (
-                          <Button
-                            variant='outline'
-                            disabled={!pools.length}
-                            onClick={() =>
-                              navigate({
-                                ...workspace,
-                                resource: {
-                                  kind: 'binding',
-                                  supplierId: workspace.supplierId,
-                                },
-                              })
-                            }
-                          >
-                            {t('Add channel binding')}
-                          </Button>
-                        )}
-                        {!pools.length && (
-                          <p className='text-muted-foreground text-sm'>
-                            {t(
-                              'Create a resource pool and an OpenAI-compatible channel first.'
-                            )}
-                          </p>
                         )}
                         {props.canPreview && (
                           <details>

@@ -122,7 +122,7 @@ func TestSupplierResourcePatchAndBindingContracts(t *testing.T) {
 	_, err = MutateSupplierResource(context.Background(), SupplierResourceMutation{Kind: "pool", ID: fmt.Sprint(pool.ID), Action: "delete", IfMatch: SupplierResourceETag("pool", pool)})
 	var problem *model.SupplierResourceError
 	require.ErrorAs(t, err, &problem)
-	assert.Equal(t, "resource_in_use", problem.Code)
+	assert.Equal(t, "resource_version_conflict", problem.Code)
 	attempt := model.SupplierAttempt{RequestID: "pending", Attempt: 1, Status: "unknown"}
 	require.NoError(t, db.Create(&attempt).Error)
 	deletion := SupplierResourceMutation{Kind: "binding", ID: fmt.Sprint(binding.ID), Action: "delete", IfMatch: SupplierResourceETag("binding", binding)}
@@ -203,10 +203,16 @@ func TestSupplierResourceRestoreKeepsCurrentCapacity(t *testing.T) {
 	createSupplierResourceForTest(t, "binding", "b", fmt.Sprintf(`{"channel_id":%d,"model":"test","pool_id":%d}`, channel.Id, pool.ID), 0)
 	ruleBody := fmt.Sprintf(`{"model":"test","mode":"capacity","targets":[{"supplier_id":%d,"weight":100}],"max_attempts":2,"timeout_seconds":120,"health":{"window_seconds":60,"min_samples":10,"failure_percent":20,"max_ttft_ms":5000,"cooldown_seconds":30,"trial_percent":10}}`, supplier.ID)
 	first := createSupplierResourceForTest(t, "rule", "r", ruleBody, 0)
+	require.NoError(t, db.First(pool, pool.ID).Error)
+	_, deleteErr := MutateSupplierResource(context.Background(), SupplierResourceMutation{Kind: "pool", ID: fmt.Sprint(pool.ID), Action: "delete", IfMatch: SupplierResourceETag("pool", pool)})
+	var deleteProblem *model.SupplierResourceError
+	require.ErrorAs(t, deleteErr, &deleteProblem)
+	assert.Equal(t, "resource_in_use", deleteProblem.Code)
 	rule := first.Resource.(*model.SupplierRoutingRule)
 	changed, err := MutateSupplierResource(context.Background(), SupplierResourceMutation{Kind: "rule", ID: rule.ID, Action: "patch", IfMatch: SupplierResourceETag("rule", rule), Patch: []byte(`{"mode":"share"}`)})
 	require.NoError(t, err)
 	rule = changed.Resource.(*model.SupplierRoutingRule)
+	require.NoError(t, db.First(pool, pool.ID).Error)
 	_, err = MutateSupplierResource(context.Background(), SupplierResourceMutation{Kind: "pool", ID: fmt.Sprint(pool.ID), Action: "patch", IfMatch: SupplierResourceETag("pool", pool), Patch: []byte(`{"limits":{"rpm":50}}`)})
 	require.NoError(t, err)
 	restored, err := MutateSupplierResource(context.Background(), SupplierResourceMutation{Kind: "rule", ID: rule.ID, Action: "patch", IfMatch: SupplierResourceETag("rule", rule), RestoreRevision: first.Revision})
@@ -217,4 +223,101 @@ func TestSupplierResourceRestoreKeepsCurrentCapacity(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.SupplierBinding{}).Count(&count).Error)
 	assert.Equal(t, int64(1), count)
+}
+
+func TestSupplierPoolModelsAndChannelsSaveAtomically(t *testing.T) {
+	db := supplierResourceFixture(t)
+	ctx := context.Background()
+	supplier := createSupplierResourceForTest(t, "supplier", "owner", `{"name":"Owner"}`, 0).Resource.(*model.Supplier)
+	channels := []model.Channel{{Name: "A", Models: "test,next", Type: 1}, {Name: "B", Models: "test,next", Type: 1}, {Name: "Unsupported", Models: "test", Type: 14}}
+	require.NoError(t, db.Create(&channels).Error)
+	body := fmt.Sprintf(`{"name":"Shared","failure_domain":"dc","limits":{"concurrency":10,"rpm":100,"tpm":10000},"max_execution_seconds":60,"input_safety_percent":110,"models":[{"name":"test","version":"v1","context_tokens":1000,"max_output_tokens":100}],"bindings":[{"channel_id":%d,"model":"test"},{"channel_id":%d,"model":"test"}]}`, channels[0].Id, channels[1].Id)
+	request := SupplierResourceMutation{Kind: "pool", Action: "create", Scope: "pool/atomic", UserID: 7, SupplierID: supplier.ID, IdempotencyKey: "atomic", Patch: []byte(body)}
+	// A valid first association followed by an unsupported one must leave no partial pool or binding.
+	request.Patch = []byte(strings.Replace(body, fmt.Sprintf(`"channel_id":%d`, channels[1].Id), fmt.Sprintf(`"channel_id":%d`, channels[2].Id), 1))
+	_, err := MutateSupplierResource(ctx, request)
+	require.Error(t, err)
+	var count int64
+	require.NoError(t, db.Model(&model.SupplierPool{}).Count(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, db.Model(&model.SupplierBinding{}).Count(&count).Error)
+	assert.Zero(t, count)
+	require.NoError(t, db.Model(&model.RoutingRevision{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+	request.Patch = []byte(body)
+	result, err := MutateSupplierResource(ctx, request)
+	require.NoError(t, err)
+	pool := result.Resource.(*model.SupplierPool)
+	require.Len(t, pool.Bindings, 2)
+	assert.Equal(t, "applied", result.Application)
+	runtime, err := ReadSupplierRuntime(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, pool.ID, runtime.Bindings[fmt.Sprintf("%d:test", channels[0].Id)])
+	assert.Equal(t, pool.ID, runtime.Bindings[fmt.Sprintf("%d:test", channels[1].Id)])
+	require.NoError(t, db.First(&channels[0], channels[0].Id).Error)
+	assert.Equal(t, supplier.ID, channels[0].SupplierID)
+	replay, err := MutateSupplierResource(ctx, request)
+	require.NoError(t, err)
+	assert.True(t, replay.Replayed)
+	assert.Equal(t, pool.ID, replay.Resource.(*model.SupplierPool).ID)
+	require.Len(t, replay.Resource.(*model.SupplierPool).Bindings, 2)
+	require.NoError(t, db.Model(&model.RoutingRevision{}).Count(&count).Error)
+	assert.Equal(t, int64(2), count)
+	patch := SupplierResourceMutation{Kind: "pool", Action: "patch", ID: fmt.Sprint(pool.ID), IfMatch: SupplierResourceETag("pool", pool), Patch: []byte(fmt.Sprintf(`{"limits":{"rpm":200},"models":[{"name":"next","version":"v2","context_tokens":2000,"max_output_tokens":200}],"bindings":[{"channel_id":%d,"model":"next"}]}`, channels[0].Id))}
+	attempt := model.SupplierAttempt{RequestID: "inflight", Attempt: 1, Status: "unknown"}
+	require.NoError(t, db.Create(&attempt).Error)
+	_, err = MutateSupplierResource(ctx, patch)
+	require.ErrorContains(t, err, "pending/unknown")
+	saved, err := model.ReadSupplierResource(db, "pool", fmt.Sprint(pool.ID))
+	require.NoError(t, err)
+	assert.Equal(t, pool.Version, saved.(*model.SupplierPool).Version)
+	assert.Equal(t, int64(100), saved.(*model.SupplierPool).Limits.RPM)
+	require.Len(t, saved.(*model.SupplierPool).Bindings, 2)
+	require.NoError(t, db.Model(&attempt).Update("status", "cancelled").Error)
+	result, err = MutateSupplierResource(ctx, patch)
+	require.NoError(t, err)
+	pool = result.Resource.(*model.SupplierPool)
+	assert.Equal(t, int64(200), pool.Limits.RPM)
+	assert.Equal(t, "next", pool.Models[0].Name)
+	require.Len(t, pool.Bindings, 1)
+	assert.Equal(t, "next", pool.Bindings[0].Model)
+	require.NoError(t, db.First(&channels[1], channels[1].Id).Error)
+	assert.Zero(t, channels[1].SupplierID)
+	// Delete this configuration and its channel associations in one transaction.
+	_, err = MutateSupplierResource(ctx, SupplierResourceMutation{Kind: "pool", Action: "delete", ID: fmt.Sprint(pool.ID), IfMatch: SupplierResourceETag("pool", pool)})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.SupplierBinding{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestSupplierPoolRejectsConflictingAssociationsAndStaleEditors(t *testing.T) {
+	db := supplierResourceFixture(t)
+	ctx := context.Background()
+	supplier := createSupplierResourceForTest(t, "supplier", "owner", `{"name":"Owner"}`, 0).Resource.(*model.Supplier)
+	body := `{"name":"Pool","failure_domain":"dc","limits":{"concurrency":10,"rpm":100,"tpm":10000},"max_execution_seconds":60,"input_safety_percent":110,"models":[{"name":"test","version":"v1","context_tokens":1000,"max_output_tokens":100}]}`
+	pool := createSupplierResourceForTest(t, "pool", "first", body, supplier.ID).Resource.(*model.SupplierPool)
+	other := createSupplierResourceForTest(t, "pool", "second", body, supplier.ID).Resource.(*model.SupplierPool)
+	channel := model.Channel{Name: "A", Type: 1, Models: "test"}
+	require.NoError(t, db.Create(&channel).Error)
+	binding := createSupplierResourceForTest(t, "binding", "b", fmt.Sprintf(`{"channel_id":%d,"model":"test","pool_id":%d}`, channel.Id, pool.ID), 0).Resource.(*model.SupplierBinding)
+	_, err := MutateSupplierResource(ctx, SupplierResourceMutation{Kind: "pool", Action: "patch", ID: fmt.Sprint(pool.ID), IfMatch: SupplierResourceETag("pool", pool), Patch: []byte(`{"bindings":[]}`)})
+	var problem *model.SupplierResourceError
+	require.ErrorAs(t, err, &problem)
+	assert.Equal(t, 412, problem.Status)
+	// Another pool cannot steal an occupied channel/model, or save limits when the association fails.
+	_, err = MutateSupplierResource(ctx, SupplierResourceMutation{Kind: "pool", Action: "patch", ID: fmt.Sprint(other.ID), IfMatch: SupplierResourceETag("pool", other), Patch: []byte(fmt.Sprintf(`{"limits":{"rpm":500},"bindings":[{"channel_id":%d,"model":"test"}]}`, channel.Id))})
+	require.ErrorAs(t, err, &problem)
+	assert.Equal(t, "binding_exists", problem.Code)
+	require.NoError(t, db.First(other, other.ID).Error)
+	assert.Equal(t, int64(100), other.Limits.RPM)
+	// Binding reassignment invalidates the source and destination pool editors.
+	current, err := model.ReadSupplierResource(db, "pool", fmt.Sprint(pool.ID))
+	require.NoError(t, err)
+	_, err = MutateSupplierResource(ctx, SupplierResourceMutation{Kind: "binding", Action: "patch", ID: fmt.Sprint(binding.ID), IfMatch: SupplierResourceETag("binding", binding), Patch: []byte(fmt.Sprintf(`{"pool_id":%d}`, other.ID))})
+	require.NoError(t, err)
+	for _, prior := range []*model.SupplierPool{current.(*model.SupplierPool), other} {
+		_, err = MutateSupplierResource(ctx, SupplierResourceMutation{Kind: "pool", Action: "patch", ID: fmt.Sprint(prior.ID), IfMatch: SupplierResourceETag("pool", prior), Patch: []byte(`{"limits":{"rpm":500}}`)})
+		require.ErrorAs(t, err, &problem)
+		assert.Equal(t, 412, problem.Status)
+	}
 }

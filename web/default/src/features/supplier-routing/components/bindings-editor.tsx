@@ -16,86 +16,144 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useId, useState } from 'react'
 import { useFormContext, useWatch } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  FieldSet,
+  FieldLegend,
+  FieldDescription,
+  FieldGroup,
+  Field,
+  FieldLabel,
+} from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
+
 import type { SupplierRoutingData } from '../api'
 import type { SupplierConfigValues } from '../lib/config-schema'
-import { ConfigField } from './config-fields'
+import { supplierModelChannels } from '../lib/resource-schema'
 
-export function BindingFields(props: {
-  channels: SupplierRoutingData['channels']
-  allBindings: SupplierConfigValues['bindings']
-  supplierId: number
+export function ModelChannels(props: {
+  data: SupplierRoutingData
+  poolIndex: number
+  model: string
 }) {
   const { t } = useTranslation()
+  const id = useId()
+  const [search, setSearch] = useState('')
   const form = useFormContext<SupplierConfigValues>()
-  const [allPools, binding] = useWatch({
+  const pool = useWatch({
     control: form.control,
-    name: ['pools', 'bindings.0'],
+    name: `pools.${props.poolIndex}`,
   })
-  const pools = allPools.filter((pool) => pool.supplier_id === props.supplierId)
-  const channels = props.channels.filter(
-    (channel) =>
-      channel.type === 1 &&
-      !props.allBindings.some(
-        (binding) =>
-          binding.channel_id === channel.id &&
-          allPools.some(
-            (pool) =>
-              pool.id === binding.pool_id &&
-              pool.supplier_id !== props.supplierId
-          )
-      )
+  const bindings = pool.bindings ?? []
+  const channels = supplierModelChannels(props.data, pool, props.model)
+  const visible = channels.filter((c) =>
+    `${c.name} #${c.id}`.toLowerCase().includes(search.trim().toLowerCase())
   )
-  const channel = channels.find((channel) => channel.id === binding.channel_id)
-  const pool = pools.find((pool) => pool.id === binding.pool_id)
-  const models =
-    channel?.models
-      .split(',')
-      .map((model) => model.trim())
-      .filter((model) => pool?.models.some((spec) => spec.name === model)) ?? []
-  const i = 0
+  const reasons = {
+    unsupported: t(
+      'This channel type is not yet supported by supplier routing.'
+    ),
+    supplier: t('This channel belongs to another supplier.'),
+    pool: t('This model is already associated with another resource pool.'),
+  }
   return (
-    <div className='grid gap-4 sm:grid-cols-3'>
-      <ConfigField
-        name={`bindings.${i}.channel_id`}
-        type='number'
-        label={t('Channel')}
-        options={channels.map((c) => ({
-          value: c.id,
-          label: `${c.name} · #${c.id}`,
-        }))}
-        onValueChange={() =>
-          form.setValue(`bindings.${i}.model`, '', {
-            shouldDirty: true,
-          })
-        }
-      />
-      <ConfigField
-        name={`bindings.${i}.pool_id`}
-        type='number'
-        label={t('Pool')}
-        options={pools.map((p) => ({
-          value: p.id,
-          label: p.name || `#${p.id}`,
-        }))}
-        onValueChange={() =>
-          form.setValue(`bindings.${i}.model`, '', {
-            shouldDirty: true,
-          })
-        }
-      />
-      <ConfigField
-        name={`bindings.${i}.model`}
-        label={t('Model')}
-        options={models.map((m) => ({ value: m, label: m }))}
-        description={
-          !models.length
-            ? t('The channel and pool need a matching verified model.')
-            : undefined
-        }
-      />
-    </div>
+    <FieldSet>
+      <FieldLegend variant='label'>{t('2. Associate channels')}</FieldLegend>
+      <FieldDescription>
+        {t(
+          'Select one or more channels. All associated channels share this capacity; adding channels does not multiply the limits.'
+        )}
+      </FieldDescription>
+      {props.model ? (
+        <>
+          <Field>
+            <FieldLabel className='sr-only' htmlFor={`${id}-search`}>
+              {t('Search channels by name or ID')}
+            </FieldLabel>
+            <Input
+              id={`${id}-search`}
+              placeholder={t('Search channels by name or ID')}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </Field>
+          <FieldDescription>
+            {t('{{selected}} selected · {{total}} matching channels', {
+              selected: bindings.filter((b) => b.model === props.model).length,
+              total: channels.length,
+            })}
+          </FieldDescription>
+          <FieldGroup className='max-h-60 gap-0 overflow-y-auto rounded-lg border'>
+            {visible.map((channel) => {
+              const checked = bindings.some(
+                (b) => b.model === props.model && b.channel_id === channel.id
+              )
+              return (
+                <Field
+                  key={channel.id}
+                  orientation='horizontal'
+                  className='items-start border-b p-3 last:border-b-0'
+                  data-disabled={Boolean(channel.reason)}
+                >
+                  <Checkbox
+                    id={`${id}-${channel.id}`}
+                    checked={checked}
+                    disabled={Boolean(channel.reason) && !checked}
+                    onCheckedChange={(selected) => {
+                      const remaining = bindings.filter(
+                        (b) =>
+                          b.model !== props.model || b.channel_id !== channel.id
+                      )
+                      form.setValue(
+                        `pools.${props.poolIndex}.bindings`,
+                        selected
+                          ? [
+                              ...remaining,
+                              { channel_id: channel.id, model: props.model },
+                            ]
+                          : remaining,
+                        { shouldDirty: true }
+                      )
+                    }}
+                  />
+                  <div className='min-w-0 flex-1'>
+                    <FieldLabel
+                      htmlFor={`${id}-${channel.id}`}
+                      className='flex flex-wrap gap-2 font-normal'
+                    >
+                      {channel.name} · #{channel.id}
+                      {channel.status !== 1 && (
+                        <Badge variant='outline'>{t('Disabled')}</Badge>
+                      )}
+                    </FieldLabel>
+                    {channel.reason && (
+                      <FieldDescription>
+                        {reasons[channel.reason]}
+                      </FieldDescription>
+                    )}
+                  </div>
+                </Field>
+              )
+            })}
+            {!visible.length && (
+              <p className='text-muted-foreground p-3 text-sm'>
+                {t(
+                  'No matching channels. Check the channel model list or your search.'
+                )}
+              </p>
+            )}
+          </FieldGroup>
+        </>
+      ) : (
+        <FieldDescription>
+          {t('Choose a platform model to see its channels.')}
+        </FieldDescription>
+      )}
+    </FieldSet>
   )
 }

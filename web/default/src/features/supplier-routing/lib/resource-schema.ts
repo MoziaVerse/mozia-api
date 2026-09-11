@@ -112,7 +112,7 @@ export function supplierResourceFormValues(
       resource
         ? (resource as unknown as SupplierConfigValues['pools'][number])
         : {
-            id: 1,
+            id: 0,
             supplier_id: supplierId ?? 0,
             name: '',
             failure_domain: '',
@@ -122,8 +122,13 @@ export function supplierResourceFormValues(
             input_safety_percent: 110,
             acceptance: '',
             models: [newSupplierModel()],
+            bindings: [],
           },
     ]
+    values.pools[0] = {
+      ...values.pools[0],
+      bindings: values.pools[0].bindings ?? [],
+    }
   }
   if (kind === 'binding') {
     values.bindings = [
@@ -156,6 +161,40 @@ export function supplierResourceFormValues(
     )
   }
   return values
+}
+
+// Keep unsupported/occupied channels visible with a reason instead of hiding them.
+export function supplierModelChannels(
+  data: SupplierRoutingData,
+  pool: SupplierConfigValues['pools'][number],
+  model: string
+) {
+  const owners = new Map(
+    (data.config.pools ?? []).map((p) => [p.id, p.supplier_id])
+  )
+  const occupied = new Map<number, 'supplier' | 'pool'>()
+  for (const binding of data.config.bindings ?? []) {
+    if (binding.pool_id === pool.id) continue
+    if (owners.get(binding.pool_id) !== pool.supplier_id) {
+      occupied.set(binding.channel_id, 'supplier')
+    } else if (binding.model === model && !occupied.has(binding.channel_id)) {
+      occupied.set(binding.channel_id, 'pool')
+    }
+  }
+  return data.channels
+    .filter((channel) =>
+      channel.models
+        .split(',')
+        .map((name) => name.trim())
+        .includes(model)
+    )
+    .map((channel) => ({
+      ...channel,
+      reason:
+        channel.type !== 1
+          ? ('unsupported' as const)
+          : occupied.get(channel.id),
+    }))
 }
 
 export function supplierFormResource(

@@ -56,6 +56,13 @@ type SupplierPool struct {
 	Models              []SupplierModelSpec `json:"models" gorm:"-"`
 	ModelsJSON          string              `json:"-" gorm:"type:text"`
 	Acceptance          string              `json:"acceptance" gorm:"type:text"`
+	// Only populated by the pool editor API; compiled runtime snapshots use the binding table.
+	Bindings []SupplierPoolBinding `json:"bindings,omitempty" gorm:"-"`
+}
+
+type SupplierPoolBinding struct {
+	ChannelID int    `json:"channel_id"`
+	Model     string `json:"model"`
 }
 
 type SupplierBinding struct {

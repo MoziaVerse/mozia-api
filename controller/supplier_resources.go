@@ -31,7 +31,18 @@ func supplierResourceError(c *gin.Context, err error) {
 
 func SupplierResourceDetail(kind string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		resource, err := model.ReadSupplierResource(model.DB.WithContext(c.Request.Context()), kind, c.Param("id"))
+		var resource any
+		err := model.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
+			// Read the pool version and its associations from one serialized snapshot.
+			if kind == "pool" {
+				if err := model.LockSupplierResources(tx); err != nil {
+					return err
+				}
+			}
+			var err error
+			resource, err = model.ReadSupplierResource(tx, kind, c.Param("id"))
+			return err
+		})
 		if err != nil {
 			supplierResourceError(c, err)
 			return

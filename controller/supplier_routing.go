@@ -33,8 +33,9 @@ func GetSupplierRouting(c *gin.Context) {
 		Name   string `json:"name"`
 		Models string `json:"models"`
 		Type   int    `json:"type"`
+		Status int    `json:"status"`
 	}
-	if err := model.DB.Model(&model.Channel{}).Select("id", "name", "models", "type").Order("id").Find(&channels).Error; err != nil {
+	if err := model.DB.Model(&model.Channel{}).Select("id", "name", "models", "type", "status").Order("id").Find(&channels).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}

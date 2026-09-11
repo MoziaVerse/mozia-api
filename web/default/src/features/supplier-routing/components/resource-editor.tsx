@@ -47,7 +47,6 @@ import {
   supplierFormResource,
   supplierResourceFormValues,
 } from '../lib/resource-schema'
-import { BindingFields } from './bindings-editor'
 import { PoolFields } from './pools-editor'
 import { RoutingControls } from './routing-controls'
 import { RuleFields } from './rules-editor'
@@ -81,8 +80,9 @@ export function ResourceEditor(props: EditorProps) {
     return <ResourceForm {...props} />
   }
   if (detail.error) return <p role='alert'>{detail.error.message}</p>
-  if (!detail.data || !detail.isFetchedAfterMount)
+  if (!detail.data || !detail.isFetchedAfterMount) {
     return <p>{t('Loading...')}</p>
+  }
   return <ResourceForm {...props} resource={detail.data} />
 }
 
@@ -312,6 +312,7 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
     setMode(next)
   }
   let saveLabel = t('Save this record')
+  if (kind === 'pool') saveLabel = t('Save models and channels')
   if (kind === 'rule') saveLabel = t('Publish this rule')
   if (kind === 'settings') saveLabel = t('Apply routing settings')
   return (
@@ -325,9 +326,13 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
         }}
       >
         <p className='text-muted-foreground text-sm'>
-          {t(
-            'Only this record is saved. Other suppliers, pools and rules are unchanged.'
-          )}
+          {kind === 'pool'
+            ? t(
+                'Model specifications, capacity limits and channel associations are saved together. If validation fails, nothing is saved.'
+              )
+            : t(
+                'Only this record is saved. Other suppliers, pools and rules are unchanged.'
+              )}
         </p>
         <div className='flex gap-2'>
           <Button
@@ -398,14 +403,7 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
           ) : (
             <>
               {kind === 'supplier' && <SupplierFields index={0} />}
-              {kind === 'pool' && <PoolFields index={0} />}
-              {kind === 'binding' && (
-                <BindingFields
-                  channels={props.data.channels}
-                  allBindings={props.data.config.bindings ?? []}
-                  supplierId={props.selection.supplierId ?? 0}
-                />
-              )}
+              {kind === 'pool' && <PoolFields index={0} data={props.data} />}
               {kind === 'rule' && <RuleFields index={0} />}
               {kind === 'settings' && <RoutingControls />}
             </>

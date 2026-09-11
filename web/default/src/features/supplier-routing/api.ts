@@ -39,7 +39,13 @@ export type SupplierRoutingData = {
     canary_percent: number
   }
   revisions: { id: number; created_at: number; created_by: number }[]
-  channels: { id: number; name: string; models: string; type: number }[]
+  channels: {
+    id: number
+    name: string
+    models: string
+    type: number
+    status: number
+  }[]
 }
 
 export type SupplierAttempt = {
