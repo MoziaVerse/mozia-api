@@ -19,6 +19,13 @@ type permissionRoute struct {
 func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 	channelRoute := apiRouter.Group("/channel")
 	channelRoute.Use(middleware.AdminAuth())
+	channelRoute.GET("/supplier-routing/models/:id", middleware.RequirePermission(authz.ChannelOperate), controller.PreviewSupplierModels)
+	channelRoute.GET("/supplier-routing", middleware.RequirePermission(authz.ChannelRead), controller.GetSupplierRouting)
+	channelRoute.POST("/supplier-routing/validate", middleware.RequirePermission(authz.SupplierRoutingPublish), controller.ValidateSupplierRouting)
+	channelRoute.PUT("/supplier-routing", middleware.RequirePermission(authz.SupplierRoutingPublish), controller.PublishSupplierRouting)
+	channelRoute.GET("/supplier-routing/stats", middleware.RequirePermission(authz.ChannelRead), controller.GetSupplierRoutingStats)
+	channelRoute.GET("/supplier-routing/attempts", middleware.RequirePermission(authz.ModelPricingRead), controller.GetSupplierAttempts)
+	channelRoute.POST("/supplier-routing/attempts/:id/reconcile", middleware.RequirePermission(authz.ModelPricingWrite), controller.ReconcileSupplierAttempt)
 
 	channelRoute.POST("/:id/key",
 		middleware.RootAuth(),

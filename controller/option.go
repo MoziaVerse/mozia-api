@@ -98,7 +98,7 @@ func GetOptions(c *gin.Context) {
 			strings.HasSuffix(k, "Key") ||
 			strings.HasSuffix(k, "secret") ||
 			strings.HasSuffix(k, "api_key")
-		if isSensitiveKey {
+		if isSensitiveKey || k == model.SupplierRoutingOptionKey {
 			continue
 		}
 		options = append(options, &model.Option{
@@ -298,6 +298,11 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
+	if option.Key == model.SupplierRoutingOptionKey {
+		common.ApiErrorMsg(c, "Supplier routing must use its dedicated publication endpoint")
+		return
+	}
+
 	if c.GetBool(contextKeyModelPricingOptionOnly) {
 		if !slices.Contains(completionRatioMetaOptionKeys, option.Key) {
 			common.ApiErrorMsg(c, "该接口只允许修改模型定价配置")

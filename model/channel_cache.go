@@ -232,6 +232,46 @@ func filterChannelsByRequestPath(channels []int, requestPath string) []int {
 	return filtered
 }
 
+// GetSatisfiedChannelCandidates shares the existing protocol filters and model
+// fallback, but returns all priority bands for capacity-aware routing.
+func GetSatisfiedChannelCandidates(group, modelName, requestPath string) ([]*Channel, error) {
+	if common.MemoryCacheEnabled {
+		channelSyncLock.RLock()
+		defer channelSyncLock.RUnlock()
+		ids := filterChannelsByRequestPath(group2model2channels[group][modelName], requestPath)
+		if len(ids) == 0 {
+			ids = filterChannelsByRequestPath(group2model2channels[group][ratio_setting.FormatMatchingModelName(modelName)], requestPath)
+		}
+		out := make([]*Channel, 0, len(ids))
+		for _, id := range ids {
+			if ch := channelsIDM[id]; ch != nil && ch.Status == common.ChannelStatusEnabled {
+				out = append(out, ch)
+			}
+		}
+		return out, nil
+	}
+	var abilities []Ability
+	for _, name := range []string{modelName, ratio_setting.FormatMatchingModelName(modelName)} {
+		if err := DB.Where(commonGroupCol+" = ? AND model = ? AND enabled = ?", group, name, true).Find(&abilities).Error; err != nil {
+			return nil, err
+		}
+		abilities = filterAbilitiesByRequestPath(abilities, requestPath)
+		if len(abilities) > 0 {
+			break
+		}
+	}
+	ids := make([]int, 0, len(abilities))
+	for _, a := range abilities {
+		ids = append(ids, a.ChannelId)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var channels []*Channel
+	err := DB.Where("id IN ? AND status = ?", ids, common.ChannelStatusEnabled).Find(&channels).Error
+	return channels, err
+}
+
 func CacheGetChannel(id int) (*Channel, error) {
 	if !common.MemoryCacheEnabled {
 		return GetChannelById(id, true)

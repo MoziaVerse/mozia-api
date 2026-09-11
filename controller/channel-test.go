@@ -72,7 +72,7 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
+func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) (testOutcome testResult) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -251,6 +251,12 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 
 	info.IsChannelTest = true
 	info.InitChannelMeta(c)
+	defer func() {
+		service.FinishSupplierAttempt(c, info, testOutcome.newAPIError, false)
+		if routing := service.SupplierRoutingState(c); routing != nil && routing.Cancel != nil {
+			routing.Cancel()
+		}
+	}()
 
 	err = attachTestBillingRequestInput(info, request)
 	if err != nil {
@@ -435,6 +441,10 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
+		var admission *service.SupplierAdmissionError
+		if errors.As(err, &admission) {
+			return testResult{context: c, localErr: err, newAPIError: service.SupplierRoutingError(err)}
+		}
 		return testResult{
 			context:     c,
 			localErr:    err,

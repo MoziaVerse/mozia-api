@@ -952,6 +952,28 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 
+	if originChannel.SupplierID != 0 {
+		if _, changed := requestData["model_mapping"]; changed && channel.GetModelMapping() != originChannel.GetModelMapping() {
+			common.ApiErrorMsg(c, "Unbind supplier routing before changing the accepted model mapping")
+			return
+		}
+		if channel.Type != 0 && channel.Type != constant.ChannelTypeOpenAI {
+			common.ApiErrorMsg(c, "Unbind supplier routing before changing the channel protocol")
+			return
+		}
+		channel.SupplierID = originChannel.SupplierID
+		if _, changed := requestData["settings"]; changed {
+			settings := channel.GetOtherSettings()
+			settings.SupplierPools = originChannel.GetOtherSettings().SupplierPools
+			settings.SupplierDeclarations = originChannel.GetOtherSettings().SupplierDeclarations
+			data, marshalErr := common.Marshal(settings)
+			if marshalErr != nil {
+				common.ApiError(c, marshalErr)
+				return
+			}
+			channel.OtherSettings = string(data)
+		}
+	}
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
 

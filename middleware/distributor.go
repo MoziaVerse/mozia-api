@@ -184,8 +184,15 @@ func Distribute() func(c *gin.Context) {
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
 		c.Next()
+		if routing := service.SupplierRoutingState(c); routing != nil && routing.Current != nil && routing.Current.Status != "success" {
+			return
+		}
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
-			service.RecordChannelAffinity(c, channel.Id)
+			successfulID := c.GetInt("supplier_success_channel_id")
+			if successfulID == 0 {
+				successfulID = channel.Id
+			}
+			service.RecordChannelAffinity(c, successfulID)
 		}
 	}
 }

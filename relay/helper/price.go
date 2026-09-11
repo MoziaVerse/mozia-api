@@ -87,6 +87,9 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 // that actually served the successful request, while the original reservation
 // is reconciled by BillingSession.Settle.
 func RefreshUserModelRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	if relayInfo.SupplierPriceFrozen {
+		return
+	}
 	groupRatioInfo := HandleGroupRatio(ctx, relayInfo)
 	relayInfo.PriceData.GroupRatioInfo = groupRatioInfo
 	if snapshot := relayInfo.TieredBillingSnapshot; snapshot != nil {

@@ -327,6 +327,23 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		return nil, err
 	}
 
+	if channel.SupplierID > 0 {
+		var declared struct {
+			Data []dto.SupplierModelDeclaration `json:"data"`
+		}
+		if len(body) > 2*1024*1024 {
+			return nil, fmt.Errorf("supplier manifest exceeds 2 MiB")
+		}
+		if err := common.Unmarshal(body, &declared); err != nil {
+			return nil, err
+		}
+		if len(declared.Data) > 128 {
+			return nil, fmt.Errorf("supplier manifest exceeds 128 models")
+		}
+		settings := channel.GetOtherSettings()
+		settings.SupplierDeclarations = declared.Data
+		channel.SetOtherSettings(settings)
+	}
 	var result OpenAIModelsResponse
 	if err := common.Unmarshal(body, &result); err != nil {
 		return nil, err
@@ -370,6 +387,9 @@ func checkAndPersistChannelUpstreamModelUpdates(
 
 	pendingAddModels, pendingRemoveModels, fetchErr := collectPendingUpstreamModelChanges(channel, *settings)
 	settings.UpstreamModelUpdateLastCheckTime = now
+	if fetchErr == nil && channel.SupplierID > 0 {
+		settings.SupplierDeclarations = channel.GetOtherSettings().SupplierDeclarations
+	}
 	if fetchErr != nil {
 		if err = updateChannelUpstreamModelSettings(channel, *settings, false); err != nil {
 			return false, 0, err
@@ -377,7 +397,7 @@ func checkAndPersistChannelUpstreamModelUpdates(
 		return false, 0, fetchErr
 	}
 
-	if allowAutoApply && settings.UpstreamModelUpdateAutoSyncEnabled && len(pendingAddModels) > 0 {
+	if allowAutoApply && channel.SupplierID == 0 && settings.UpstreamModelUpdateAutoSyncEnabled && len(pendingAddModels) > 0 {
 		originModels := normalizeModelNames(channel.GetModels())
 		mergedModels := mergeModelNames(originModels, pendingAddModels)
 		if len(mergedModels) > len(originModels) {

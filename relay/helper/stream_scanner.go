@@ -103,11 +103,17 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 		select {
 		case <-done:
+			if info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
+				logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
+			} else {
+				logger.LogError(c, fmt.Sprintf("stream ended: %s, received=%d", info.StreamStatus.Summary(), info.ReceivedResponseCount))
+			}
 		case <-time.After(5 * time.Second):
 			logger.LogError(c, "timeout waiting for goroutines to exit")
 		}
 
-		close(stopChan)
+		// Cancellation stops the workers. A timed-out worker may still send a
+		// stop signal, so let this local channel be collected instead of closing it.
 	}()
 
 	scanner.Split(bufio.ScanLines)
@@ -123,7 +129,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		wg.Add(1)
 		gopool.Go(func() {
 			defer func() {
-				wg.Done()
+				defer wg.Done()
 				if r := recover(); r != nil {
 					logger.LogError(c, fmt.Sprintf("ping goroutine panic: %v", r))
 					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("ping panic: %v", r))
@@ -185,7 +191,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	wg.Add(1)
 	gopool.Go(func() {
 		defer func() {
-			wg.Done()
+			defer wg.Done()
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("data handler goroutine panic: %v", r))
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("handler panic: %v", r))
@@ -209,7 +215,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	common.RelayCtxGo(ctx, func() {
 		defer func() {
 			close(dataChan)
-			wg.Done()
+			defer wg.Done()
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("scanner goroutine panic: %v", r))
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("scanner panic: %v", r))
@@ -283,9 +289,4 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
 	}
 
-	if info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
-		logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
-	} else {
-		logger.LogError(c, fmt.Sprintf("stream ended: %s, received=%d", info.StreamStatus.Summary(), info.ReceivedResponseCount))
-	}
 }

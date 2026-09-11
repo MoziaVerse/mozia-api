@@ -89,6 +89,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			if c.Writer.Written() {
+				return
+			}
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			switch relayFormat {
@@ -151,12 +154,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	relayInfo.SetEstimatePromptTokens(tokens)
-
 	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		return
 	}
+	if err := service.InitSupplierRouting(c, relayInfo); err != nil {
+		newAPIError = service.SupplierRoutingError(err)
+		return
+	}
+	if routing := service.SupplierRoutingState(c); routing != nil {
+		defer routing.Cancel()
+		defer func() { service.FinishSupplierAttempt(c, relayInfo, newAPIError, false) }()
+	}
+
 	if newAPIError = service.EnforceResellerModelAccess(relayInfo.UserId, relayInfo.OriginModelName); newAPIError != nil {
 		return
 	}
@@ -196,7 +207,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	maxAttempts := common.RetryTimes + 1
+	if routing := service.SupplierRoutingState(c); routing != nil {
+		maxAttempts = routing.Rule.MaxAttempts
+	}
+	for attempts := 0; attempts < maxAttempts; attempts++ {
+		if attempts > 0 {
+			retryParam.IncreaseRetry()
+		}
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
@@ -229,7 +247,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = relayHandler(c, relayInfo)
 		}
 
+		service.FinishSupplierAttempt(c, relayInfo, newAPIError, false)
 		if newAPIError == nil {
+			c.Set("supplier_success_channel_id", channel.Id)
 			relayInfo.LastError = nil
 			return
 		}
@@ -239,7 +259,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		if !shouldRetry(c, newAPIError, maxAttempts-attempts-1) {
 			break
 		}
 	}
@@ -308,6 +328,34 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
+	if routing := service.SupplierRoutingState(c); routing != nil && routing.Shadow && !routing.ShadowRecorded {
+		routing.ShadowRecorded = true
+		if _, err := service.SelectSupplierChannel(c, info, nil); err != nil {
+			logger.LogWarn(c, "supplier shadow recommendation unavailable: "+err.Error())
+		}
+	}
+
+	if routing := service.SupplierRoutingState(c); routing != nil && routing.Managed && !routing.Shadow {
+		var locked *model.Channel
+		_, specified := c.Get("specific_channel_id")
+		if specified || service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+			var err error
+			locked, err = model.CacheGetChannel(c.GetInt("channel_id"))
+			if err != nil {
+				return nil, service.SupplierRoutingError(err)
+			}
+		}
+		ch, err := service.SelectSupplierChannel(c, info, locked)
+		if err != nil {
+			return nil, service.SupplierRoutingError(err)
+		}
+		if apiErr := middleware.SetupContextForSelectedChannel(c, ch, info.OriginModelName); apiErr != nil {
+			return nil, apiErr
+		}
+		info.InitChannelMeta(c)
+		return ch, nil
+	}
+
 	if info.ChannelMeta == nil {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
@@ -340,23 +388,20 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
-	if openaiErr == nil {
+	if openaiErr == nil || retryTimes <= 0 || c.Writer.Written() || (c.Request != nil && c.Request.Context().Err() != nil) {
 		return false
 	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
-	if types.IsChannelError(openaiErr) {
-		return true
-	}
 	if types.IsSkipRetryError(openaiErr) {
-		return false
-	}
-	if retryTimes <= 0 {
 		return false
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
+	}
+	if types.IsChannelError(openaiErr) {
+		return true
 	}
 	code := openaiErr.StatusCode
 	if code >= 200 && code < 300 {

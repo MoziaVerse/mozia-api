@@ -21,6 +21,7 @@ import (
 )
 
 type Channel struct {
+	SupplierID         int64   `json:"supplier_id" gorm:"index"`
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
 	Key                string  `json:"key" gorm:"not null"`
