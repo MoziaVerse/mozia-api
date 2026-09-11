@@ -40,7 +40,10 @@ import {
   type SupplierResourceResult,
   type SupplierRoutingData,
 } from '../api'
-import type { SupplierConfigValues } from '../lib/config-schema'
+import {
+  supplierConfigSchema,
+  type SupplierConfigValues,
+} from '../lib/config-schema'
 import {
   editableSupplierResource,
   parseSupplierResourceJSON,
@@ -121,7 +124,6 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
   const prefix = {
     supplier: 'suppliers.0',
     pool: 'pools.0',
-    binding: 'bindings.0',
     rule: 'rules.0',
     settings: '',
   }[kind]
@@ -181,7 +183,9 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
   }
   const save = useMutation({
     mutationFn: (payload: Record<string, unknown>) => {
-      const body = JSON.stringify(payload)
+      const supplierId =
+        kind === 'pool' ? form.getValues('pools.0.supplier_id') : undefined
+      const body = JSON.stringify({ supplierId, payload })
       if (idempotency.current.body !== body) {
         idempotency.current = {
           body,
@@ -193,7 +197,7 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
       return saveSupplierResource({
         kind,
         resource: base,
-        supplierId: props.selection.supplierId,
+        supplierId,
         payload,
         idempotencyKey: idempotency.current.key,
       })
@@ -240,6 +244,11 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
     form.clearErrors()
     setMessage('')
     try {
+      if (kind === 'pool' && !base) {
+        supplierConfigSchema.shape.pools.element
+          .pick({ supplier_id: true })
+          .parse(form.getValues('pools.0'))
+      }
       const payload = parseSupplierResourceJSON(
         kind,
         raw ?? JSON.stringify(supplierFormResource(kind, form.getValues()))
@@ -312,7 +321,7 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
     setMode(next)
   }
   let saveLabel = t('Save this record')
-  if (kind === 'pool') saveLabel = t('Save models and channels')
+  if (kind === 'pool') saveLabel = t('Save resource pool')
   if (kind === 'rule') saveLabel = t('Publish this rule')
   if (kind === 'settings') saveLabel = t('Apply routing settings')
   return (
@@ -403,7 +412,9 @@ function ResourceForm(props: EditorProps & { resource?: SupplierResource }) {
           ) : (
             <>
               {kind === 'supplier' && <SupplierFields index={0} />}
-              {kind === 'pool' && <PoolFields index={0} data={props.data} />}
+              {kind === 'pool' && (
+                <PoolFields index={0} data={props.data} isNew={!base} />
+              )}
               {kind === 'rule' && <RuleFields index={0} />}
               {kind === 'settings' && <RoutingControls />}
             </>

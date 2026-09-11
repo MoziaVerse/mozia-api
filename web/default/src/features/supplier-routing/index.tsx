@@ -25,7 +25,10 @@ import { SupplierConfigEditor } from '@/features/supplier-routing/components/con
 import { hasPermission } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
-export function SuppliersPage() {
+export function SupplierManagementPage(props: {
+  view: 'suppliers' | 'pools'
+  supplierId?: number
+}) {
   const { t } = useTranslation()
   const user = useAuthStore((state) => state.auth.user)
   const canRead = hasPermission(user, 'channel', 'read')
@@ -39,6 +42,9 @@ export function SuppliersPage() {
   if (config.data) {
     return (
       <SupplierConfigEditor
+        key={props.view}
+        view={props.view}
+        supplierId={props.supplierId}
         data={config.data}
         canPublish={hasPermission(user, 'supplier_routing', 'publish')}
         canPreview={hasPermission(user, 'channel', 'operate')}
@@ -47,7 +53,9 @@ export function SuppliersPage() {
   }
   return (
     <SectionPageLayout>
-      <SectionPageLayout.Title>{t('Suppliers')}</SectionPageLayout.Title>
+      <SectionPageLayout.Title>
+        {props.view === 'pools' ? t('Resource pools') : t('Suppliers')}
+      </SectionPageLayout.Title>
       <SectionPageLayout.Content>
         {config.error ? (
           <p role='alert'>{config.error.message}</p>

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { isAxiosError } from 'axios'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -43,6 +44,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import {
   deleteSupplierResource,
+  saveSupplierResource,
   getSupplierResourceStatus,
   previewSupplierModels,
   type SupplierResource,
@@ -54,15 +56,18 @@ import {
   type SupplierConfigValues,
 } from '../lib/config-schema'
 import { ResourceEditor, type ResourceSelection } from './resource-editor'
+import { ResourcePoolList } from './resource-pool-list'
 import { SupplierList } from './supplier-list'
 
 type Workspace = {
   supplierId?: number
-  section: 'basic' | 'pools' | 'rules' | 'settings'
+  section: 'basic' | 'pool' | 'rules' | 'settings'
   resource?: ResourceSelection
 }
 
 export function SupplierConfigEditor(props: {
+  view: 'suppliers' | 'pools'
+  supplierId?: number
   data: SupplierRoutingData
   canPublish: boolean
   canPreview: boolean
@@ -91,16 +96,24 @@ export function SupplierConfigEditor(props: {
     queryFn: getSupplierResourceStatus,
     refetchInterval: 5000,
   })
-  const remove = useMutation({
-    mutationFn: (value: NonNullable<typeof deleting>) =>
-      deleteSupplierResource(value.kind, value.resource),
-    onSuccess: (result) => {
+  const change = useMutation({
+    mutationFn: (value: NonNullable<typeof deleting> & { enabled?: boolean }) =>
+      value.enabled === undefined
+        ? deleteSupplierResource(value.kind, value.resource)
+        : saveSupplierResource({
+            kind: value.kind,
+            resource: value.resource,
+            payload: { enabled: value.enabled },
+            idempotencyKey: '',
+          }),
+    onSuccess: (result, value) => {
       setDeleting(null)
-      toast.success(
-        result.application === 'pending'
-          ? t('Saved. Waiting for routing to apply.')
-          : t('Record deleted.')
-      )
+      let message =
+        value.enabled === undefined ? t('Record deleted.') : t('Record saved.')
+      if (result.application === 'pending') {
+        message = t('Saved. Waiting for routing to apply.')
+      }
+      toast.success(message)
       void queryClient.invalidateQueries({ queryKey: ['supplier-routing'] })
       void queryClient.invalidateQueries({ queryKey: ['supplier-status'] })
     },
@@ -132,11 +145,8 @@ export function SupplierConfigEditor(props: {
   const supplier = config.suppliers.find(
     (supplier) => supplier.id === workspace?.supplierId
   )
-  const pools = config.pools.filter(
-    (pool) => pool.supplier_id === workspace?.supplierId
-  )
-  const bindings = config.bindings.filter((binding) =>
-    pools.some((pool) => pool.id === binding.pool_id)
+  const bindings = config.bindings.filter(
+    (binding) => binding.pool_id === workspace?.resource?.id
   )
   const modes = {
     legacy: t('Original channel routing'),
@@ -144,39 +154,17 @@ export function SupplierConfigEditor(props: {
     canary: t('Gradual customer rollout'),
     active: t('Dynamic routing for all matched customers'),
   }
-  const isSupplier =
-    workspace?.section === 'basic' || workspace?.section === 'pools'
-  const busy = remove.isPending
-  const listActions = (
-    kind: SupplierResourceKind,
-    item: { id?: number | string },
-    label: string
-  ) => (
-    <div className='flex gap-2'>
-      <Button
-        variant='outline'
-        size='sm'
-        onClick={() =>
-          navigate({
-            ...(workspace ?? { section: 'rules' }),
-            resource: { kind, id: item.id, supplierId: workspace?.supplierId },
-          })
-        }
-      >
-        {t('Edit')}
-      </Button>
-      {props.canPublish && (
-        <Button
-          variant='ghost'
-          size='sm'
-          disabled={busy}
-          onClick={() => askDelete(kind, item, label)}
-        >
-          {t('Delete')}
-        </Button>
-      )}
-    </div>
-  )
+  const isSupplier = workspace?.section === 'basic'
+  const isPool = workspace?.section === 'pool'
+  const busy = change.isPending
+  let drawerTitle = t('Routing policies')
+  if (isSupplier) drawerTitle = supplier?.name || t('Create supplier')
+  if (isPool) {
+    drawerTitle =
+      workspace?.resource?.id === undefined
+        ? t('Add resource pool')
+        : t('Resource pool configuration')
+  }
   const onSaved = (resource: SupplierResource) => {
     setDirty(false)
     if (!workspace) return
@@ -185,18 +173,24 @@ export function SupplierConfigEditor(props: {
       workspace.resource.id === undefined
     ) {
       const id = Number(resource.id)
-      setWorkspace({ supplierId: id, section: 'pools' })
+      setWorkspace({
+        supplierId: id,
+        section: 'basic',
+        resource: { kind: 'supplier', id },
+      })
     } else if (
       workspace.resource?.kind !== 'supplier' &&
       workspace.resource?.kind !== 'settings'
     ) {
-      setWorkspace({ ...workspace, resource: undefined })
+      setWorkspace(isPool ? null : { ...workspace, resource: undefined })
     }
   }
   return (
     <>
       <SectionPageLayout>
-        <SectionPageLayout.Title>{t('Suppliers')}</SectionPageLayout.Title>
+        <SectionPageLayout.Title>
+          {props.view === 'pools' ? t('Resource pools') : t('Suppliers')}
+        </SectionPageLayout.Title>
         <SectionPageLayout.Content>
           <div className='space-y-4'>
             <div className='flex flex-wrap items-center gap-3'>
@@ -208,27 +202,42 @@ export function SupplierConfigEditor(props: {
                 {status.data?.applied_revision ?? config.revision}
               </span>
               <div className='ml-auto flex gap-2'>
-                <Button
-                  variant='outline'
-                  onClick={() =>
-                    navigate({
-                      section: 'settings',
-                      resource: { kind: 'settings' },
-                    })
-                  }
-                >
-                  {t('Routing policies')}
-                </Button>
-                {props.canPublish && (
+                {props.view === 'suppliers' && (
                   <Button
+                    variant='outline'
                     onClick={() =>
                       navigate({
-                        section: 'basic',
-                        resource: { kind: 'supplier' },
+                        section: 'settings',
+                        resource: { kind: 'settings' },
                       })
                     }
                   >
-                    {t('Create supplier')}
+                    {t('Routing policies')}
+                  </Button>
+                )}
+                {props.canPublish && (
+                  <Button
+                    disabled={
+                      busy ||
+                      (props.view === 'pools' && !config.suppliers.length)
+                    }
+                    onClick={() =>
+                      navigate(
+                        props.view === 'pools'
+                          ? {
+                              section: 'pool',
+                              resource: {
+                                kind: 'pool',
+                                supplierId: props.supplierId,
+                              },
+                            }
+                          : { section: 'basic', resource: { kind: 'supplier' } }
+                      )
+                    }
+                  >
+                    {props.view === 'pools'
+                      ? t('Add resource pool')
+                      : t('Create supplier')}
                   </Button>
                 )}
               </div>
@@ -242,21 +251,62 @@ export function SupplierConfigEditor(props: {
               </Alert>
             )}
             {status.error && <p role='alert'>{status.error.message}</p>}
-            <SupplierList
-              config={config}
-              readOnly={!props.canPublish || busy}
-              onEdit={(id) =>
-                navigate({
-                  supplierId: id,
-                  section: 'basic',
-                  resource: { kind: 'supplier', id },
-                })
-              }
-              onDelete={(id) => {
-                const record = config.suppliers.find((item) => item.id === id)
-                if (record) askDelete('supplier', record, record.name)
-              }}
-            />
+            {props.view === 'pools' ? (
+              <>
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'Manage shared capacity, model specifications and channel associations for each resource pool.'
+                  )}
+                </p>
+                {!config.suppliers.length && (
+                  <Button variant='outline' render={<Link to='/suppliers' />}>
+                    {t('Create a supplier first')}
+                  </Button>
+                )}
+                <ResourcePoolList
+                  config={config}
+                  canPublish={props.canPublish}
+                  busy={busy}
+                  onEdit={(id) =>
+                    navigate({
+                      section: 'pool',
+                      resource: { kind: 'pool', id },
+                    })
+                  }
+                  onDelete={(id) => {
+                    const record = config.pools.find((pool) => pool.id === id)
+                    if (record) askDelete('pool', record, record.name)
+                  }}
+                  onToggle={(id) => {
+                    const record = config.pools.find((pool) => pool.id === id)
+                    if (record) {
+                      change.mutate({
+                        kind: 'pool',
+                        resource: record as unknown as SupplierResource,
+                        name: record.name,
+                        enabled: !record.enabled,
+                      })
+                    }
+                  }}
+                />
+              </>
+            ) : (
+              <SupplierList
+                config={config}
+                readOnly={!props.canPublish || busy}
+                onEdit={(id) =>
+                  navigate({
+                    supplierId: id,
+                    section: 'basic',
+                    resource: { kind: 'supplier', id },
+                  })
+                }
+                onDelete={(id) => {
+                  const record = config.suppliers.find((item) => item.id === id)
+                  if (record) askDelete('supplier', record, record.name)
+                }}
+              />
+            )}
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
@@ -268,64 +318,62 @@ export function SupplierConfigEditor(props: {
       >
         <SheetContent className={sideDrawerContentClassName('sm:max-w-3xl')}>
           <SheetHeader className={sideDrawerHeaderClassName()}>
-            <SheetTitle>
-              {isSupplier
-                ? supplier?.name || t('Create supplier')
-                : t('Routing policies')}
-            </SheetTitle>
+            <SheetTitle>{drawerTitle}</SheetTitle>
             <SheetDescription>
-              {t(
-                'Save the supplier, then choose models, associate channels and set capacity in one form.'
-              )}
+              {isPool
+                ? t(
+                    'Configure basic information and shared capacity first, then add models and associated channels. Save the entire resource pool once.'
+                  )
+                : t(
+                    'Manage supplier details and routing policies. Shared capacity is configured on the Resource pools page.'
+                  )}
             </SheetDescription>
           </SheetHeader>
           <div className={sideDrawerFormClassName()}>
             {workspace && (
               <>
-                <Tabs
-                  value={workspace.section}
-                  onValueChange={(value) => {
-                    const section = String(value) as Workspace['section']
-                    let resource: ResourceSelection | undefined
-                    if (section === 'basic') {
-                      resource = { kind: 'supplier', id: workspace.supplierId }
+                {!isSupplier && !isPool && (
+                  <Tabs
+                    value={workspace.section}
+                    onValueChange={(value) => {
+                      const section = String(value) as 'settings' | 'rules'
+                      navigate({
+                        section,
+                        resource:
+                          section === 'settings'
+                            ? { kind: 'settings' }
+                            : undefined,
+                      })
+                    }}
+                  >
+                    <TabsList variant='line'>
+                      <TabsTrigger value='settings'>
+                        {t('Traffic routing')}
+                      </TabsTrigger>
+                      <TabsTrigger value='rules'>
+                        {t('Supplier routing rules')}
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                )}
+                {isSupplier && workspace.supplierId !== undefined && (
+                  <Button
+                    className='my-3'
+                    variant='outline'
+                    render={
+                      <Link
+                        to='/resource-pools'
+                        search={{ supplier: [String(workspace.supplierId)] }}
+                      />
                     }
-                    if (section === 'settings') resource = { kind: 'settings' }
-                    navigate({
-                      supplierId: workspace.supplierId,
-                      section,
-                      resource,
-                    })
-                  }}
-                >
-                  <TabsList variant='line'>
-                    {isSupplier ? (
-                      <>
-                        <TabsTrigger value='basic'>
-                          {t('Basic information')}
-                        </TabsTrigger>
-                        <TabsTrigger
-                          value='pools'
-                          disabled={workspace.supplierId === undefined}
-                        >
-                          {t('Models and channels')}
-                        </TabsTrigger>
-                      </>
-                    ) : (
-                      <>
-                        <TabsTrigger value='settings'>
-                          {t('Traffic routing')}
-                        </TabsTrigger>
-                        <TabsTrigger value='rules'>
-                          {t('Supplier routing rules')}
-                        </TabsTrigger>
-                      </>
-                    )}
-                  </TabsList>
-                </Tabs>
+                  >
+                    {t('View resource pools')}
+                  </Button>
+                )}
                 {workspace.resource &&
                   workspace.resource.kind !== 'supplier' &&
-                  workspace.resource.kind !== 'settings' && (
+                  workspace.resource.kind !== 'settings' &&
+                  !isPool && (
                     <Button
                       className='my-3'
                       variant='ghost'
@@ -337,111 +385,53 @@ export function SupplierConfigEditor(props: {
                     </Button>
                   )}
                 {workspace.resource ? (
-                  <ResourceEditor
-                    key={`${workspace.resource.kind}:${workspace.resource.id ?? 'new'}:${workspace.supplierId ?? ''}`}
-                    selection={workspace.resource}
-                    data={props.data}
-                    canPublish={props.canPublish}
-                    onDirtyChange={setDirty}
-                    onSaved={onSaved}
-                  />
+                  <>
+                    <ResourceEditor
+                      key={`${workspace.resource.kind}:${workspace.resource.id ?? 'new'}:${workspace.supplierId ?? ''}`}
+                      selection={workspace.resource}
+                      data={props.data}
+                      canPublish={props.canPublish}
+                      onDirtyChange={setDirty}
+                      onSaved={onSaved}
+                    />
+                    {isPool &&
+                      props.canPreview &&
+                      workspace.resource?.id !== undefined && (
+                        <details>
+                          <summary className='cursor-pointer text-sm'>
+                            {t('Preview supplier model declarations')}
+                          </summary>
+                          <div className='my-3 flex flex-wrap gap-2'>
+                            {props.data.channels
+                              .filter((channel) =>
+                                bindings.some(
+                                  (binding) => binding.channel_id === channel.id
+                                )
+                              )
+                              .map((channel) => (
+                                <Button
+                                  key={channel.id}
+                                  variant='outline'
+                                  disabled={preview.isPending}
+                                  onClick={() => preview.mutate(channel.id)}
+                                >
+                                  {channel.name}
+                                </Button>
+                              ))}
+                          </div>
+                          {preview.error && (
+                            <p role='alert'>{preview.error.message}</p>
+                          )}
+                          {preview.data !== undefined && (
+                            <pre className='max-h-80 overflow-auto rounded border p-3 text-xs'>
+                              {JSON.stringify(preview.data, null, 2)}
+                            </pre>
+                          )}
+                        </details>
+                      )}
+                  </>
                 ) : (
                   <div className='space-y-4 py-4'>
-                    {workspace.section === 'pools' && (
-                      <>
-                        <p className='text-muted-foreground text-sm'>
-                          {t(
-                            'A resource pool represents shared capacity in a supplier cluster. Channels and keys using that cluster share the same limits.'
-                          )}
-                        </p>
-                        {pools.map((pool) => (
-                          <div
-                            className='flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4'
-                            key={pool.id}
-                          >
-                            <div>
-                              <p className='font-medium'>{pool.name}</p>
-                              <p className='text-muted-foreground text-sm'>
-                                {pool.limits.rpm} RPM · {pool.limits.tpm} TPM ·{' '}
-                                {pool.models
-                                  .map((model) => model.name)
-                                  .join(', ')}
-                              </p>
-                              <p className='text-muted-foreground text-sm'>
-                                {t('Associated channels')}:{' '}
-                                {bindings
-                                  .filter((b) => b.pool_id === pool.id)
-                                  .map(
-                                    (b) =>
-                                      props.data.channels.find(
-                                        (c) => c.id === b.channel_id
-                                      )?.name ?? `#${b.channel_id}`
-                                  )
-                                  .filter(
-                                    (name, index, names) =>
-                                      names.indexOf(name) === index
-                                  )
-                                  .join(', ') || t('None')}
-                              </p>
-                              <Badge variant='outline'>
-                                {pool.enabled ? t('Enabled') : t('Disabled')}
-                              </Badge>
-                            </div>
-                            {listActions('pool', pool, pool.name)}
-                          </div>
-                        ))}
-                        {props.canPublish && (
-                          <Button
-                            variant='outline'
-                            onClick={() =>
-                              navigate({
-                                ...workspace,
-                                resource: {
-                                  kind: 'pool',
-                                  supplierId: workspace.supplierId,
-                                },
-                              })
-                            }
-                          >
-                            {t('Add model configuration')}
-                          </Button>
-                        )}
-                        {props.canPreview && (
-                          <details>
-                            <summary className='cursor-pointer text-sm'>
-                              {t('Preview supplier model declarations')}
-                            </summary>
-                            <div className='my-3 flex flex-wrap gap-2'>
-                              {props.data.channels
-                                .filter((channel) =>
-                                  bindings.some(
-                                    (binding) =>
-                                      binding.channel_id === channel.id
-                                  )
-                                )
-                                .map((channel) => (
-                                  <Button
-                                    key={channel.id}
-                                    variant='outline'
-                                    disabled={preview.isPending}
-                                    onClick={() => preview.mutate(channel.id)}
-                                  >
-                                    {channel.name}
-                                  </Button>
-                                ))}
-                            </div>
-                            {preview.error && (
-                              <p role='alert'>{preview.error.message}</p>
-                            )}
-                            {preview.data !== undefined && (
-                              <pre className='max-h-80 overflow-auto rounded border p-3 text-xs'>
-                                {JSON.stringify(preview.data, null, 2)}
-                              </pre>
-                            )}
-                          </details>
-                        )}
-                      </>
-                    )}
                     {workspace.section === 'rules' && (
                       <>
                         {config.rules.map((rule) => (
@@ -457,7 +447,32 @@ export function SupplierConfigEditor(props: {
                                 {rule.id}
                               </p>
                             </div>
-                            {listActions('rule', rule, rule.model)}
+                            <div className='flex gap-2'>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                onClick={() =>
+                                  navigate({
+                                    section: 'rules',
+                                    resource: { kind: 'rule', id: rule.id },
+                                  })
+                                }
+                              >
+                                {t('Edit')}
+                              </Button>
+                              {props.canPublish && (
+                                <Button
+                                  variant='ghost'
+                                  size='sm'
+                                  disabled={busy}
+                                  onClick={() =>
+                                    askDelete('rule', rule, rule.model)
+                                  }
+                                >
+                                  {t('Delete')}
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         ))}
                         {props.canPublish && (
@@ -512,12 +527,19 @@ export function SupplierConfigEditor(props: {
           if (!open) setDeleting(null)
         }}
         title={t('Delete')}
-        desc={deleting?.name ?? ''}
+        desc={
+          deleting?.kind === 'pool'
+            ? t(
+                'Delete resource pool {{name}} and remove its channel associations? The channels themselves will be kept.',
+                { name: deleting.name }
+              )
+            : (deleting?.name ?? '')
+        }
         destructive
         isLoading={busy}
         confirmText={t('Delete')}
         handleConfirm={() => {
-          if (deleting) remove.mutate(deleting)
+          if (deleting) change.mutate(deleting)
         }}
       />
     </>

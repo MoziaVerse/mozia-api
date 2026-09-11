@@ -37,7 +37,6 @@ const schemas = {
   pool: supplierConfigSchema.shape.pools.element
     .omit({ id: true, supplier_id: true })
     .strict(),
-  binding: supplierConfigSchema.shape.bindings.element.strict(),
   rule: supplierConfigSchema.shape.rules.element.omit({ id: true }).strict(),
   settings: supplierConfigSchema
     .pick({ enabled: true, shadow: true, canary_percent: true })
@@ -130,19 +129,6 @@ export function supplierResourceFormValues(
       bindings: values.pools[0].bindings ?? [],
     }
   }
-  if (kind === 'binding') {
-    values.bindings = [
-      resource
-        ? (resource as unknown as SupplierConfigValues['bindings'][number])
-        : {
-            channel_id: 0,
-            pool_id:
-              values.pools.find((pool) => pool.supplier_id === supplierId)
-                ?.id ?? 0,
-            model: '',
-          },
-    ]
-  }
   if (kind === 'rule') {
     values.rules = [
       resource
@@ -204,7 +190,6 @@ export function supplierFormResource(
   const objects = {
     supplier: values.suppliers[0],
     pool: values.pools[0],
-    binding: values.bindings[0],
     rule: values.rules[0],
     settings: values,
   }

@@ -31,6 +31,7 @@ import {
   Field,
   FieldLabel,
   FieldDescription,
+  FieldGroup,
   FieldSet,
   FieldLegend,
 } from '@/components/ui/field'
@@ -71,7 +72,7 @@ function PoolModels(props: { poolIndex: number; data: SupplierRoutingData }) {
   ].sort()
   return (
     <FieldSet>
-      <FieldLegend>{t('Models and channels')}</FieldLegend>
+      <FieldLegend>{t('Model information')}</FieldLegend>
       {list.fields.map((item, i) => {
         const path = `pools.${props.poolIndex}.models.${i}` as const
         const options = platformModels
@@ -229,29 +230,58 @@ function PoolModels(props: { poolIndex: number; data: SupplierRoutingData }) {
 export function PoolFields(props: {
   index: number
   data: SupplierRoutingData
+  isNew: boolean
 }) {
   const { t } = useTranslation()
   const i = props.index
+  const form = useFormContext<SupplierConfigValues>()
+  const supplierId = useWatch({
+    control: form.control,
+    name: `pools.${i}.supplier_id`,
+  })
   return (
-    <div className='space-y-5'>
-      <PoolModels poolIndex={i} data={props.data} />
-      <div className='grid gap-4 sm:grid-cols-2'>
-        <ConfigField name={`pools.${i}.name`} label={t('Pool name')} />
-        <ConfigField
-          name={`pools.${i}.failure_domain`}
-          label={t('Failure domain')}
-          description={t(
-            'Use the same identifier for pools affected by the same datacenter outage.'
-          )}
-        />
-        <ConfigField
-          name={`pools.${i}.acceptance`}
-          label={t('Acceptance or load-test reference')}
-          description={t(
-            'Required before enabling a pool. Enter the reference to your verified capacity report.'
-          )}
-        />
-      </div>
+    <FieldGroup>
+      <FieldSet>
+        <FieldLegend>{t('Basic information')}</FieldLegend>
+        {props.isNew ? (
+          <ConfigField
+            name={`pools.${i}.supplier_id`}
+            type='number'
+            label={t('Supplier')}
+            options={(props.data.config.suppliers ?? []).map((supplier) => ({
+              value: supplier.id,
+              label: `${supplier.name} · #${supplier.id}`,
+            }))}
+            onValueChange={() =>
+              form.setValue(`pools.${i}.bindings`, [], { shouldDirty: true })
+            }
+          />
+        ) : (
+          <FieldDescription>
+            {t('Supplier')}:{' '}
+            {props.data.config.suppliers?.find(
+              (supplier) => supplier.id === supplierId
+            )?.name ?? `#${supplierId}`}
+          </FieldDescription>
+        )}
+        <div className='grid gap-4 sm:grid-cols-2'>
+          <ConfigField name={`pools.${i}.name`} label={t('Pool name')} />
+          <ConfigField
+            name={`pools.${i}.failure_domain`}
+            label={t('Failure domain')}
+            description={t(
+              'Use the same identifier for pools affected by the same datacenter outage.'
+            )}
+          />
+          <ConfigField
+            name={`pools.${i}.acceptance`}
+            label={t('Acceptance or load-test reference')}
+            description={t(
+              'Required before enabling a pool. Enter the reference to your verified capacity report.'
+            )}
+          />
+        </div>
+      </FieldSet>
       <FieldSet>
         <FieldLegend>{t('Shared capacity limits')}</FieldLegend>
         <div className='grid gap-4 sm:grid-cols-3'>
@@ -301,6 +331,7 @@ export function PoolFields(props: {
           label={t('Input token safety margin (%)')}
         />
       </div>
+      <PoolModels poolIndex={i} data={props.data} />
       <ConfigSwitch
         name={`pools.${i}.enabled`}
         label={t('Pool available')}
@@ -308,6 +339,6 @@ export function PoolFields(props: {
           'Enable only after verifying the model specifications and capacity limits.'
         )}
       />
-    </div>
+    </FieldGroup>
   )
 }

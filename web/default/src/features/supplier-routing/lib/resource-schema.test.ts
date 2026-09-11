@@ -117,6 +117,8 @@ test('pool JSON round trip saves specifications and multiple channel association
   }
   const values = supplierResourceFormValues(data, 'pool', undefined, 2)
   const pool = values.pools[0]
+  assert.equal(pool.supplier_id, 2)
+  assert.equal(supplierResourceFormValues(data, 'pool').pools[0].supplier_id, 0)
   pool.name = 'Shared capacity'
   pool.failure_domain = 'dc-a'
   pool.models[0].name = 'test'

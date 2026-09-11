@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Link } from '@tanstack/react-router'
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -142,6 +143,18 @@ export function SupplierList(props: {
       header: t('Actions'),
       cell: ({ row }) => (
         <div className='flex gap-1'>
+          <Button
+            variant='ghost'
+            size='sm'
+            render={
+              <Link
+                to='/resource-pools'
+                search={{ supplier: [String(row.original.id)] }}
+              />
+            }
+          >
+            {t('View resource pools')}
+          </Button>
           <Button
             variant='ghost'
             size='sm'

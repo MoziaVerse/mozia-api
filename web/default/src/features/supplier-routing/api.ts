@@ -141,12 +141,7 @@ export async function previewSupplierModels(id: number): Promise<unknown> {
   return response.data.data
 }
 
-export type SupplierResourceKind =
-  | 'supplier'
-  | 'pool'
-  | 'binding'
-  | 'rule'
-  | 'settings'
+export type SupplierResourceKind = 'supplier' | 'pool' | 'rule' | 'settings'
 export type SupplierResource = {
   id?: number | string
   version: number
@@ -183,7 +178,6 @@ export function supplierResourcePath(
   const paths = {
     supplier: '/api/suppliers',
     pool: '/api/supplier-pools',
-    binding: '/api/supplier-bindings',
     rule: '/api/supplier-routing/rules',
   }
   return id === undefined

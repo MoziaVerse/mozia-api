@@ -135,6 +135,11 @@ export function useSidebarData(): SidebarData {
                   icon: Box,
                 },
                 {
+                  title: t('Resource pools'),
+                  url: '/resource-pools',
+                  icon: ServerCog,
+                },
+                {
                   title: t('Supplier monitoring'),
                   url: '/supplier-monitor',
                   icon: Activity,

@@ -110,6 +110,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/profile': { section: 'personal', module: 'personal' },
   '/channels': { section: 'admin', module: 'channel' },
   '/suppliers': { section: 'admin', module: 'channel' },
+  '/resource-pools': { section: 'admin', module: 'channel' },
   '/supplier-monitor': { section: 'admin', module: 'channel' },
   '/models': { section: 'admin', module: 'models' },
   '/models/metadata': { section: 'admin', module: 'models' },
