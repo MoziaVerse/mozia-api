@@ -39,7 +39,6 @@ export function ConfigField(props: {
   type?: 'number' | 'text'
   min?: number
   max?: number
-  readOnly?: boolean
   onValueChange?: () => void
   options?: { value: string | number; label: string }[]
 }) {
@@ -81,7 +80,6 @@ export function ConfigField(props: {
           min={props.min}
           max={props.max}
           step={props.type === 'number' ? 1 : undefined}
-          readOnly={props.readOnly}
           aria-invalid={Boolean(error)}
           aria-describedby={`${id}-description`}
           {...registration}

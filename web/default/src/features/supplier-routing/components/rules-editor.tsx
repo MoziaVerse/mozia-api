@@ -104,9 +104,9 @@ function RuleTargets(props: { index: number }) {
         variant='outline'
         disabled={list.fields.length >= 32 || !nextSupplier}
         onClick={() => {
-            if (nextSupplier) {
-              list.append({ supplier_id: nextSupplier.id, weight: 100 })
-            }
+          if (nextSupplier) {
+            list.append({ supplier_id: nextSupplier.id, weight: 100 })
+          }
         }}
       >
         {t('Add target supplier')}
@@ -223,47 +223,30 @@ export function RulesEditor() {
                 {t('Health and recovery thresholds')}
               </summary>
               <div className='mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-                <ConfigField
-                  name={`rules.${i}.health.window_seconds`}
-                  type='number'
-                  min={10}
-                  max={3600}
-                  label={t('Health window (seconds)')}
-                />
-                <ConfigField
-                  name={`rules.${i}.health.min_samples`}
-                  type='number'
-                  min={1}
-                  max={10000}
-                  label={t('Minimum samples')}
-                />
-                <ConfigField
-                  name={`rules.${i}.health.failure_percent`}
-                  type='number'
-                  min={1}
-                  max={100}
-                  label={t('Failure threshold (%)')}
-                />
-                <ConfigField
-                  name={`rules.${i}.health.max_ttft_ms`}
-                  type='number'
-                  min={1}
-                  label={t('First-token threshold (ms)')}
-                />
-                <ConfigField
-                  name={`rules.${i}.health.cooldown_seconds`}
-                  type='number'
-                  min={1}
-                  max={3600}
-                  label={t('Cooldown (seconds)')}
-                />
-                <ConfigField
-                  name={`rules.${i}.health.trial_percent`}
-                  type='number'
-                  min={1}
-                  max={100}
-                  label={t('Recovery trial percentage')}
-                />
+                {(
+                  [
+                    ['window_seconds', t('Health window (seconds)'), 10, 3600],
+                    ['min_samples', t('Minimum samples'), 1, 10000],
+                    ['failure_percent', t('Failure threshold (%)'), 1, 100],
+                    [
+                      'max_ttft_ms',
+                      t('First-token threshold (ms)'),
+                      1,
+                      undefined,
+                    ],
+                    ['cooldown_seconds', t('Cooldown (seconds)'), 1, 3600],
+                    ['trial_percent', t('Recovery trial percentage'), 1, 100],
+                  ] as const
+                ).map(([name, label, min, max]) => (
+                  <ConfigField
+                    key={name}
+                    name={`rules.${i}.health.${name}`}
+                    type='number'
+                    min={min}
+                    max={max}
+                    label={label}
+                  />
+                ))}
               </div>
             </details>
           </CardContent>
