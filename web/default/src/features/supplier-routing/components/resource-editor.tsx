@@ -81,7 +81,8 @@ export function ResourceEditor(props: EditorProps) {
     return <ResourceForm {...props} />
   }
   if (detail.error) return <p role='alert'>{detail.error.message}</p>
-  if (!detail.data) return <p>{t('Loading...')}</p>
+  if (!detail.data || !detail.isFetchedAfterMount)
+    return <p>{t('Loading...')}</p>
   return <ResourceForm {...props} resource={detail.data} />
 }
 
