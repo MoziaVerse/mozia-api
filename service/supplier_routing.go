@@ -273,10 +273,7 @@ func SupplierPromptTokens(request *dto.GeneralOpenAIRequest, info *relaycommon.R
 	// Count independently of the customer billing token-count feature flag.
 	meta := request.GetTokenCountMeta()
 	prompt := int64(CountTextToken(meta.CombineText, info.OriginModelName) + meta.ToolsCount*8 + meta.MessagesCount*3 + meta.NameCount*3 + 3)
-	if int64(info.GetEstimatePromptTokens()) > prompt {
-		prompt = int64(info.GetEstimatePromptTokens())
-	}
-	return prompt
+	return max(prompt, int64(info.GetEstimatePromptTokens()))
 }
 
 func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *model.Channel) (*model.Channel, error) {

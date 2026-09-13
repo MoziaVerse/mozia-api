@@ -46,13 +46,15 @@ func TestAdaptiveCostRoutingCapacityAndPreview(t *testing.T) {
 		require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:%s:g0:%d", id, now.Unix()/60), "success", 20, "ttft", 20000, "ttft_n", 20, "tps", 2000, "tps_n", 20).Err())
 	}
 	runtime.Bindings["11:test"] = 1
+	runtime.Bindings["12:test"] = 1
 	raw, err := common.Marshal(runtime)
 	require.NoError(t, err)
 	require.NoError(t, client.Set(ctx, supplierRuntimeKey, string(raw), 0).Err())
 	candidates := []SupplierCandidate{
 		{ChannelID: 1, PoolID: 1, SupplierID: 1, Cost: 1, Tokens: 20, PerformanceKey: "performance:1"},
 		{ChannelID: 2, PoolID: 2, SupplierID: 2, Cost: 2, Tokens: 20, Priority: 1000, PerformanceKey: "performance:2"},
-		{ChannelID: 11, PoolID: 1, SupplierID: 1, Cost: 3, Tokens: 20, PerformanceKey: "performance:1"},
+		{ChannelID: 11, PoolID: 1, SupplierID: 1, Cost: 1, Tokens: 20, PerformanceKey: "performance:1"},
+		{ChannelID: 12, PoolID: 1, SupplierID: 1, Cost: 3, Tokens: 20, PerformanceKey: "performance:1"},
 	}
 	preview := adaptiveAdmission(t, client, "preview", "preview", candidates)
 	require.NotNil(t, preview)
@@ -66,7 +68,7 @@ func TestAdaptiveCostRoutingCapacityAndPreview(t *testing.T) {
 		counts[c.ChannelID]++
 		supplierFinishForTest(t, client, id, false, true, 20)
 	}
-	assert.Equal(t, map[int]int{1: 16, 2: 4}, counts, "inverse-square procurement cost wins independently of channel priority and duplicate channels")
+	assert.Equal(t, map[int]int{1: 8, 2: 4, 11: 8}, counts, "inverse-square pool weights ignore channel priority and duplicates; cheapest tied channels rotate evenly")
 	// Speed is a gate: a cheaper but slow candidate cannot displace a healthy one.
 	require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:1:g0:%d", now.Unix()/60), "tps", 20).Err())
 	assert.Equal(t, 2, adaptiveAdmission(t, client, "slow", "preview", candidates).ChannelID)

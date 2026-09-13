@@ -32,12 +32,12 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, UpsertChannelCostPricing(&cost))
+	require.NoError(t, UpsertChannelCostPricing(db, &cost))
 	assert.Equal(t, "CNY", cost.Currency)
 
 	basePrice = 0.16
 	cost.Config.BasePrice = &basePrice
-	require.NoError(t, UpsertChannelCostPricing(&cost))
+	require.NoError(t, UpsertChannelCostPricing(db, &cost))
 	costs, err := ListChannelCostPricing()
 	require.NoError(t, err)
 	require.Len(t, costs, 1)
@@ -45,7 +45,7 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 	assert.Equal(t, 0.16, *costs[0].Config.BasePrice)
 
 	cost.Mode = ChannelCostModeParametric
-	err = UpsertChannelCostPricing(&cost)
+	err = UpsertChannelCostPricing(db, &cost)
 	assert.ErrorContains(t, err, "task billing mode must be parametric")
 
 	cost.Mode = ChannelCostModeTokenParametric
@@ -60,7 +60,7 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, UpsertChannelCostPricing(&cost))
+	require.NoError(t, UpsertChannelCostPricing(db, &cost))
 	costs, err = ListChannelCostPricing()
 	require.NoError(t, err)
 	require.Len(t, costs, 1)

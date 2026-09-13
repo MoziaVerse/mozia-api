@@ -305,7 +305,6 @@ for sid, c in pairs(suppliers) do
 end
 if adaptive then
     local tied = channelTies[tostring(selected.pool_id)]
-    table.sort(tied, function(a,b) return a.channel_id < b.channel_id end)
     local rotation = prefix .. 'channel-rotation:' .. selected.pool_id .. ':' .. input.model
     local turn = tonumber(redis.call('GET', rotation) or '0')
     local chosen = tied[turn % #tied + 1]

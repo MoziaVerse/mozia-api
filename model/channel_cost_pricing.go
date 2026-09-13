@@ -40,10 +40,6 @@ type ChannelCostPricing struct {
 	Config     ChannelCostConfig `json:"config" gorm:"-"`
 }
 
-func ValidateChannelCostPricing(cost *ChannelCostPricing) error {
-	return validateChannelCostPricing(DB, cost)
-}
-
 func validateChannelCostPricing(db *gorm.DB, cost *ChannelCostPricing) error {
 	cost.ModelName = strings.TrimSpace(cost.ModelName)
 	cost.Currency = strings.ToUpper(strings.TrimSpace(cost.Currency))
@@ -137,11 +133,7 @@ func ListChannelCostPricing() ([]ChannelCostPricing, error) {
 	return costs, nil
 }
 
-func UpsertChannelCostPricing(cost *ChannelCostPricing) error {
-	return UpsertChannelCostPricingWithDB(DB, cost)
-}
-
-func UpsertChannelCostPricingWithDB(db *gorm.DB, cost *ChannelCostPricing) error {
+func UpsertChannelCostPricing(db *gorm.DB, cost *ChannelCostPricing) error {
 	if err := validateChannelCostPricing(db, cost); err != nil {
 		return err
 	}

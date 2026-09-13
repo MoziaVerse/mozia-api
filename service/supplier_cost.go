@@ -146,7 +146,7 @@ func MutateSupplierCost(parent context.Context, cost *model.ChannelCostPricing, 
 		}
 		id := fmt.Sprint(deleteID)
 		if cost != nil {
-			if err := model.UpsertChannelCostPricingWithDB(tx, cost); err != nil {
+			if err := model.UpsertChannelCostPricing(tx, cost); err != nil {
 				return err
 			}
 			result.Resource = cost
