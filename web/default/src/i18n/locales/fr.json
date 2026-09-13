@@ -5271,6 +5271,15 @@
     "Max Prompt": "Prompt max",
     "Max Prompt Tokens": "Tokens de prompt max",
     "Maximum input context length": "Longueur maximale du contexte d'entrée",
-    "Maximum output completion length": "Longueur maximale de la complétion"
+    "Maximum output completion length": "Longueur maximale de la complétion",
+    "Deployment type": "Type de déploiement",
+    "Pending confirmation": "À confirmer",
+    "Self-hosted": "Auto-hébergé",
+    "Third-party": "Tiers",
+    "Cost not calculated": "Coût non calculé",
+    "Not configured": "Non configuré",
+    "Select a model from a non-self-hosted channel": "Sélectionnez un modèle d’un canal non auto-hébergé",
+    "Search model, channel or deployment type": "Rechercher un modèle, un canal ou un type de déploiement",
+    "Search or select a model": "Rechercher ou sélectionner un modèle"
   }
 }

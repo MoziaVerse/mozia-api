@@ -5329,6 +5329,15 @@
     "Max Prompt": "Max Prompt",
     "Max Prompt Tokens": "Max Prompt Tokens",
     "Maximum input context length": "Maximum input context length",
-    "Maximum output completion length": "Maximum output completion length"
+    "Maximum output completion length": "Maximum output completion length",
+    "Deployment type": "Deployment type",
+    "Pending confirmation": "Pending confirmation",
+    "Self-hosted": "Self-hosted",
+    "Third-party": "Third-party",
+    "Cost not calculated": "Cost not calculated",
+    "Not configured": "Not configured",
+    "Select a model from a non-self-hosted channel": "Select a model from a non-self-hosted channel",
+    "Search model, channel or deployment type": "Search model, channel or deployment type",
+    "Search or select a model": "Search or select a model"
   }
 }

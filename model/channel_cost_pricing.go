@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -57,8 +58,15 @@ func ValidateChannelCostPricing(cost *ChannelCostPricing) error {
 	if len(cost.Note) > 20000 {
 		return fmt.Errorf("note is too long")
 	}
-	if _, err := GetChannelById(cost.ChannelId, false); err != nil {
+	channel, err := GetChannelById(cost.ChannelId, false)
+	if err != nil {
 		return fmt.Errorf("channel does not exist: %w", err)
+	}
+	if !slices.Contains(channel.GetModels(), cost.ModelName) {
+		return fmt.Errorf("model does not belong to this channel")
+	}
+	if channel.DeploymentType == ChannelDeploymentSelfHosted {
+		return fmt.Errorf("self-hosted channel costs are not configured")
 	}
 
 	validatePrice := func(name string, value *float64) error {

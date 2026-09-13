@@ -22,6 +22,17 @@ import { z } from 'zod'
 // Channel Schema & Types
 // ============================================================================
 
+export const channelDeploymentSchema = z.enum([
+  'unknown',
+  'self_hosted',
+  'third_party',
+])
+export const CHANNEL_DEPLOYMENT_LABELS = {
+  unknown: 'Pending confirmation',
+  self_hosted: 'Self-hosted',
+  third_party: 'Third-party',
+} as const
+
 export const channelInfoSchema = z.object({
   is_multi_key: z.boolean().default(false),
   multi_key_size: z.number().default(0),
@@ -42,6 +53,7 @@ export const channelSchema = z.object({
   test_model: z.string().nullish(),
   status: z.number(), // 1: enabled, 0: manual disabled, 2: auto disabled
   name: z.string(),
+  deployment_type: channelDeploymentSchema.default('unknown'),
   weight: z.number().nullish(),
   created_time: z.number(),
   test_time: z.number(),

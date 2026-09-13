@@ -5271,6 +5271,15 @@
     "Max Prompt": "Макс. промпт",
     "Max Prompt Tokens": "Макс. токенов промпта",
     "Maximum input context length": "Максимальная длина входного контекста",
-    "Maximum output completion length": "Максимальная длина завершения"
+    "Maximum output completion length": "Максимальная длина завершения",
+    "Deployment type": "Тип развёртывания",
+    "Pending confirmation": "Требует подтверждения",
+    "Self-hosted": "Собственное размещение",
+    "Third-party": "Сторонний сервис",
+    "Cost not calculated": "Стоимость не рассчитана",
+    "Not configured": "Не настроено",
+    "Select a model from a non-self-hosted channel": "Выберите модель канала без собственного размещения",
+    "Search model, channel or deployment type": "Поиск модели, канала или типа развёртывания",
+    "Search or select a model": "Найти или выбрать модель"
   }
 }

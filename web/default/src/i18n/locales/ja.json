@@ -5271,6 +5271,15 @@
     "Max Prompt": "最大入力",
     "Max Prompt Tokens": "最大入力トークン数",
     "Maximum input context length": "最大入力コンテキスト長",
-    "Maximum output completion length": "最大出力補完長"
+    "Maximum output completion length": "最大出力補完長",
+    "Deployment type": "デプロイ種別",
+    "Pending confirmation": "要確認",
+    "Self-hosted": "自己ホスト",
+    "Third-party": "サードパーティ",
+    "Cost not calculated": "コスト未計算",
+    "Not configured": "未設定",
+    "Select a model from a non-self-hosted channel": "自己ホスト以外のチャネルのモデルを選択してください",
+    "Search model, channel or deployment type": "モデル、チャネル、デプロイ種別を検索",
+    "Search or select a model": "モデルを検索または選択"
   }
 }

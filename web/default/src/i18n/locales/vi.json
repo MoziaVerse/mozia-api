@@ -5271,6 +5271,15 @@
     "Max Prompt": "Prompt tối đa",
     "Max Prompt Tokens": "Token prompt tối đa",
     "Maximum input context length": "Độ dài ngữ cảnh đầu vào tối đa",
-    "Maximum output completion length": "Độ dài hoàn thành đầu ra tối đa"
+    "Maximum output completion length": "Độ dài hoàn thành đầu ra tối đa",
+    "Deployment type": "Loại triển khai",
+    "Pending confirmation": "Chờ xác nhận",
+    "Self-hosted": "Tự triển khai",
+    "Third-party": "Bên thứ ba",
+    "Cost not calculated": "Chưa tính chi phí",
+    "Not configured": "Chưa cấu hình",
+    "Select a model from a non-self-hosted channel": "Chọn mô hình của kênh không tự triển khai",
+    "Search model, channel or deployment type": "Tìm mô hình, kênh hoặc loại triển khai",
+    "Search or select a model": "Tìm hoặc chọn mô hình"
   }
 }
