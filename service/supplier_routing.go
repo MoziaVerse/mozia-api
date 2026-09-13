@@ -37,6 +37,8 @@ type SupplierRuntime struct {
 }
 
 type SupplierCandidate struct {
+	ModelVersion   string  `json:"model_version"`
+	RuleID         string  `json:"rule_id"`
 	Cost           float64 `json:"cost"`
 	EstimatedCost  string  `json:"estimated_cost"`
 	PriceJSON      string  `json:"price_json"`
@@ -347,6 +349,8 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 		candidate := SupplierCandidate{ChannelID: ch.Id, PoolID: poolID, SupplierID: pool.SupplierID, Priority: ch.GetPriority(), Weight: weight, Tokens: tokens, OutputScope: outputScope, Measure: !info.IsChannelTest, Streaming: info.IsStream}
 		for _, spec := range pool.Models {
 			if spec.Name == info.OriginModelName {
+				candidate.ModelVersion = spec.Version
+				candidate.RuleID = s.Rule.ID
 				scope := fmt.Sprintf("%q:%q:%q:%t:%q", spec.Name, spec.Version, s.Group, info.IsStream, s.Rule.ID)
 				candidate.PerformanceKey = fmt.Sprintf("supplier-routing:performance:%d:%x", poolID, sha256.Sum256([]byte(scope)))
 			}

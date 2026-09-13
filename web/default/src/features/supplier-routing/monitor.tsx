@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { hasPermission } from '@/lib/admin-permissions'
+import { formatTimestampForInput, parseTimestampFromInput } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -52,7 +53,9 @@ import {
   getSupplierStats,
   getSupplierAttempts,
   type SupplierAttempt,
+  type SupplierHistoryFilter,
 } from './api'
+import { SupplierRealtimeMonitor } from './components/realtime-monitor'
 import { SupplierReconciliation } from './components/reconciliation'
 
 export function SupplierMonitor() {
@@ -61,6 +64,14 @@ export function SupplierMonitor() {
   const canRead = hasPermission(user, 'channel', 'read')
   const canReadCost = canRead && hasPermission(user, 'model_pricing', 'read')
   const canWriteCost = hasPermission(user, 'model_pricing', 'write')
+  const [view, setView] = useState('realtime')
+  const [historyTab, setHistoryTab] = useState('traffic')
+  const [page, setPage] = useState(1)
+  const [filters, setFilters] = useState<SupplierHistoryFilter>(() => ({
+    start_timestamp: Math.floor(Date.now() / 60000) * 60 - 86400,
+    end_timestamp: (Math.floor(Date.now() / 60000) + 1) * 60,
+  }))
+  const [rangeError, setRangeError] = useState(false)
   const [supplier, setSupplier] = useState('all')
   const [model, setModel] = useState('')
   const [reconcile, setReconcile] = useState<SupplierAttempt | null>(null)
@@ -70,34 +81,23 @@ export function SupplierMonitor() {
     enabled: canRead,
   })
   const stats = useQuery({
-    queryKey: ['supplier-routing-stats'],
-    queryFn: getSupplierStats,
-    enabled: canRead,
-    refetchInterval: 30000,
+    queryKey: ['supplier-routing-stats', filters],
+    queryFn: () => getSupplierStats(filters),
+    enabled: canRead && view === 'history',
   })
   const attempts = useQuery({
-    queryKey: ['supplier-routing-attempts'],
-    queryFn: getSupplierAttempts,
-    enabled: canReadCost,
-    refetchInterval: 30000,
+    queryKey: ['supplier-routing-attempts', filters, page],
+    queryFn: () => getSupplierAttempts({ ...filters, p: page, page_size: 20 }),
+    enabled: canReadCost && view === 'history' && historyTab === 'calls',
   })
   const suppliers = new Map(
     config.data?.config.suppliers?.map((s) => [s.id, s.name])
   )
   const pools = new Map(config.data?.config.pools?.map((p) => [p.id, p.name]))
-  const rows = (stats.data?.rows ?? []).filter(
-    (row) =>
-      (supplier === 'all' || String(row.supplier_id) === supplier) &&
-      row.model.toLowerCase().includes(model.toLowerCase())
-  )
+  const rows = stats.data?.rows ?? []
   const traffic = rows.filter((row) => row.kind !== 'shadow')
   const observations = rows.filter((row) => row.kind === 'shadow')
-  const calls = (attempts.data ?? []).filter(
-    (row) =>
-      row.kind !== 'shadow' &&
-      (supplier === 'all' || String(row.supplier_id) === supplier) &&
-      row.model.toLowerCase().includes(model.toLowerCase())
-  )
+  const calls = attempts.data?.items ?? []
   const labels: Record<string, string> = {
     first: t('First attempt'),
     retry: t('Retry'),
@@ -125,473 +125,548 @@ export function SupplierMonitor() {
         {t('Supplier monitoring')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
-        <Button
-          variant='outline'
-          disabled={stats.isFetching || attempts.isFetching}
-          onClick={() => {
-            void config.refetch()
-            void stats.refetch()
-            if (canReadCost) void attempts.refetch()
-          }}
-        >
-          {t('Refresh')}
-        </Button>
         <Button render={<Link to='/suppliers' />}>
           {t('Configure routing')}
         </Button>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <div className='space-y-6'>
-          <div>
-            <p className='text-muted-foreground text-sm'>
-              {t(
-                'Supplier requests, health and procurement records. Refreshes every 30 seconds.'
-              )}
-            </p>
-            <p className='text-muted-foreground mt-1 text-xs'>
-              {t('Current hour starts at')}:{' '}
-              {stats.data
-                ? new Date(stats.data.hour_start * 1000).toLocaleString()
-                : '—'}
-            </p>
-          </div>
-          {[
-            { name: 'config', error: config.error },
-            { name: 'stats', error: stats.error },
-          ]
-            .filter((result) => result.error)
-            .map((result) => (
-              <Alert variant='destructive' key={result.name}>
-                <AlertDescription>{result.error?.message}</AlertDescription>
-              </Alert>
-            ))}
-          <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
-            {[
-              { label: t('Requests'), value: stats.data?.summary.requests },
-              {
-                label: t('First-attempt successes'),
-                value: stats.data?.summary.first_success,
-              },
-              {
-                label: t('Final successes'),
-                value: stats.data?.summary.final_success,
-              },
-              {
-                label: t('Unresolved requests'),
-                value: stats.data?.summary.unresolved,
-              },
-            ].map((card) => (
-              <Card key={card.label}>
-                <CardHeader>
-                  <CardTitle className='text-muted-foreground text-sm font-normal'>
-                    {card.label}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className='text-2xl font-semibold tabular-nums'>
-                  {card.value?.toLocaleString() ?? '—'}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-          <p className='text-muted-foreground text-xs'>
-            {t(
-              'Summary covers all suppliers this hour and excludes probes and recommendations. Filters below apply to tables only.'
+        {config.error && (
+          <Alert variant='destructive'>
+            <AlertDescription>{config.error.message}</AlertDescription>
+          </Alert>
+        )}
+        <Tabs value={view} onValueChange={(value) => setView(String(value))}>
+          <TabsList>
+            <TabsTrigger value='realtime'>
+              {t('Real-time quality ranking')}
+            </TabsTrigger>
+            <TabsTrigger value='history'>
+              {t('Historical monitoring')}
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value='realtime'>
+            {view === 'realtime' && (
+              <SupplierRealtimeMonitor suppliers={suppliers} pools={pools} />
             )}
-          </p>
-          {canReadCost &&
-            stats.data?.costs?.map((cost) => (
-              <Card key={cost.currency || 'unknown'}>
-                <CardHeader>
-                  <CardTitle>
-                    {t('Procurement this hour')} ·{' '}
-                    {cost.currency || t('Unknown')}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className='flex flex-wrap gap-x-8 gap-y-3 text-sm'>
-                  <span>
-                    {t('Procurement cost')}: {cost.total}
-                  </span>
-                  <span>
-                    {t('Retry cost')}: {cost.retry_cost}
-                  </span>
-                  <span>
-                    {t('Failed call cost')}: {cost.failed_cost}
-                  </span>
-                  <span>
-                    {t('Cost per successful request')}:{' '}
-                    {cost.successful_requests > 0
-                      ? (Number(cost.total) / cost.successful_requests).toFixed(
-                          8
-                        )
-                      : '—'}
-                  </span>
-                  <span>
-                    {t('Pending reconciliation')}: {cost.pending}
-                  </span>
-                  {cost.pending > 0 && (
-                    <p className='text-muted-foreground w-full'>
-                      {t(
-                        'Costs are provisional until pending calls are reconciled.'
-                      )}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          <div className='flex flex-wrap items-end gap-4'>
-            <div className='space-y-2'>
-              <Label htmlFor='monitor-supplier'>{t('Supplier')}</Label>
-              <NativeSelect
-                id='monitor-supplier'
-                value={supplier}
-                onChange={(event) => setSupplier(event.target.value)}
-              >
-                <NativeSelectOption value='all'>
-                  {t('All suppliers')}
-                </NativeSelectOption>
-                {[...suppliers].map(([id, name]) => (
-                  <NativeSelectOption key={id} value={id}>
-                    {name} · #{id}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
-            <div className='space-y-2'>
-              <Label htmlFor='monitor-model'>{t('Model')}</Label>
-              <Input
-                id='monitor-model'
-                value={model}
-                onChange={(event) => setModel(event.target.value)}
-                placeholder={t('Filter by model')}
-              />
-            </div>
-          </div>
-          <Tabs defaultValue='traffic'>
-            <TabsList className='h-auto flex-wrap'>
-              <TabsTrigger value='traffic'>
-                {t('Supplier traffic this hour')}
-              </TabsTrigger>
-              <TabsTrigger value='observations'>
-                {t('Routing recommendations')}
-              </TabsTrigger>
-              {canReadCost && (
-                <TabsTrigger value='calls'>
-                  {t('Supplier call records')}
-                </TabsTrigger>
-              )}
-            </TabsList>
-            <TabsContent value='traffic' className='space-y-3'>
+          </TabsContent>
+          <TabsContent value='history'>
+            <div className='space-y-6'>
               <p className='text-muted-foreground text-sm'>
                 {t(
-                  'First-dispatch share is calculated per supplier for the same model and group. It is not a percentage of all platform requests.'
+                  'Query persisted supplier calls by request time. History remains available when real-time metrics expire.'
                 )}
               </p>
+              <form
+                className='flex flex-wrap items-end gap-4'
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const data = new FormData(event.currentTarget)
+                  const start = parseTimestampFromInput(
+                    String(data.get('start'))
+                  )
+                  const end = parseTimestampFromInput(String(data.get('end')))
+                  if (
+                    !Number.isFinite(start) ||
+                    !Number.isFinite(end) ||
+                    start < 0 ||
+                    start >= end
+                  ) {
+                    setRangeError(true)
+                    return
+                  }
+                  setRangeError(false)
+                  setPage(1)
+                  setReconcile(null)
+                  setFilters({
+                    start_timestamp: start,
+                    end_timestamp: end,
+                    supplier_id:
+                      supplier === 'all' ? undefined : Number(supplier),
+                    model: model.trim() || undefined,
+                  })
+                }}
+              >
+                <div className='space-y-2'>
+                  <Label htmlFor='history-start'>{t('Start time')}</Label>
+                  <Input
+                    id='history-start'
+                    name='start'
+                    type='datetime-local'
+                    required
+                    defaultValue={formatTimestampForInput(
+                      filters.start_timestamp
+                    )}
+                  />
+                </div>
+                <div className='space-y-2'>
+                  <Label htmlFor='history-end'>{t('End time')}</Label>
+                  <Input
+                    id='history-end'
+                    name='end'
+                    type='datetime-local'
+                    required
+                    defaultValue={formatTimestampForInput(
+                      filters.end_timestamp
+                    )}
+                  />
+                </div>
+                <div className='space-y-2'>
+                  <Label htmlFor='monitor-supplier'>{t('Supplier')}</Label>
+                  <NativeSelect
+                    id='monitor-supplier'
+                    value={supplier}
+                    onChange={(event) => setSupplier(event.target.value)}
+                  >
+                    <NativeSelectOption value='all'>
+                      {t('All suppliers')}
+                    </NativeSelectOption>
+                    {[...suppliers].map(([id, name]) => (
+                      <NativeSelectOption key={id} value={id}>
+                        {name} · #{id}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </div>
+                <div className='space-y-2'>
+                  <Label htmlFor='monitor-model'>{t('Model')}</Label>
+                  <Input
+                    id='monitor-model'
+                    value={model}
+                    onChange={(event) => setModel(event.target.value)}
+                    placeholder={t('Exact model name (optional)')}
+                  />
+                </div>
+                <Button type='submit'>{t('Search')}</Button>
+                <Button
+                  type='button'
+                  variant='outline'
+                  disabled={stats.isFetching || attempts.isFetching}
+                  onClick={() => {
+                    void stats.refetch()
+                    if (canReadCost && historyTab === 'calls') {
+                      void attempts.refetch()
+                    }
+                  }}
+                >
+                  {t('Refresh')}
+                </Button>
+              </form>
+              {rangeError && (
+                <Alert variant='destructive'>
+                  <AlertDescription>
+                    {t('Start time must precede end time.')}
+                  </AlertDescription>
+                </Alert>
+              )}
+              {stats.error && (
+                <Alert variant='destructive'>
+                  <AlertDescription>{stats.error.message}</AlertDescription>
+                </Alert>
+              )}
+              <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
+                {[
+                  { label: t('Requests'), value: stats.data?.summary.requests },
+                  {
+                    label: t('First-attempt successes'),
+                    value: stats.data?.summary.first_success,
+                  },
+                  {
+                    label: t('Final successes'),
+                    value: stats.data?.summary.final_success,
+                  },
+                  {
+                    label: t('Unresolved requests'),
+                    value: stats.data?.summary.unresolved,
+                  },
+                ].map((card) => (
+                  <Card key={card.label}>
+                    <CardHeader>
+                      <CardTitle className='text-muted-foreground text-sm font-normal'>
+                        {card.label}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className='text-2xl font-semibold tabular-nums'>
+                      {card.value?.toLocaleString() ?? '—'}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
               <p className='text-muted-foreground text-xs'>
                 {t(
-                  'Service performance uses recent five-minute samples. Streamed and non-streamed calls are measured separately.'
+                  'Summary and costs use the selected range and filters. Requests are deduplicated across matching first attempts and retries; probes and recommendations are excluded.'
                 )}
               </p>
-              {stats.isPending ? (
-                <p>{t('Loading...')}</p>
-              ) : (
-                <div className='overflow-x-auto rounded-lg border'>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        {[
-                          t('Supplier'),
-                          t('Pool'),
-                          t('Model'),
-                          t('Group'),
-                          t('Attempt type'),
-                          t('Status'),
-                          t('Requests'),
-                          t('TTFT (ms)'),
-                          t('Recent service performance'),
-                          t('First-dispatch share'),
-                          t('Health'),
-                          t('Priority fallback'),
-                        ].map((label) => (
-                          <TableHead key={label}>{label}</TableHead>
-                        ))}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {traffic.map((row) => (
-                        <TableRow
-                          key={`${row.performance_scope}:${row.pool_id}:${row.model}:${row.group_name}:${row.kind}:${row.status}:${row.priority_fallback}:${row.outcome_class}`}
-                        >
-                          <TableCell>
-                            {suppliers.get(row.supplier_id) ||
-                              `#${row.supplier_id}`}
-                          </TableCell>
-                          <TableCell>
-                            {pools.get(row.pool_id) || `#${row.pool_id}`}
-                          </TableCell>
-                          <TableCell>{row.model}</TableCell>
-                          <TableCell>{row.group_name || '—'}</TableCell>
-                          <TableCell>{labels[row.kind] || row.kind}</TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={
-                                row.status === 'failed'
-                                  ? 'destructive'
-                                  : 'secondary'
-                              }
-                            >
-                              {labels[row.status] || row.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{row.requests}</TableCell>
-                          <TableCell>
-                            {row.avg_ttft_ms > 0
-                              ? Math.round(row.avg_ttft_ms)
-                              : '—'}
-                          </TableCell>
-                          <TableCell className='whitespace-nowrap'>
-                            {row.performance ? (
-                              <>
-                                <div>
-                                  {t('Samples')}: {row.performance.samples} ·{' '}
-                                  {t('Success rate')}:{' '}
-                                  {row.performance.success_rate.toFixed(1)}%
-                                </div>
-                                <div>
-                                  {t('Overload rate')}:{' '}
-                                  {row.performance.overload_rate.toFixed(1)}% ·{' '}
-                                  {row.performance.throughput.toFixed(1)}{' '}
-                                  tokens/s
-                                </div>
-                                <div>
-                                  {t('TTFT (ms)')}:{' '}
-                                  {row.performance.ttft_ms > 0
-                                    ? Math.round(row.performance.ttft_ms)
-                                    : '—'}
-                                </div>
-                              </>
-                            ) : (
-                              '—'
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {row.kind === 'first'
-                              ? `${row.first_share_percent.toFixed(1)}%`
-                              : '—'}
-                          </TableCell>
-                          <TableCell>
-                            {labels[row.health_state] ||
-                              row.health_state ||
-                              '—'}{' '}
-                            {row.health_scale > 0 && `${row.health_scale}%`}
-                          </TableCell>
-                          <TableCell>
-                            {row.priority_fallback ? t('Yes') : t('No')}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  {!traffic.length && !stats.error && (
-                    <Empty>
-                      <EmptyHeader>
-                        <EmptyTitle>{t('No supplier traffic yet')}</EmptyTitle>
-                        <EmptyDescription>
+              {canReadCost &&
+                stats.data?.costs?.map((cost) => (
+                  <Card key={cost.currency || 'unknown'}>
+                    <CardHeader>
+                      <CardTitle>
+                        {t('Procurement in selected period')} ·{' '}
+                        {cost.currency || t('Unknown')}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className='flex flex-wrap gap-x-8 gap-y-3 text-sm'>
+                      <span>
+                        {t('Procurement cost')}: {cost.total}
+                      </span>
+                      <span>
+                        {t('Retry cost')}: {cost.retry_cost}
+                      </span>
+                      <span>
+                        {t('Failed call cost')}: {cost.failed_cost}
+                      </span>
+                      <span>
+                        {t('Cost per successful request')}:{' '}
+                        {cost.successful_requests > 0
+                          ? (
+                              Number(cost.total) / cost.successful_requests
+                            ).toFixed(8)
+                          : '—'}
+                      </span>
+                      <span>
+                        {t('Pending reconciliation')}: {cost.pending}
+                      </span>
+                      {cost.pending > 0 && (
+                        <p className='text-muted-foreground w-full'>
                           {t(
-                            'Calls appear after requests reach channels bound to a supplier resource pool.'
+                            'Costs are provisional until pending calls are reconciled.'
                           )}
-                        </EmptyDescription>
-                      </EmptyHeader>
-                    </Empty>
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              <Tabs
+                value={historyTab}
+                onValueChange={(value) => setHistoryTab(String(value))}
+              >
+                <TabsList className='h-auto flex-wrap'>
+                  <TabsTrigger value='traffic'>
+                    {t('Historical supplier traffic')}
+                  </TabsTrigger>
+                  <TabsTrigger value='observations'>
+                    {t('Routing recommendations')}
+                  </TabsTrigger>
+                  {canReadCost && (
+                    <TabsTrigger value='calls'>
+                      {t('Supplier call records')}
+                    </TabsTrigger>
                   )}
-                </div>
-              )}
-            </TabsContent>
-            <TabsContent value='observations' className='space-y-3'>
-              <Alert>
-                <AlertDescription>
-                  {t(
-                    'These are scheduling suggestions, not model calls. They do not consume supplier capacity and are excluded from request success and cost totals.'
+                </TabsList>
+                <TabsContent value='traffic' className='space-y-3'>
+                  <p className='text-muted-foreground text-sm'>
+                    {t(
+                      'First-dispatch share is calculated within the selected suppliers, model, group and time range.'
+                    )}
+                  </p>
+                  {stats.isPending ? (
+                    <p>{t('Loading...')}</p>
+                  ) : (
+                    <div className='overflow-x-auto rounded-lg border'>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            {[
+                              t('Supplier'),
+                              t('Pool'),
+                              t('Model'),
+                              t('Group'),
+                              t('Attempt type'),
+                              t('Status'),
+                              t('Requests'),
+                              t('TTFT (ms)'),
+                              t('Latency (ms)'),
+                              t('First-dispatch share'),
+                              t('Priority fallback'),
+                            ].map((label) => (
+                              <TableHead key={label}>{label}</TableHead>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {traffic.map((row) => (
+                            <TableRow
+                              key={`${row.pool_id}:${row.model}:${row.group_name}:${row.kind}:${row.status}:${row.priority_fallback}:${row.outcome_class}`}
+                            >
+                              <TableCell>
+                                {suppliers.get(row.supplier_id) ||
+                                  `#${row.supplier_id}`}
+                              </TableCell>
+                              <TableCell>
+                                {pools.get(row.pool_id) || `#${row.pool_id}`}
+                              </TableCell>
+                              <TableCell>{row.model}</TableCell>
+                              <TableCell>{row.group_name || '—'}</TableCell>
+                              <TableCell>
+                                {labels[row.kind] || row.kind}
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={
+                                    row.status === 'failed'
+                                      ? 'destructive'
+                                      : 'secondary'
+                                  }
+                                >
+                                  {labels[row.status] || row.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>{row.requests}</TableCell>
+                              <TableCell>
+                                {row.avg_ttft_ms > 0
+                                  ? Math.round(row.avg_ttft_ms)
+                                  : '—'}
+                              </TableCell>
+                              <TableCell>
+                                {row.avg_latency_ms > 0
+                                  ? Math.round(row.avg_latency_ms)
+                                  : '—'}
+                              </TableCell>
+                              <TableCell>
+                                {row.kind === 'first'
+                                  ? `${row.first_share_percent.toFixed(1)}%`
+                                  : '—'}
+                              </TableCell>
+                              <TableCell>
+                                {row.priority_fallback ? t('Yes') : t('No')}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      {!traffic.length && !stats.error && (
+                        <Empty>
+                          <EmptyHeader>
+                            <EmptyTitle>
+                              {t('No supplier traffic yet')}
+                            </EmptyTitle>
+                            <EmptyDescription>
+                              {t(
+                                'Calls appear after requests reach channels bound to a supplier resource pool.'
+                              )}
+                            </EmptyDescription>
+                          </EmptyHeader>
+                        </Empty>
+                      )}
+                    </div>
                   )}
-                </AlertDescription>
-              </Alert>
-              <div className='overflow-x-auto rounded-lg border'>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      {[
-                        t('Recommended supplier'),
-                        t('Pool'),
-                        t('Model'),
-                        t('Group'),
-                        t('Recommendations'),
-                      ].map((label) => (
-                        <TableHead key={label}>{label}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {observations.map((row) => (
-                      <TableRow
-                        key={`${row.performance_scope}:${row.pool_id}:${row.model}:${row.group_name}:${row.status}`}
-                      >
-                        <TableCell>
-                          {suppliers.get(row.supplier_id) ||
-                            `#${row.supplier_id}`}
-                        </TableCell>
-                        <TableCell>
-                          {pools.get(row.pool_id) || `#${row.pool_id}`}
-                        </TableCell>
-                        <TableCell>{row.model}</TableCell>
-                        <TableCell>{row.group_name || '—'}</TableCell>
-                        <TableCell>{row.requests}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                {!observations.length && !stats.isPending && !stats.error && (
-                  <Empty>
-                    <EmptyHeader>
-                      <EmptyTitle>
-                        {t('No routing recommendations yet')}
-                      </EmptyTitle>
-                      <EmptyDescription>
-                        {t(
-                          'Enable observation and send requests matching a routing rule to collect recommendations.'
-                        )}
-                      </EmptyDescription>
-                    </EmptyHeader>
-                  </Empty>
-                )}
-              </div>
-            </TabsContent>
-            {canReadCost && (
-              <TabsContent value='calls' className='space-y-3'>
-                <p className='text-muted-foreground text-sm'>
-                  {t(
-                    'Latest 100 supplier attempts, including retries and probes. Recommendations are shown separately.'
-                  )}
-                </p>
-                {attempts.error && (
-                  <Alert variant='destructive'>
+                </TabsContent>
+                <TabsContent value='observations' className='space-y-3'>
+                  <Alert>
                     <AlertDescription>
-                      {attempts.error.message}
+                      {t(
+                        'These are scheduling suggestions, not model calls. They do not consume supplier capacity and are excluded from request success and cost totals.'
+                      )}
                     </AlertDescription>
                   </Alert>
-                )}
-                {reconcile && (
-                  <SupplierReconciliation
-                    key={reconcile.id}
-                    attempt={reconcile}
-                    onClose={() => setReconcile(null)}
-                  />
-                )}
-                {attempts.isPending ? (
-                  <p>{t('Loading...')}</p>
-                ) : (
                   <div className='overflow-x-auto rounded-lg border'>
                     <Table>
                       <TableHeader>
                         <TableRow>
                           {[
-                            t('Time'),
-                            t('Request'),
-                            t('Supplier'),
+                            t('Recommended supplier'),
+                            t('Pool'),
                             t('Model'),
-                            t('Channel'),
-                            t('Attempt type'),
-                            t('Routing reason'),
-                            t('Status'),
-                            t('Input tokens'),
-                            t('Output tokens'),
-                            t('Estimated procurement cost'),
-                            t('Procurement cost'),
-                            t('Reconciliation'),
+                            t('Group'),
+                            t('Recommendations'),
                           ].map((label) => (
                             <TableHead key={label}>{label}</TableHead>
                           ))}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {calls.map((attempt) => (
-                          <TableRow key={attempt.id}>
-                            <TableCell className='whitespace-nowrap'>
-                              {new Date(
-                                attempt.created_at * 1000
-                              ).toLocaleString()}
-                            </TableCell>
-                            <TableCell title={attempt.request_id}>
-                              {attempt.request_id.slice(-10)} /{' '}
-                              {attempt.attempt}
+                        {observations.map((row) => (
+                          <TableRow
+                            key={`${row.pool_id}:${row.model}:${row.group_name}:${row.status}`}
+                          >
+                            <TableCell>
+                              {suppliers.get(row.supplier_id) ||
+                                `#${row.supplier_id}`}
                             </TableCell>
                             <TableCell>
-                              {suppliers.get(attempt.supplier_id) ||
-                                `#${attempt.supplier_id}`}
+                              {pools.get(row.pool_id) || `#${row.pool_id}`}
                             </TableCell>
-                            <TableCell>{attempt.model}</TableCell>
-                            <TableCell>{attempt.channel_id}</TableCell>
-                            <TableCell>
-                              {labels[attempt.kind] || attempt.kind}
-                            </TableCell>
-                            <TableCell>
-                              {attempt.reason === 'adaptive'
-                                ? t('Experience qualified, cost first')
-                                : attempt.reason}
-                              {attempt.health_state && (
-                                <div className='text-muted-foreground text-xs'>
-                                  {labels[attempt.health_state] ||
-                                    attempt.health_state}{' '}
-                                  · {t('Routing weight')}:{' '}
-                                  {attempt.routing_weight}
-                                </div>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {labels[attempt.status] || attempt.status}
-                            </TableCell>
-                            <TableCell>{attempt.input_tokens}</TableCell>
-                            <TableCell>{attempt.output_tokens}</TableCell>
-                            <TableCell>
-                              {attempt.estimated_cost || '—'} {attempt.currency}
-                            </TableCell>
-                            <TableCell>
-                              {attempt.cost || t('Pending reconciliation')}{' '}
-                              {attempt.currency}
-                            </TableCell>
-                            <TableCell>
-                              {canWriteCost &&
-                              attempt.cost_status === 'pending' ? (
-                                <Button
-                                  type='button'
-                                  variant='outline'
-                                  size='sm'
-                                  onClick={() => setReconcile(attempt)}
-                                >
-                                  {t('Reconcile')}
-                                </Button>
-                              ) : (
-                                labels[attempt.cost_status] ||
-                                attempt.cost_status
-                              )}
-                            </TableCell>
+                            <TableCell>{row.model}</TableCell>
+                            <TableCell>{row.group_name || '—'}</TableCell>
+                            <TableCell>{row.requests}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
-                    {!calls.length && !attempts.error && (
-                      <Empty>
-                        <EmptyHeader>
-                          <EmptyTitle>
-                            {t('No supplier call records yet')}
-                          </EmptyTitle>
-                        </EmptyHeader>
-                      </Empty>
-                    )}
+                    {!observations.length &&
+                      !stats.isPending &&
+                      !stats.error && (
+                        <Empty>
+                          <EmptyHeader>
+                            <EmptyTitle>
+                              {t('No routing recommendations yet')}
+                            </EmptyTitle>
+                            <EmptyDescription>
+                              {t(
+                                'Enable observation and send requests matching a routing rule to collect recommendations.'
+                              )}
+                            </EmptyDescription>
+                          </EmptyHeader>
+                        </Empty>
+                      )}
                   </div>
+                </TabsContent>
+                {canReadCost && (
+                  <TabsContent value='calls' className='space-y-3'>
+                    <p className='text-muted-foreground text-sm'>
+                      {t(
+                        'Persisted calls in the selected period, including retries and probes. Recommendations are shown separately.'
+                      )}
+                    </p>
+                    {attempts.error && (
+                      <Alert variant='destructive'>
+                        <AlertDescription>
+                          {attempts.error.message}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    <div className='flex items-center gap-3'>
+                      <Button
+                        variant='outline'
+                        disabled={page <= 1 || attempts.isFetching}
+                        onClick={() => setPage(page - 1)}
+                      >
+                        {t('Previous page')}
+                      </Button>
+                      <span className='text-sm'>
+                        {t('Page {{page}} · {{total}} records', {
+                          page,
+                          total: attempts.data?.total ?? 0,
+                        })}
+                      </span>
+                      <Button
+                        variant='outline'
+                        disabled={
+                          attempts.isFetching ||
+                          page * 20 >= (attempts.data?.total ?? 0)
+                        }
+                        onClick={() => setPage(page + 1)}
+                      >
+                        {t('Next page')}
+                      </Button>
+                    </div>
+                    {reconcile && (
+                      <SupplierReconciliation
+                        key={reconcile.id}
+                        attempt={reconcile}
+                        onClose={() => setReconcile(null)}
+                      />
+                    )}
+                    {attempts.isPending ? (
+                      <p>{t('Loading...')}</p>
+                    ) : (
+                      <div className='overflow-x-auto rounded-lg border'>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              {[
+                                t('Time'),
+                                t('Request'),
+                                t('Supplier'),
+                                t('Model'),
+                                t('Channel'),
+                                t('Attempt type'),
+                                t('Routing reason'),
+                                t('Status'),
+                                t('Input tokens'),
+                                t('Output tokens'),
+                                t('Estimated procurement cost'),
+                                t('Procurement cost'),
+                                t('Reconciliation'),
+                              ].map((label) => (
+                                <TableHead key={label}>{label}</TableHead>
+                              ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {calls.map((attempt) => (
+                              <TableRow key={attempt.id}>
+                                <TableCell className='whitespace-nowrap'>
+                                  {new Date(
+                                    attempt.created_at * 1000
+                                  ).toLocaleString()}
+                                </TableCell>
+                                <TableCell title={attempt.request_id}>
+                                  {attempt.request_id.slice(-10)} /{' '}
+                                  {attempt.attempt}
+                                </TableCell>
+                                <TableCell>
+                                  {suppliers.get(attempt.supplier_id) ||
+                                    `#${attempt.supplier_id}`}
+                                </TableCell>
+                                <TableCell>{attempt.model}</TableCell>
+                                <TableCell>{attempt.channel_id}</TableCell>
+                                <TableCell>
+                                  {labels[attempt.kind] || attempt.kind}
+                                </TableCell>
+                                <TableCell>
+                                  {attempt.reason === 'adaptive'
+                                    ? t('Experience qualified, cost first')
+                                    : attempt.reason}
+                                  {attempt.health_state && (
+                                    <div className='text-muted-foreground text-xs'>
+                                      {labels[attempt.health_state] ||
+                                        attempt.health_state}{' '}
+                                      · {t('Routing weight')}:{' '}
+                                      {attempt.routing_weight}
+                                    </div>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  {labels[attempt.status] || attempt.status}
+                                </TableCell>
+                                <TableCell>{attempt.input_tokens}</TableCell>
+                                <TableCell>{attempt.output_tokens}</TableCell>
+                                <TableCell>
+                                  {attempt.estimated_cost || '—'}{' '}
+                                  {attempt.currency}
+                                </TableCell>
+                                <TableCell>
+                                  {attempt.cost || t('Pending reconciliation')}{' '}
+                                  {attempt.currency}
+                                </TableCell>
+                                <TableCell>
+                                  {canWriteCost &&
+                                  attempt.cost_status === 'pending' ? (
+                                    <Button
+                                      type='button'
+                                      variant='outline'
+                                      size='sm'
+                                      onClick={() => setReconcile(attempt)}
+                                    >
+                                      {t('Reconcile')}
+                                    </Button>
+                                  ) : (
+                                    labels[attempt.cost_status] ||
+                                    attempt.cost_status
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                        {!calls.length && !attempts.error && (
+                          <Empty>
+                            <EmptyHeader>
+                              <EmptyTitle>
+                                {t('No supplier call records yet')}
+                              </EmptyTitle>
+                            </EmptyHeader>
+                          </Empty>
+                        )}
+                      </div>
+                    )}
+                  </TabsContent>
                 )}
-              </TabsContent>
-            )}
-          </Tabs>
-        </div>
+              </Tabs>
+            </div>
+          </TabsContent>
+        </Tabs>
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

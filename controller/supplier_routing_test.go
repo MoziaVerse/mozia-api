@@ -144,3 +144,78 @@ func TestSupplierProcurementSummaryPermissionAndRetryCosts(t *testing.T) {
 		assert.Equal(t, 1, cost.Success)
 	}
 }
+
+func TestSupplierHistoryRangeFiltersAndPagination(t *testing.T) {
+	db := setupMaterialControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.SupplierAttempt{}))
+	oldRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedis })
+	rows := []model.SupplierAttempt{
+		{RequestID: "prior-first", Attempt: 1, SupplierID: 1, Model: "test", Kind: "first", Status: "failed", CreatedAt: 99, CostStatus: "calculated", Cost: "10", Currency: "CNY"},
+		{RequestID: "prior-first", Attempt: 2, SupplierID: 2, Model: "test", Kind: "retry", Status: "success", CreatedAt: 100, CostStatus: "calculated", Cost: "0.2", Currency: "CNY"},
+		{RequestID: "same", Attempt: 1, SupplierID: 2, Model: "test", Kind: "first", Status: "failed", CreatedAt: 101, CostStatus: "calculated", Cost: "0.1", Currency: "CNY"},
+		{RequestID: "same", Attempt: 2, SupplierID: 2, Model: "test", Kind: "retry", Status: "success", CreatedAt: 102, CostStatus: "calculated", Cost: "0.2", Currency: "CNY"},
+		{RequestID: "shadow", Attempt: 0, SupplierID: 2, Model: "test", Kind: "shadow", Status: "observed", CreatedAt: 103},
+		{RequestID: "other-model", Attempt: 1, SupplierID: 2, Model: "other", Kind: "first", Status: "success", CreatedAt: 103, CostStatus: "calculated", Cost: "20", Currency: "CNY"},
+		{RequestID: "other-supplier", Attempt: 1, SupplierID: 1, Model: "test", Kind: "first", Status: "success", CreatedAt: 103, CostStatus: "calculated", Cost: "20", Currency: "CNY"},
+		{RequestID: "end", Attempt: 1, SupplierID: 2, Model: "test", Kind: "first", Status: "success", CreatedAt: 104, CostStatus: "calculated", Cost: "20", Currency: "CNY"},
+	}
+	require.NoError(t, db.Create(&rows).Error)
+	filter := "?start_timestamp=100&end_timestamp=104&supplier_id=2&model=test"
+	for page, expectedIDs := range map[int][]int64{1: {rows[3].ID, rows[2].ID}, 2: {rows[1].ID}} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/attempts"+filter+"&page_size=2&p="+strconv.Itoa(page), nil)
+		GetSupplierAttempts(c)
+		var response struct {
+			Success bool
+			Data    struct {
+				Total int
+				Items []model.SupplierAttempt
+			}
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.True(t, response.Success, recorder.Body.String())
+		assert.Equal(t, 3, response.Data.Total)
+		ids := []int64{}
+		for _, row := range response.Data.Items {
+			ids = append(ids, row.ID)
+		}
+		assert.Equal(t, expectedIDs, ids)
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/stats"+filter, nil)
+	c.Set("role", common.RoleRootUser)
+	c.Set("id", 1)
+	GetSupplierRoutingStats(c)
+	var response struct {
+		Success bool
+		Data    struct {
+			Summary struct {
+				Requests int
+				Final    int `json:"final_success"`
+			}
+			Costs []struct{ Total string }
+		}
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success, recorder.Body.String())
+	assert.Equal(t, 2, response.Data.Summary.Requests, "a matching retry counts even when its first attempt is outside the filter")
+	assert.Equal(t, 2, response.Data.Summary.Final)
+	require.Len(t, response.Data.Costs, 1)
+	assert.Equal(t, "0.5", response.Data.Costs[0].Total)
+	for _, query := range []string{"?start_timestamp=104&end_timestamp=100", "?start_timestamp=bad", "?supplier_id=-1", "?p=-1", "?p=1&page_size=0"} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/attempts"+query, nil)
+		GetSupplierAttempts(c)
+		assert.Equal(t, http.StatusBadRequest, recorder.Code, query)
+	}
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/realtime", nil)
+	GetSupplierRealtime(c)
+	assert.Contains(t, recorder.Body.String(), `"available":false`)
+}

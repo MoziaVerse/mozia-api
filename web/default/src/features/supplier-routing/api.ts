@@ -73,18 +73,7 @@ export type SupplierAttempt = {
 }
 
 export type SupplierStat = {
-  performance_scope?: string
-  performance?: {
-    samples: number
-    success_rate: number
-    overload_rate: number
-    throughput: number
-    ttft_ms: number
-    state: string
-  }
   first_share_percent: number
-  health_state: string
-  health_scale: number
   priority_fallback: boolean
   outcome_class: string
   supplier_id: number
@@ -108,7 +97,8 @@ export type SupplierStats = {
     pending: number
     successful_requests: number
   }[]
-  hour_start: number
+  start_timestamp: number
+  end_timestamp: number
   rows: SupplierStat[]
   summary: {
     requests: number
@@ -127,16 +117,67 @@ export async function getSupplierRouting(): Promise<SupplierRoutingData> {
   return response.data.data
 }
 
-export async function getSupplierAttempts(): Promise<SupplierAttempt[]> {
-  const response = await api.get<Envelope<SupplierAttempt[]>>(
-    `${base}/attempts`
-  )
-  if (!response.data.success) throw new Error(response.data.message)
-  return response.data.data ?? []
+export type SupplierHistoryFilter = {
+  start_timestamp: number
+  end_timestamp: number
+  supplier_id?: number
+  model?: string
 }
 
-export async function getSupplierStats(): Promise<SupplierStats> {
-  const response = await api.get<Envelope<SupplierStats>>(`${base}/stats`)
+export type SupplierRealtimeRow = {
+  scope: string
+  supplier_id: number
+  pool_id: number
+  model: string
+  model_version: string
+  group_name: string
+  is_stream: boolean
+  rule_id: string
+  min_samples: number
+  rank: number
+  samples: number
+  success_rate: number
+  overload_rate: number
+  throughput: number
+  throughput_samples: number
+  ttft_ms: number
+  ttft_samples: number
+  state: string
+}
+export type SupplierRealtime = {
+  available: boolean
+  window_start?: number
+  window_end?: number
+  rows: SupplierRealtimeRow[]
+}
+
+export async function getSupplierRealtime(): Promise<SupplierRealtime> {
+  const response = await api.get<Envelope<SupplierRealtime>>(`${base}/realtime`)
+  if (!response.data.success) throw new Error(response.data.message)
+  return response.data.data
+}
+
+export async function getSupplierAttempts(
+  params: SupplierHistoryFilter & { p: number; page_size: number }
+) {
+  const response = await api.get<
+    Envelope<{
+      items: SupplierAttempt[]
+      total: number
+      page: number
+      page_size: number
+    }>
+  >(`${base}/attempts`, { params })
+  if (!response.data.success) throw new Error(response.data.message)
+  return response.data.data
+}
+
+export async function getSupplierStats(
+  params: SupplierHistoryFilter
+): Promise<SupplierStats> {
+  const response = await api.get<Envelope<SupplierStats>>(`${base}/stats`, {
+    params,
+  })
   if (!response.data.success) throw new Error(response.data.message)
   return response.data.data
 }

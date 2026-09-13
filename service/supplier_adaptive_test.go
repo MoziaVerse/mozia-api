@@ -105,8 +105,10 @@ func TestAdaptiveColdStartOverloadAndZeroPrice(t *testing.T) {
 	oldClient := common.RDB
 	common.RDB = client
 	t.Cleanup(func() { common.RDB = oldClient })
-	view, err := ReadSupplierPerformance(ctx, "performance:cold")
+	views, _, err := ReadSupplierRealtime(ctx)
 	require.NoError(t, err)
+	require.Len(t, views, 1)
+	view := views[0]
 	assert.Equal(t, "overloaded", view.State)
 	assert.Equal(t, float64(100), view.OverloadRate, "cooldown must not erase the visible overload rate")
 	// Move the fixture's cooldown into the past; no sleeps or timing races.

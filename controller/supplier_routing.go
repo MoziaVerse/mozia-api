@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
+	"gorm.io/gorm"
 )
 
 func GetSupplierRouting(c *gin.Context) {
@@ -73,41 +74,111 @@ func PublishSupplierRouting(c *gin.Context) {
 	c.JSON(http.StatusGone, gin.H{"success": false, "code": "whole_configuration_write_retired", "message": "Whole configuration writes are retired. Refresh the page and save each supplier, pool, binding or rule individually."})
 }
 
-func GetSupplierAttempts(c *gin.Context) {
-	var attempts []model.SupplierAttempt
-	query := model.DB.Order("id DESC").Limit(100)
-	if poolID, err := strconv.ParseInt(c.Query("pool_id"), 10, 64); err == nil && poolID > 0 {
-		query = query.Where("pool_id = ?", poolID)
+// The same range and filters drive tables, request summaries and procurement totals.
+func supplierHistoryQuery(c *gin.Context, defaultStart int64) (*gorm.DB, int64, int64, error) {
+	start, end := defaultStart, time.Now().Unix()+1
+	for name, target := range map[string]*int64{"start_timestamp": &start, "end_timestamp": &end} {
+		if raw, exists := c.GetQuery(name); exists {
+			value, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || value < 0 {
+				return nil, 0, 0, fmt.Errorf("invalid %s", name)
+			}
+			*target = value
+		}
 	}
-	if err := query.Find(&attempts).Error; err != nil {
+	if start >= end {
+		return nil, 0, 0, fmt.Errorf("start_timestamp must precede end_timestamp")
+	}
+	query := model.DB.WithContext(c.Request.Context()).Model(&model.SupplierAttempt{}).Where("created_at >= ? AND created_at < ?", start, end)
+	for _, name := range []string{"supplier_id", "pool_id"} {
+		if raw, exists := c.GetQuery(name); exists {
+			id, err := strconv.ParseInt(raw, 10, 64)
+			if err != nil || id <= 0 {
+				return nil, 0, 0, fmt.Errorf("invalid %s", name)
+			}
+			query = query.Where(name+" = ?", id)
+		}
+	}
+	for _, name := range []string{"model", "group_name"} {
+		if value := c.Query(name); value != "" {
+			query = query.Where(name+" = ?", value)
+		}
+	}
+	return query, start, end, nil
+}
+
+func GetSupplierAttempts(c *gin.Context) {
+	query, _, _, err := supplierHistoryQuery(c, 0)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	attempts := []model.SupplierAttempt{}
+	// Preserve the existing latest-records response for clients without pagination.
+	if c.Query("p") == "" {
+		if err := query.Order("id DESC").Limit(100).Find(&attempts).Error; err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		common.ApiSuccess(c, attempts)
+		return
+	}
+	page, err := strconv.Atoi(c.Query("p"))
+	size, sizeErr := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	if err != nil || sizeErr != nil || page < 1 || page > 1000000 || size < 1 || size > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid pagination"})
+		return
+	}
+	query = query.Where("kind <> ?", "shadow")
+	var total int64
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, attempts)
+	if err := query.Order("id DESC").Offset((page - 1) * size).Limit(size).Find(&attempts).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, common.PageInfo{Page: page, PageSize: size, Total: int(total), Items: attempts})
+}
+
+func GetSupplierRealtime(c *gin.Context) {
+	if !common.RedisEnabled || common.RDB == nil {
+		common.ApiSuccess(c, gin.H{"available": false, "rows": []service.SupplierRealtimeRow{}})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	rows, now, err := service.ReadSupplierRealtime(ctx)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"available": true, "window_start": (now.Unix()/60 - 4) * 60, "window_end": now.Unix(), "rows": rows})
 }
 
 func GetSupplierRoutingStats(c *gin.Context) {
-	var rows []struct {
-		PerformanceScope string                       `json:"performance_scope"`
-		Performance      *service.SupplierPerformance `json:"performance,omitempty"`
-		SupplierID       int64                        `json:"supplier_id"`
-		PoolID           int64                        `json:"pool_id"`
-		Model            string                       `json:"model"`
-		GroupName        string                       `json:"group_name"`
-		Kind             string                       `json:"kind"`
-		Status           string                       `json:"status"`
-		Requests         int64                        `json:"requests"`
-		AvgTTFTMs        float64                      `json:"avg_ttft_ms"`
-		AvgLatencyMs     float64                      `json:"avg_latency_ms"`
-		OutputTokens     int64                        `json:"output_tokens"`
-		FirstShare       float64                      `json:"first_share_percent"`
-		HealthState      string                       `json:"health_state"`
-		HealthScale      int64                        `json:"health_scale"`
-		PriorityFallback bool                         `json:"priority_fallback"`
-		OutcomeClass     string                       `json:"outcome_class"`
+	rows := []struct {
+		SupplierID       int64   `json:"supplier_id"`
+		PoolID           int64   `json:"pool_id"`
+		Model            string  `json:"model"`
+		GroupName        string  `json:"group_name"`
+		Kind             string  `json:"kind"`
+		Status           string  `json:"status"`
+		Requests         int64   `json:"requests"`
+		AvgTTFTMs        float64 `json:"avg_ttft_ms"`
+		AvgLatencyMs     float64 `json:"avg_latency_ms"`
+		OutputTokens     int64   `json:"output_tokens"`
+		FirstShare       float64 `json:"first_share_percent"`
+		PriorityFallback bool    `json:"priority_fallback"`
+		OutcomeClass     string  `json:"outcome_class"`
+	}{}
+	base, start, end, err := supplierHistoryQuery(c, time.Now().Truncate(time.Hour).Unix())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
 	}
-	start := time.Now().Truncate(time.Hour).Unix()
-	err := model.DB.Model(&model.SupplierAttempt{}).Select("performance_key AS performance_scope, supplier_id, pool_id, model, group_name, kind, status, priority_fallback, outcome_class, COUNT(*) AS requests, COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms ELSE NULL END), 0) AS avg_ttft_ms, AVG(latency_ms) AS avg_latency_ms, SUM(output_tokens) AS output_tokens").Where("created_at >= ? AND status <> ?", start, "cancelled").Group("performance_key, supplier_id, pool_id, model, group_name, kind, status, priority_fallback, outcome_class").Find(&rows).Error
+	err = base.Session(&gorm.Session{}).Select("supplier_id, pool_id, model, group_name, kind, status, priority_fallback, outcome_class, COUNT(*) AS requests, COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms ELSE NULL END), 0) AS avg_ttft_ms, AVG(latency_ms) AS avg_latency_ms, SUM(output_tokens) AS output_tokens").Where("status <> ?", "cancelled").Group("supplier_id, pool_id, model, group_name, kind, status, priority_fallback, outcome_class").Find(&rows).Error
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -122,49 +193,23 @@ func GetSupplierRoutingStats(c *gin.Context) {
 			numerators[fmt.Sprintf("%d:%s", row.SupplierID, scope)] += row.Requests
 		}
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
-	defer cancel()
-	performance := map[string]service.SupplierPerformance{}
 	for i := range rows {
 		row := &rows[i]
 		scope := fmt.Sprintf("%q:%q", row.Model, row.GroupName)
 		if total := denominators[scope]; total > 0 && row.Kind == "first" {
 			row.FirstShare = 100 * float64(numerators[fmt.Sprintf("%d:%s", row.SupplierID, scope)]) / float64(total)
 		}
-		row.HealthState = "unavailable"
-		if common.RedisEnabled && common.RDB != nil && row.PerformanceScope != "" {
-			view, found := performance[row.PerformanceScope]
-			if !found {
-				var err error
-				view, err = service.ReadSupplierPerformance(ctx, row.PerformanceScope)
-				if err != nil {
-					view.State = "unavailable"
-				}
-				performance[row.PerformanceScope] = view
-			}
-			row.Performance = &view
-			row.HealthState = view.State
-		} else if common.RedisEnabled && common.RDB != nil {
-			key := fmt.Sprintf("supplier-routing:health:%d:%d:%s:%s", row.PoolID, len(row.Model), row.Model, row.GroupName)
-			health, err := common.RDB.HGetAll(ctx, key).Result()
-			if err == nil {
-				row.HealthState = health["state"]
-				row.HealthScale, _ = strconv.ParseInt(health["scale"], 10, 64)
-				if row.HealthState == "" {
-					row.HealthState = "trial"
-				}
-			}
-		}
 	}
+
 	// Aggregate in SQL so the dashboard does not load one row per user request.
-	outcomes := model.DB.Model(&model.SupplierAttempt{}).Select("request_id, MAX(CASE WHEN kind = 'first' THEN 1 ELSE 0 END) AS first_count, MAX(CASE WHEN kind = 'first' AND status = 'success' THEN 1 ELSE 0 END) AS first_success, MAX(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS final_success, MAX(CASE WHEN status IN ('pending','unknown') THEN 1 ELSE 0 END) AS unresolved").Where("created_at >= ? AND kind IN ? AND status <> ?", start, []string{"first", "retry"}, "cancelled").Group("request_id")
+	outcomes := base.Session(&gorm.Session{}).Select("request_id, MAX(CASE WHEN kind = 'first' AND status = 'success' THEN 1 ELSE 0 END) AS first_success, MAX(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS final_success, MAX(CASE WHEN status IN ('pending','unknown') THEN 1 ELSE 0 END) AS unresolved").Where("kind IN ? AND status <> ?", []string{"first", "retry"}, "cancelled").Group("request_id")
 	var summary struct {
 		Requests     int64 `json:"requests"`
 		FirstSuccess int64 `json:"first_success"`
 		FinalSuccess int64 `json:"final_success"`
 		Unresolved   int64 `json:"unresolved"`
 	}
-	err = model.DB.Table("(?) AS request_outcomes", outcomes).Select("COUNT(*) AS requests, COALESCE(SUM(first_success),0) AS first_success, COALESCE(SUM(final_success),0) AS final_success, COALESCE(SUM(CASE WHEN final_success = 0 AND unresolved > 0 THEN 1 ELSE 0 END),0) AS unresolved").Where("first_count > 0").Scan(&summary).Error
+	err = model.DB.Table("(?) AS request_outcomes", outcomes).Select("COUNT(*) AS requests, COALESCE(SUM(first_success),0) AS first_success, COALESCE(SUM(final_success),0) AS final_success, COALESCE(SUM(CASE WHEN final_success = 0 AND unresolved > 0 THEN 1 ELSE 0 END),0) AS unresolved").Scan(&summary).Error
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -179,13 +224,13 @@ func GetSupplierRoutingStats(c *gin.Context) {
 	}
 	if authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ModelPricingRead) {
 		known := "cost_status IN ('calculated','reconciled')"
-		err = model.DB.Model(&model.SupplierAttempt{}).Select("currency, COALESCE(SUM(CASE WHEN "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS total, COALESCE(SUM(CASE WHEN kind = 'retry' AND "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS retry_cost, COALESCE(SUM(CASE WHEN status <> 'success' AND "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS failed_cost, SUM(CASE WHEN cost_status = 'pending' THEN 1 ELSE 0 END) AS pending, COUNT(DISTINCT CASE WHEN status = 'success' THEN request_id END) AS successful_requests").Where("created_at >= ? AND kind IN ? AND status <> ?", start, []string{"first", "retry"}, "cancelled").Group("currency").Scan(&costs).Error
+		err = base.Session(&gorm.Session{}).Select("currency, COALESCE(SUM(CASE WHEN "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS total, COALESCE(SUM(CASE WHEN kind = 'retry' AND "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS retry_cost, COALESCE(SUM(CASE WHEN status <> 'success' AND "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS failed_cost, SUM(CASE WHEN cost_status = 'pending' THEN 1 ELSE 0 END) AS pending, COUNT(DISTINCT CASE WHEN status = 'success' THEN request_id END) AS successful_requests").Where("kind IN ? AND status <> ?", []string{"first", "retry"}, "cancelled").Group("currency").Scan(&costs).Error
 		if err != nil {
 			common.ApiError(c, err)
 			return
 		}
 	}
-	common.ApiSuccess(c, gin.H{"hour_start": start, "rows": rows, "summary": summary, "costs": costs})
+	common.ApiSuccess(c, gin.H{"hour_start": start, "start_timestamp": start, "end_timestamp": end, "rows": rows, "summary": summary, "costs": costs})
 }
 
 func ReconcileSupplierAttempt(c *gin.Context) {

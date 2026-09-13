@@ -52,20 +52,9 @@ local function performanceTier(c, h)
     return 0
 end
 
-local function finishPerformance(a)
-    if not a.performance_key or not a.measure or input.cancel or (input.class ~= 'success' and input.class ~= 'failure' and input.class ~= 'overload') then return end
-    local key = a.performance_key
-    local loadKey = key .. ':load:' .. math.floor(now/60000)
-    redis.call('HINCRBY', loadKey, 'arrivals', 1)
-    if input.class == 'overload' then redis.call('HINCRBY', loadKey, 'overload_arrivals', 1) end
-    redis.call('EXPIRE', loadKey, 360)
-    local generation = tonumber(redis.call('HGET', key, 'generation') or '0')
-    if generation ~= (a.performance_generation or 0) then return end
-    local minute = math.floor(now / 60000)
-    local bucket = key .. ':g' .. generation .. ':' .. minute
+local function recordPerformance(bucket)
     redis.call('HINCRBY', bucket, input.class, 1)
     if input.class == 'success' then
-        redis.call('HSET', key, 'consecutive_failures', 0)
         if input.ttft > 0 then
             redis.call('HINCRBYFLOAT', bucket, 'ttft', input.ttft)
             redis.call('HINCRBY', bucket, 'ttft_n', 1)
@@ -73,13 +62,35 @@ local function finishPerformance(a)
         if input.tokens >= 0 and (input.latency or 0) > 0 then
             redis.call('HINCRBYFLOAT', bucket, 'tps', input.output * 1000/input.latency)
             redis.call('HINCRBY', bucket, 'tps_n', 1)
+        end
+    end
+    redis.call('EXPIRE', bucket, 360)
+end
+
+local function finishPerformance(a)
+    if not a.performance_key or not a.measure or input.cancel or (input.class ~= 'success' and input.class ~= 'failure' and input.class ~= 'overload') then return end
+    local key = a.performance_key
+    local loadKey = key .. ':load:' .. math.floor(now/60000)
+    redis.call('HINCRBY', loadKey, 'arrivals', 1)
+    if input.class == 'overload' then redis.call('HINCRBY', loadKey, 'overload_arrivals', 1) end
+    recordPerformance(loadKey)
+    redis.call('ZADD', prefix .. 'live', now, key)
+    redis.call('ZREMRANGEBYSCORE', prefix .. 'live', '-inf', now-300000)
+    redis.call('EXPIRE', prefix .. 'live', 360)
+    local generation = tonumber(redis.call('HGET', key, 'generation') or '0')
+    if generation ~= (a.performance_generation or 0) then return end
+    local minute = math.floor(now / 60000)
+    local bucket = key .. ':g' .. generation .. ':' .. minute
+    recordPerformance(bucket)
+    if input.class == 'success' then
+        redis.call('HSET', key, 'consecutive_failures', 0)
+        if input.tokens >= 0 and (input.latency or 0) > 0 then
             local outputKey = a.output_scope .. ':' .. minute
             redis.call('HINCRBY', outputKey, 'output', input.output)
             redis.call('HINCRBY', outputKey, 'count', 1)
             redis.call('EXPIRE', outputKey, 360)
         end
     end
-    redis.call('EXPIRE', bucket, 360)
     redis.call('HSET', key, 'last', now)
     redis.call('EXPIRE', key, 86400)
     if not a.adaptive then return end
@@ -312,6 +323,13 @@ if adaptive then
     if op ~= 'preview' then redis.call('INCR', rotation); redis.call('EXPIRE', rotation, 7200) end
 end
 if op == 'preview' then return cjson.encode(selected) end
+if selected.measure and selected.performance_key then
+    redis.call('HSET', selected.performance_key, 'metadata', cjson.encode({pool_id=selected.pool_id, supplier_id=selected.supplier_id, model=input.model, model_version=selected.model_version, group_name=input.group, is_stream=selected.streaming, rule_id=selected.rule_id, min_samples=input.health.min_samples}))
+    redis.call('EXPIRE', selected.performance_key, 86400)
+    redis.call('ZADD', prefix .. 'live', now, selected.performance_key)
+    redis.call('ZREMRANGEBYSCORE', prefix .. 'live', '-inf', now-300000)
+    redis.call('EXPIRE', prefix .. 'live', 360)
+end
 if adaptive then
     redis.call('INCR', explorationKey); redis.call('EXPIRE', explorationKey, 7200)
     redis.call('HSET', selected.performance_key, 'state', selected.health_state)
