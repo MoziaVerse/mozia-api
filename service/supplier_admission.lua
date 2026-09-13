@@ -71,8 +71,6 @@ local function finishPerformance(a)
     if not a.performance_key or not a.measure or input.cancel or (input.class ~= 'success' and input.class ~= 'failure' and input.class ~= 'overload') then return end
     local key = a.performance_key
     local loadKey = key .. ':load:' .. math.floor(now/60000)
-    redis.call('HINCRBY', loadKey, 'arrivals', 1)
-    if input.class == 'overload' then redis.call('HINCRBY', loadKey, 'overload_arrivals', 1) end
     recordPerformance(loadKey)
     redis.call('ZADD', prefix .. 'live', now, key)
     redis.call('ZREMRANGEBYSCORE', prefix .. 'live', '-inf', now-300000)

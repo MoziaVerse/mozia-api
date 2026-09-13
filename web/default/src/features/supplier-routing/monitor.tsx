@@ -145,9 +145,7 @@ export function SupplierMonitor() {
             </TabsTrigger>
           </TabsList>
           <TabsContent value='realtime'>
-            {view === 'realtime' && (
-              <SupplierRealtimeMonitor suppliers={suppliers} pools={pools} />
-            )}
+            <SupplierRealtimeMonitor suppliers={suppliers} pools={pools} />
           </TabsContent>
           <TabsContent value='history'>
             <div className='space-y-6'>
