@@ -270,7 +270,7 @@ func FinishSupplierAttempt(c *gin.Context, info *relaycommon.RelayInfo, apiErr *
 		data, _ := common.Marshal(s.Usage)
 		a.UsageJSON = string(data)
 	}
-	if amount, err := SupplierCost(a.PriceJSON, s.Usage); err == nil && s.Complete && a.Status != "unknown" {
+	if amount, err := SupplierCost(a.PriceJSON, s.Usage); err == nil && s.Complete && a.Status != "unknown" && a.CostStatus != "not_applicable" {
 		a.Cost = amount
 		a.CostStatus = "calculated"
 	}

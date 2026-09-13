@@ -152,6 +152,7 @@ func TestSupplierComparableProcurementQuotes(t *testing.T) {
 		{"complete", ChannelCostPricing{Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 1, "output": 10, "cache_read": 0.5}}}, "0.00065"},
 		{"tiny-positive", ChannelCostPricing{Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 1e-18, "output": 1e-18}}}, "0.00000000000000000000025"},
 		{"free", ChannelCostPricing{Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 0, "output": 0}}}, "0"},
+		{"self-hosted", SupplierSelfHostedPrice(1, "test"), "0"},
 		{"missing-output", ChannelCostPricing{Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 0}}}, ""},
 		{"unsupported", ChannelCostPricing{Currency: "CNY", Mode: "per_second"}, ""},
 		{"currency", ChannelCostPricing{Currency: "EUR", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 1, "output": 1}}}, ""},
@@ -178,4 +179,9 @@ func TestSupplierComparableProcurementQuotes(t *testing.T) {
 	require.ErrorContains(t, ValidateSupplierRulePrices(&cfg, rule), "one currency")
 	cfg.Prices[1].Currency = "CNY"
 	require.NoError(t, ValidateSupplierRulePrices(&cfg, rule))
+	cfg.Prices[0] = SupplierSelfHostedPrice(1, "test")
+	cfg.Prices[1].Currency = "USD"
+	require.NoError(t, ValidateSupplierRulePrices(&cfg, rule), "self-hosted cost is currency-neutral")
+	cfg.Prices = cfg.Prices[:1]
+	require.NoError(t, ValidateSupplierRulePrices(&cfg, rule), "self-hosted-only rules need no quote")
 }

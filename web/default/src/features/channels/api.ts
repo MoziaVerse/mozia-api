@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api, type ApiRequestConfig } from '@/lib/api'
 import { getGroups as getUserGroups } from '@/features/users/api'
+import { api, type ApiRequestConfig } from '@/lib/api'
+
 import type {
   AddChannelRequest,
   BatchDeleteParams,
@@ -129,7 +130,12 @@ export async function createChannel(
 export async function updateChannel(
   id: number,
   data: Partial<Channel>
-): Promise<{ success: boolean; message?: string; data?: Channel }> {
+): Promise<{
+  success: boolean
+  message?: string
+  data?: Channel
+  procurement?: { application: string; revision: number } | null
+}> {
   const res = await api.put(
     '/api/channel/',
     { id, ...data },

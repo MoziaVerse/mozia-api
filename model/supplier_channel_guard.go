@@ -74,7 +74,7 @@ func RegisterSupplierChannelGuards(db *gorm.DB) error {
 			if value.Kind() != reflect.Struct {
 				return
 			}
-			for _, name := range []string{"models", "type", "model_mapping", "supplier_id", "settings"} {
+			for _, name := range []string{"models", "type", "model_mapping", "supplier_id", "settings", "deployment_type"} {
 				field := tx.Statement.Schema.LookUpField(name)
 				v, zero := field.ValueOf(context.Background(), value)
 				allowed, exists := selected[name]
@@ -88,7 +88,7 @@ func RegisterSupplierChannelGuards(db *gorm.DB) error {
 			}
 		}
 		relevant := false
-		for _, key := range []string{"models", "type", "model_mapping", "supplier_id", "settings"} {
+		for _, key := range []string{"models", "type", "model_mapping", "supplier_id", "settings", "deployment_type"} {
 			if _, ok := columns[key]; ok {
 				relevant = true
 			}
@@ -124,6 +124,12 @@ func RegisterSupplierChannelGuards(db *gorm.DB) error {
 			}
 			if prior.SupplierID == 0 {
 				continue
+			}
+			if deployment, ok := columns["deployment_type"]; ok && deployment != prior.DeploymentType {
+				if allowed, _ := tx.Get("supplier:deployment_update"); allowed != true {
+					tx.AddError(SupplierResourceConflict("publication_required", "update deployment type through the channel API to publish procurement changes"))
+					return
+				}
 			}
 			if channelType, ok := columns["type"]; ok && channelType != constant.ChannelTypeOpenAI {
 				tx.AddError(SupplierResourceConflict("resource_in_use", "unbind the supplier before changing the channel protocol"))
@@ -179,6 +185,6 @@ func supplierChannelMutationTargets(tx *gorm.DB) ([]Channel, error) {
 		}
 	}
 	var channels []Channel
-	err := query.Select("id", "supplier_id", "models", "type", "model_mapping", "settings").Find(&channels).Error
+	err := query.Select("id", "supplier_id", "models", "type", "model_mapping", "settings", "deployment_type").Find(&channels).Error
 	return channels, err
 }

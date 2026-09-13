@@ -40,9 +40,26 @@ func SupplierExpectedOutput(ctx context.Context, scope string, fallback int64) (
 	return max(1, tokens/samples), nil
 }
 
-// Price edits use the same publication fence as resource edits. The unchanged
-// pricing API remains usable without Redis when there are no adaptive rules.
 func MutateSupplierCost(parent context.Context, cost *model.ChannelCostPricing, deleteID int64, userID int) (*SupplierResourceResult, error) {
+	id := fmt.Sprint(deleteID)
+	return mutateSupplierProcurement(parent, "price", id, userID, func(tx *gorm.DB) (any, error) {
+		if cost != nil {
+			return cost, model.UpsertChannelCostPricing(tx, cost)
+		}
+		deleted := tx.Delete(&model.ChannelCostPricing{}, deleteID)
+		return deleted.RowsAffected > 0, deleted.Error
+	})
+}
+
+func UpdateSupplierChannel(parent context.Context, channel *model.Channel, userID int) (*SupplierResourceResult, error) {
+	return mutateSupplierProcurement(parent, "channel", fmt.Sprint(channel.Id), userID, func(tx *gorm.DB) (any, error) {
+		return channel, channel.UpdateWithDB(tx.Set("supplier:deployment_update", true))
+	})
+}
+
+// Both quote and deployment edits change procurement. Reuse the resource publication
+// fence; ordinary installations without adaptive rules still work without Redis.
+func mutateSupplierProcurement(parent context.Context, kind, id string, userID int, mutate func(*gorm.DB) (any, error)) (*SupplierResourceResult, error) {
 	ctx, cancel := context.WithTimeout(parent, 20*time.Second)
 	defer cancel()
 	managed := model.DB.Migrator().HasTable(&model.SupplierRoutingRule{})
@@ -83,19 +100,13 @@ func MutateSupplierCost(parent context.Context, cost *model.ChannelCostPricing, 
 				return model.SupplierResourceConflict("configuration_apply_pending", "wait for the current publication before changing prices")
 			}
 		}
-		id := fmt.Sprint(deleteID)
-		if cost != nil {
-			if err := model.UpsertChannelCostPricing(tx, cost); err != nil {
-				return err
-			}
-			result.Resource = cost
+		var err error
+		result.Resource, err = mutate(tx)
+		if err != nil {
+			return err
+		}
+		if cost, ok := result.Resource.(*model.ChannelCostPricing); ok {
 			id = fmt.Sprint(cost.Id)
-		} else {
-			deleted := tx.Delete(&model.ChannelCostPricing{}, deleteID)
-			if deleted.Error != nil {
-				return deleted.Error
-			}
-			result.Resource = deleted.RowsAffected > 0
 		}
 		if adaptive == 0 {
 			return nil
@@ -114,7 +125,7 @@ func MutateSupplierCost(parent context.Context, cost *model.ChannelCostPricing, 
 		if err := supplierLeaseGate.Run(ctx, common.RDB, []string{supplierPublishLock, supplierRuntimeKey}, token, exists).Err(); err != nil {
 			return err
 		}
-		if err := model.CreateSupplierRuntimeRevision(tx, cfg, "price", id, userID); err != nil {
+		if err := model.CreateSupplierRuntimeRevision(tx, cfg, kind, id, userID); err != nil {
 			return err
 		}
 		result.Revision, result.Application = cfg.Revision, "pending"
@@ -127,7 +138,7 @@ func MutateSupplierCost(parent context.Context, cost *model.ChannelCostPricing, 
 		if err := applySupplierRevision(ctx, token); err == nil {
 			result.Application = "applied"
 		} else {
-			common.SysError("supplier price saved; application pending: " + err.Error())
+			common.SysError("supplier procurement saved; application pending: " + err.Error())
 			_, _, _ = EnqueueSystemTask("supplier_configuration_apply", struct{}{})
 		}
 	}

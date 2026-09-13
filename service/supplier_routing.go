@@ -37,6 +37,7 @@ type SupplierRuntime struct {
 }
 
 type SupplierCandidate struct {
+	SelfHosted     bool    `json:"self_hosted"`
 	ModelVersion   string  `json:"model_version"`
 	RuleID         string  `json:"rule_id"`
 	Cost           float64 `json:"cost"`
@@ -370,6 +371,7 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 				continue
 			}
 			candidate.EstimatedCost = amount.String()
+			candidate.SelfHosted = price.Mode == model.SupplierCostModeSelfHosted
 			candidate.Currency = price.Currency
 			raw, err := common.Marshal(price)
 			if err != nil {
@@ -464,13 +466,22 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	s.Current = &model.SupplierAttempt{EstimatedCost: selected.EstimatedCost, RoutingWeight: selected.RoutingWeight, HealthState: selected.HealthState, PerformanceKey: selected.PerformanceKey, PriceJSON: selected.PriceJSON, Currency: selected.Currency, PriorityFallback: fallback, CapacityUntil: selected.Expires, RequestID: s.RequestID, Attempt: s.AttemptNumber, SupplierID: selected.SupplierID, PoolID: selected.PoolID, ChannelID: selected.ChannelID, UserID: info.UserId, Model: info.OriginModelName, GroupName: s.Group, Revision: s.Runtime.Config.Revision, Reason: reason, Kind: kind, Status: "pending", CreatedAt: time.Now().Unix(), CostStatus: "pending"}
 	var cost model.ChannelCostPricing
 	if !adaptive {
-		if err := model.DB.Where("channel_id = ? AND model_name = ?", selected.ChannelID, info.OriginModelName).First(&cost).Error; err == nil {
-			if err := common.UnmarshalJsonStr(cost.ConfigJson, &cost.Config); err == nil {
-				snapshot, _ := common.Marshal(cost)
-				s.Current.PriceJSON = string(snapshot)
-				s.Current.Currency = cost.Currency
+		var channel model.Channel
+		if err := model.DB.Select("deployment_type").First(&channel, selected.ChannelID).Error; err == nil && channel.DeploymentType == model.ChannelDeploymentSelfHosted {
+			cost = model.SupplierSelfHostedPrice(selected.ChannelID, info.OriginModelName)
+		} else if err := model.DB.Where("channel_id = ? AND model_name = ?", selected.ChannelID, info.OriginModelName).First(&cost).Error; err == nil {
+			if err := common.UnmarshalJsonStr(cost.ConfigJson, &cost.Config); err != nil {
+				cost = model.ChannelCostPricing{}
 			}
 		}
+		if cost.Mode != "" {
+			snapshot, _ := common.Marshal(cost)
+			s.Current.PriceJSON = string(snapshot)
+			s.Current.Currency = cost.Currency
+		}
+	}
+	if cost.Mode == model.SupplierCostModeSelfHosted || selected.SelfHosted {
+		s.Current.Cost, s.Current.CostStatus = "0.00000000", "not_applicable"
 	}
 	if err := model.DB.Create(s.Current).Error; err != nil {
 		FinishSupplierAttempt(c, info, nil, true)

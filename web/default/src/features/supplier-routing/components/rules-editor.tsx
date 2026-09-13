@@ -195,7 +195,7 @@ export function RuleFields(props: { index: number }) {
       {adaptive && (
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Configure complete channel procurement quotes in one currency before saving. Missing or unsupported quotes are excluded; supplier shares are not configured here.'
+            'Self-hosted channels need no quote and have the lowest routing cost within the same health tier. Other channels require complete procurement quotes in one currency. Trial traffic and capacity limits still apply.'
           )}{' '}
           <Link
             to='/system-settings/billing/$section'

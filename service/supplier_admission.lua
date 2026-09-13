@@ -263,13 +263,17 @@ local adaptive = input.mode == 'adaptive'
 local suppliers = {}
 local bestTier = 2
 local channelTies = {}
+local function cheaper(a, b)
+    if a.self_hosted ~= b.self_hosted then return a.self_hosted end
+    return a.cost < b.cost
+end
 for _, c in ipairs(candidates) do
     local sid = tostring(adaptive and c.pool_id or c.supplier_id)
     local prior = suppliers[sid]
-    if not prior or (adaptive and (c.cost < prior.cost or (c.cost == prior.cost and c.channel_id < prior.channel_id))) or (not adaptive and c.utilization < prior.utilization) then suppliers[sid] = c end
+    if not prior or (adaptive and cheaper(c, prior)) or (not adaptive and c.utilization < prior.utilization) then suppliers[sid] = c end
     if adaptive then
-        if not channelTies[sid] or c.cost < channelTies[sid][1].cost then channelTies[sid] = {c}
-        elseif c.cost == channelTies[sid][1].cost then table.insert(channelTies[sid], c) end
+        if not channelTies[sid] or cheaper(c, channelTies[sid][1]) then channelTies[sid] = {c}
+        elseif c.cost == channelTies[sid][1].cost and c.self_hosted == channelTies[sid][1].self_hosted then table.insert(channelTies[sid], c) end
         if c.tier < bestTier then bestTier = c.tier end
     end
 end
@@ -288,7 +292,13 @@ if adaptive then
     if explore then scheduleKey = scheduleKey .. ':trial' end
 end
 local minimumCost = nil
-if adaptive then for _, c in pairs(suppliers) do if not minimumCost or c.cost < minimumCost then minimumCost = c.cost end end end
+local hasSelfHosted = false
+if adaptive then
+    for _, c in pairs(suppliers) do
+        if not minimumCost or c.cost < minimumCost then minimumCost = c.cost end
+        if c.self_hosted then hasSelfHosted = true end
+    end
+end
 local selected = nil
 local total = 0
 local highest = nil
@@ -299,6 +309,7 @@ for sid, c in pairs(suppliers) do
         weight = 1
         if not explore and minimumCost > 0 then weight = math.max(1, math.floor(1000*(minimumCost/c.cost)^2+0.5)) end
         if not explore and minimumCost == 0 and c.cost > 0 then weight = 0 end
+        if not explore and hasSelfHosted and not c.self_hosted then weight = 0 end
     end
     if weight > 0 then
         c.routing_weight = weight
@@ -318,6 +329,7 @@ if adaptive then
     local turn = tonumber(redis.call('GET', rotation) or '0')
     local chosen = tied[turn % #tied + 1]
     selected.channel_id = chosen.channel_id; selected.price_json = chosen.price_json
+    selected.currency = chosen.currency
     if op ~= 'preview' then redis.call('INCR', rotation); redis.call('EXPIRE', rotation, 7200) end
 end
 if op == 'preview' then return cjson.encode(selected) end

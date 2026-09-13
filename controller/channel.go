@@ -1073,7 +1073,16 @@ func UpdateChannel(c *gin.Context) {
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
 	}
-	err = channel.Update()
+	var procurement gin.H
+	if channel.DeploymentType != "" && channel.DeploymentType != originChannel.DeploymentType {
+		var result *service.SupplierResourceResult
+		result, err = service.UpdateSupplierChannel(c.Request.Context(), &channel.Channel, c.GetInt("id"))
+		if result != nil {
+			procurement = gin.H{"application": result.Application, "revision": result.Revision}
+		}
+	} else {
+		err = channel.Update()
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1108,9 +1117,10 @@ func UpdateChannel(c *gin.Context) {
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    channel,
+		"success":     true,
+		"message":     "",
+		"data":        channel,
+		"procurement": procurement,
 	})
 	return
 }

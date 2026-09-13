@@ -10,6 +10,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// Internal snapshot mode, never an editable procurement quote or a currency.
+const SupplierCostModeSelfHosted = "self_hosted"
+
+func SupplierSelfHostedPrice(channelID int, model string) ChannelCostPricing {
+	return ChannelCostPricing{ChannelId: channelID, ModelName: model, Mode: SupplierCostModeSelfHosted}
+}
+
 func DefaultSupplierAdaptiveHealth() SupplierHealthPolicy {
 	return SupplierHealthPolicy{WindowSeconds: 300, MinSamples: 20, FailurePercent: 20, SuccessPercent: 95, MaxTTFTMs: 5000, MinThroughput: 10, CooldownSeconds: 30, TrialPercent: 5, TrialConcurrency: 1, ReferenceOutputTokens: 512}
 }
@@ -50,6 +57,9 @@ func SupplierPriceAmount(cost ChannelCostPricing, input, output, cached int64) (
 	if input < 0 || output < 0 || cached < 0 || cached > input {
 		return decimal.Zero, fmt.Errorf("invalid supplier usage")
 	}
+	if cost.Mode == SupplierCostModeSelfHosted {
+		return decimal.Zero, nil
+	}
 	if cost.Currency != "CNY" && cost.Currency != "USD" {
 		return decimal.Zero, fmt.Errorf("supplier currency must be CNY or USD")
 	}
@@ -87,12 +97,30 @@ func LoadSupplierPrices(db *gorm.DB, cfg *SupplierRoutingConfig) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	if err := db.Where("channel_id IN ?", ids).Find(&cfg.Prices).Error; err != nil {
+	var channels []Channel
+	if err := db.Select("id", "deployment_type").Where("id IN ?", ids).Find(&channels).Error; err != nil {
 		return err
 	}
-	for i := range cfg.Prices {
-		if err := common.UnmarshalJsonStr(cfg.Prices[i].ConfigJson, &cfg.Prices[i].Config); err != nil {
+	selfHosted := map[int]bool{}
+	for _, channel := range channels {
+		selfHosted[channel.Id] = channel.DeploymentType == ChannelDeploymentSelfHosted
+	}
+	var prices []ChannelCostPricing
+	if err := db.Where("channel_id IN ?", ids).Find(&prices).Error; err != nil {
+		return err
+	}
+	for _, price := range prices {
+		if selfHosted[price.ChannelId] {
+			continue // Old quotes remain stored but cannot override self-hosted routing.
+		}
+		if err := common.UnmarshalJsonStr(price.ConfigJson, &price.Config); err != nil {
 			return err
+		}
+		cfg.Prices = append(cfg.Prices, price)
+	}
+	for _, binding := range cfg.Bindings {
+		if selfHosted[binding.ChannelID] {
+			cfg.Prices = append(cfg.Prices, SupplierSelfHostedPrice(binding.ChannelID, binding.Model))
 		}
 	}
 	return nil
@@ -100,6 +128,7 @@ func LoadSupplierPrices(db *gorm.DB, cfg *SupplierRoutingConfig) error {
 
 func ValidateSupplierRulePrices(cfg *SupplierRoutingConfig, r SupplierRoutingRule) error {
 	currency := ""
+	usable := false
 	for _, price := range cfg.Prices {
 		if price.ModelName != r.Model {
 			continue
@@ -115,13 +144,17 @@ func ValidateSupplierRulePrices(cfg *SupplierRoutingConfig, r SupplierRoutingRul
 		if _, err := SupplierPriceAmount(price, 1, 1, 0); err != nil {
 			continue
 		}
+		usable = true
+		if price.Mode == SupplierCostModeSelfHosted {
+			continue
+		}
 		if currency != "" && currency != price.Currency {
 			return SupplierFieldError("targets", "adaptive routing requires procurement quotes in one currency")
 		}
 		currency = price.Currency
 	}
-	if currency == "" {
-		return SupplierFieldError("targets", "configure a complete text-token or per-request procurement quote for an associated channel first")
+	if !usable {
+		return SupplierFieldError("targets", "associate a self-hosted channel or configure a complete text-token or per-request procurement quote first")
 	}
 	return nil
 }

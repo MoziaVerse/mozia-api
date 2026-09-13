@@ -357,6 +357,9 @@ export function ChannelCostPricingSection() {
       <div className='text-muted-foreground text-sm'>
         {t(
           'Channel procurement quotes determine adaptive routing costs and supplier accounting. Customer billing stays independent.'
+        )}{' '}
+        {t(
+          'Self-hosted channels use zero cost for routing only; infrastructure costs are not accounted for.'
         )}
       </div>
       <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>

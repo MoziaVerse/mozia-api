@@ -121,6 +121,63 @@ func TestAdaptiveColdStartOverloadAndZeroPrice(t *testing.T) {
 	assert.Equal(t, "normal", adaptiveAdmission(t, client, "zero", "acquire", candidates).HealthState)
 }
 
+func TestAdaptiveSelfHostedPreferenceRespectsHealthAndCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		thirdCost float64
+		samePool  bool
+		slow      bool
+		cooldown  bool
+		full      bool
+		want      int
+	}{
+		{name: "paid-third-party", thirdCost: 1, want: 2},
+		{name: "free-third-party", want: 2},
+		{name: "same-pool-free-third-party", samePool: true, want: 2},
+		{name: "self-hosted-slow", slow: true, want: 1},
+		{name: "self-hosted-cooling", cooldown: true, want: 1},
+		{name: "self-hosted-full", full: true, want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, runtime := supplierRedisFixture(t)
+			ctx := context.Background()
+			now, err := client.Time(ctx).Result()
+			require.NoError(t, err)
+			for _, id := range []int{1, 2} {
+				require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:%d:g0:%d", id, now.Unix()/60), "success", 20, "tps", 2000, "tps_n", 20).Err())
+			}
+			candidates := []SupplierCandidate{
+				{ChannelID: 1, PoolID: 1, SupplierID: 1, Tokens: 1, Cost: tc.thirdCost, Currency: "USD", PerformanceKey: "performance:1"},
+				{ChannelID: 2, PoolID: 2, SupplierID: 2, Tokens: 1, Cost: 0, SelfHosted: true, PerformanceKey: "performance:2"},
+			}
+			if tc.samePool {
+				runtime.Bindings["2:test"] = 1
+				candidates[1].PoolID, candidates[1].SupplierID = 1, 1
+				candidates[1].PerformanceKey = "performance:1"
+			}
+			if tc.slow {
+				require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:2:g0:%d", now.Unix()/60), "tps", 20).Err())
+			}
+			if tc.cooldown {
+				require.NoError(t, client.HSet(ctx, "performance:2", "state", "paused", "until", now.UnixMilli()+60000).Err())
+			}
+			if tc.full {
+				pool := runtime.Pools["2"]
+				pool.Limits.Concurrency = 1
+				runtime.Pools["2"] = pool
+				require.NoError(t, client.ZAdd(ctx, "supplier-routing:pool:2:active", &redis.Z{Score: float64(now.UnixMilli() + 60000), Member: "in-flight"}).Err())
+			}
+			raw, err := common.Marshal(runtime)
+			require.NoError(t, err)
+			require.NoError(t, client.Set(ctx, supplierRuntimeKey, raw, 0).Err())
+			selected := adaptiveAdmission(t, client, "self-hosted-choice", "acquire", candidates)
+			require.NotNil(t, selected)
+			assert.Equal(t, tc.want, selected.ChannelID)
+			assert.Equal(t, tc.want == 2, selected.SelfHosted)
+		})
+	}
+}
+
 func TestAdaptivePricePublicationAndOptionalPoolLimits(t *testing.T) {
 	db := supplierResourceFixture(t)
 	t.Setenv("LOG_SQL_DSN", "")
@@ -182,6 +239,62 @@ func TestAdaptivePricePublicationAndOptionalPoolLimits(t *testing.T) {
 	assert.ErrorContains(t, err, "procurement quote", "cannot delete the only usable quote under an active adaptive rule")
 	var persisted model.ChannelCostPricing
 	require.NoError(t, db.First(&persisted, cost.Id).Error)
+
+	// Deployment classification is a procurement publication, including in-flight snapshots.
+	selfHosted := model.Channel{Id: ch.Id, DeploymentType: model.ChannelDeploymentSelfHosted}
+	changed, err := UpdateSupplierChannel(context.Background(), &selfHosted, 7)
+	require.NoError(t, err)
+	assert.Equal(t, "applied", changed.Application)
+	assert.Equal(t, ch.Models, selfHosted.Models)
+	assert.ErrorContains(t, db.Model(&ch).Update("deployment_type", model.ChannelDeploymentThirdParty).Error, "channel API", "direct writes must not bypass publication")
+	_, err = MutateSupplierCost(context.Background(), &cost, 0, 7)
+	assert.ErrorContains(t, err, "self-hosted")
+	runtime, err = ReadSupplierRuntime(context.Background())
+	require.NoError(t, err)
+	require.Len(t, runtime.Config.Prices, 1)
+	assert.Equal(t, model.SupplierCostModeSelfHosted, runtime.Config.Prices[0].Mode)
+	assert.Empty(t, runtime.Config.Prices[0].Currency)
+	ownContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ownContext.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ownState := &SupplierRouteState{Runtime: runtime, Rule: runtime.Config.Rules[0], Managed: true, Group: "default", RequestID: "self-hosted-snapshot", Excluded: map[int]bool{}, ExcludedPools: map[int64]bool{}, ExcludedDomains: map[string]bool{}}
+	ownContext.Set(supplierStateKey, ownState)
+	selected, err = SelectSupplierChannel(ownContext, info, nil)
+	require.NoError(t, err)
+	assert.Equal(t, ch.Id, selected.Id)
+	assert.Equal(t, "0", ownState.Current.EstimatedCost)
+	assert.Equal(t, "not_applicable", ownState.Current.CostStatus)
+	thirdParty := model.Channel{Id: ch.Id, DeploymentType: model.ChannelDeploymentThirdParty}
+	_, err = UpdateSupplierChannel(context.Background(), &thirdParty, 7)
+	require.NoError(t, err)
+	next, err := ReadSupplierRuntime(context.Background())
+	require.NoError(t, err)
+	require.Len(t, next.Config.Prices, 1)
+	assert.Equal(t, float64(4), next.Config.Prices[0].Config.Items["output"], "old quotes survive self-hosted classification")
+	ownState.Sent = true
+	ObserveSupplierResponse(ownContext, info, []byte(`{"choices":[{"finish_reason":"stop"}]}`), false)
+	FinishSupplierAttempt(ownContext, info, nil, false)
+	assert.Equal(t, "0.00000000", ownState.Current.Cost)
+	assert.Equal(t, "not_applicable", ownState.Current.CostStatus, "self-hosted usage never becomes a fabricated procurement settlement")
+	var ownAttempt model.SupplierAttempt
+	require.NoError(t, db.First(&ownAttempt, ownState.Current.ID).Error)
+	assert.Equal(t, "not_applicable", ownAttempt.CostStatus)
+	assert.Equal(t, "success", ownAttempt.Status)
+	assert.Less(t, ownAttempt.Revision, next.Config.Revision)
+	_, err = UpdateSupplierChannel(context.Background(), &selfHosted, 7)
+	require.NoError(t, err)
+	_, err = MutateSupplierCost(context.Background(), nil, cost.Id, 7)
+	require.NoError(t, err, "self-hosted-only rules need no stored procurement quotes")
+	before, err := ReadSupplierRuntime(context.Background())
+	require.NoError(t, err)
+	thirdParty = model.Channel{Id: ch.Id, DeploymentType: model.ChannelDeploymentThirdParty}
+	_, err = UpdateSupplierChannel(context.Background(), &thirdParty, 7)
+	assert.ErrorContains(t, err, "procurement quote", "cannot change the last eligible self-hosted source to an unquoted third-party channel")
+	var savedChannel model.Channel
+	require.NoError(t, db.First(&savedChannel, ch.Id).Error)
+	assert.Equal(t, model.ChannelDeploymentSelfHosted, savedChannel.DeploymentType)
+	after, err := ReadSupplierRuntime(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, before.Config.Revision, after.Config.Revision)
 }
 
 func TestAdaptiveTrialsAreSharedAndFaultsRecover(t *testing.T) {
@@ -194,7 +307,7 @@ func TestAdaptiveTrialsAreSharedAndFaultsRecover(t *testing.T) {
 	require.NoError(t, client.HSet(ctx, bucket, "success", 20, "tps", 2000, "tps_n", 20).Err())
 	candidates := []SupplierCandidate{
 		{ChannelID: 1, PoolID: 1, SupplierID: 1, Cost: 1, Tokens: 1, PerformanceKey: key},
-		{ChannelID: 2, PoolID: 2, SupplierID: 2, Cost: 0, Tokens: 1, PerformanceKey: "performance:new-2"},
+		{ChannelID: 2, PoolID: 2, SupplierID: 2, Cost: 0, SelfHosted: true, Tokens: 1, PerformanceKey: "performance:new-2"},
 		{ChannelID: 3, PoolID: 3, SupplierID: 3, Cost: 0, Tokens: 1, PerformanceKey: "performance:new-3"},
 	}
 	counts := map[int64]int{}
