@@ -16,15 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  type ReactNode,
-  useEffect,
-  useState,
-  useMemo,
-  useCallback,
-  useRef,
-} from 'react'
-import { type SubmitErrorHandler, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -51,6 +42,15 @@ import {
   SlidersHorizontal,
   Wand2,
 } from 'lucide-react'
+import {
+  type ReactNode,
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+} from 'react'
+import { type SubmitErrorHandler, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -164,7 +164,7 @@ import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
-import type { Channel } from '../../types'
+import { CHANNEL_DEPLOYMENT_LABELS, type Channel } from '../../types'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
@@ -735,9 +735,7 @@ export function ChannelMutateDrawer({
   const currentAllowServiceTier = form.watch('allow_service_tier')
   const currentDisableStore = form.watch('disable_store')
   const currentAllowSafetyIdentifier = form.watch('allow_safety_identifier')
-  const currentAllowIncludeObfuscation = form.watch(
-    'allow_include_obfuscation'
-  )
+  const currentAllowIncludeObfuscation = form.watch('allow_include_obfuscation')
   const currentAllowInferenceGeo = form.watch('allow_inference_geo')
   const currentAllowSpeed = form.watch('allow_speed')
   const currentClaudeBetaQuery = form.watch('claude_beta_query')
@@ -918,57 +916,57 @@ export function ChannelMutateDrawer({
   const advancedSummary = advancedHaveErrors ? t('Error') : undefined
   const routingStrategyConfigured = Boolean(
     currentPriority ||
-      currentWeight ||
-      currentTestModel?.trim() ||
-      (currentAutoBan ?? 1) !== 1
+    currentWeight ||
+    currentTestModel?.trim() ||
+    (currentAutoBan ?? 1) !== 1
   )
   const internalNotesConfigured = Boolean(
     currentTag?.trim() || currentRemark?.trim()
   )
   const overrideRulesConfigured = Boolean(
     hasConfiguredOverrideValue(currentStatusCodeMapping) ||
-      hasConfiguredOverrideValue(currentParamOverride) ||
-      hasConfiguredOverrideValue(currentHeaderOverride)
+    hasConfiguredOverrideValue(currentParamOverride) ||
+    hasConfiguredOverrideValue(currentHeaderOverride)
   )
   const extraSettingsConfigured = Boolean(
     currentForceFormat ||
-      currentThinkingToContent ||
-      currentHideReasoningWhenDisabled ||
-      currentPassThroughBodyEnabled ||
-      currentDisableTaskPollingSleep ||
-      currentProxy?.trim() ||
-      currentSystemPrompt?.trim() ||
-      currentSystemPromptOverride
+    currentThinkingToContent ||
+    currentHideReasoningWhenDisabled ||
+    currentPassThroughBodyEnabled ||
+    currentDisableTaskPollingSleep ||
+    currentProxy?.trim() ||
+    currentSystemPrompt?.trim() ||
+    currentSystemPromptOverride
   )
   let fieldPassthroughConfigured = false
   if (currentType === 1) {
     fieldPassthroughConfigured = Boolean(
       currentAllowServiceTier ||
-        currentDisableStore ||
-        currentAllowSafetyIdentifier ||
-        currentAllowIncludeObfuscation ||
-        currentAllowInferenceGeo
+      currentDisableStore ||
+      currentAllowSafetyIdentifier ||
+      currentAllowIncludeObfuscation ||
+      currentAllowInferenceGeo
     )
   } else if (currentType === 14) {
     fieldPassthroughConfigured = Boolean(
       currentAllowServiceTier ||
-        currentAllowInferenceGeo ||
-        currentAllowSpeed ||
-        currentClaudeBetaQuery
+      currentAllowInferenceGeo ||
+      currentAllowSpeed ||
+      currentClaudeBetaQuery
     )
   }
   const upstreamModelDetectionConfigured = Boolean(
     upstreamModelUpdateCheckEnabled ||
-      currentUpstreamModelUpdateAutoSyncEnabled ||
-      currentUpstreamModelUpdateIgnoredModels?.trim()
+    currentUpstreamModelUpdateAutoSyncEnabled ||
+    currentUpstreamModelUpdateIgnoredModels?.trim()
   )
   const advancedConfigured = Boolean(
     routingStrategyConfigured ||
-      internalNotesConfigured ||
-      overrideRulesConfigured ||
-      extraSettingsConfigured ||
-      fieldPassthroughConfigured ||
-      upstreamModelDetectionConfigured
+    internalNotesConfigured ||
+    overrideRulesConfigured ||
+    extraSettingsConfigured ||
+    fieldPassthroughConfigured ||
+    upstreamModelDetectionConfigured
   )
   const advancedNavChildren: ChannelEditorNavChildItem[] = [
     {
@@ -1899,6 +1897,31 @@ export function ChannelMutateDrawer({
                           />
                         </div>
 
+                        <FormField
+                          control={form.control}
+                          name='deployment_type'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Deployment type')}</FormLabel>
+                              <FormControl>
+                                <select
+                                  {...field}
+                                  className='border-input bg-background h-9 w-full rounded-md border px-3 text-sm'
+                                >
+                                  {Object.entries(
+                                    CHANNEL_DEPLOYMENT_LABELS
+                                  ).map(([value, label]) => (
+                                    <option key={value} value={value}>
+                                      {t(label)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
                         {!isEditing && (
                           <FormField
                             control={form.control}
@@ -2681,14 +2704,18 @@ export function ChannelMutateDrawer({
                                               </Badge>
                                             )
                                           )}
-                                          {hiddenAdvancedCustomRouteTypeCount > 0 && (
+                                          {hiddenAdvancedCustomRouteTypeCount >
+                                            0 && (
                                             <Badge
                                               variant='outline'
                                               title={
                                                 advancedCustomRouteTypeTitle
                                               }
                                             >
-                                              +{hiddenAdvancedCustomRouteTypeCount}
+                                              +
+                                              {
+                                                hiddenAdvancedCustomRouteTypeCount
+                                              }
                                             </Badge>
                                           )}
                                           {!advancedCustomStats.valid && (
@@ -4066,7 +4093,9 @@ export function ChannelMutateDrawer({
                                   <FormItem className='flex items-center justify-between px-4 py-3'>
                                     <div className='space-y-0.5'>
                                       <FormLabel>
-                                        {t('Merge mid-conversation system messages')}
+                                        {t(
+                                          'Merge mid-conversation system messages'
+                                        )}
                                       </FormLabel>
                                       <FormDescription>
                                         {t(
@@ -4173,9 +4202,7 @@ export function ChannelMutateDrawer({
                           >
                             <CardHeading
                               title={t('Field passthrough controls')}
-                              icon={
-                                <SlidersHorizontal className='h-4 w-4' />
-                              }
+                              icon={<SlidersHorizontal className='h-4 w-4' />}
                             />
                             <fieldset
                               disabled={sensitiveLocked}

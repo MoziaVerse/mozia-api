@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { CHANNEL_DEPLOYMENT_LABELS } from '@/features/channels/types'
 
 import { SettingsSection } from '../components/settings-section'
 import {
@@ -237,25 +238,46 @@ export function ChannelCostPricingSection() {
       ),
     [query.data?.channels]
   )
-  const modelOptions = useMemo(() => {
-    const models = new Set(query.data?.models ?? [])
-    for (const channel of query.data?.channels ?? []) {
-      channel.models
-        .split(',')
-        .map((model) => model.trim())
-        .filter(Boolean)
-        .forEach((model) => models.add(model))
-    }
-    return [...models].sort().map((model) => ({ value: model, label: model }))
-  }, [query.data])
+  const modelOptions = (
+    channelsById.get(Number(draft?.channelId))?.models ?? ''
+  )
+    .split(',')
+    .map((model) => model.trim())
+    .filter(Boolean)
+    .map((model) => ({ value: model, label: model }))
   const filteredItems = useMemo(() => {
+    const rows = new Map<
+      string,
+      { channel_id: number; model_name: string; cost?: ChannelCostRecord }
+    >()
+    for (const cost of query.data?.items ?? []) {
+      rows.set(`${cost.channel_id}:${cost.model_name}`, { ...cost, cost })
+    }
+    for (const channel of query.data?.channels ?? []) {
+      if (channel.status !== 1) continue
+      for (const modelName of channel.models.split(',').filter(Boolean)) {
+        const key = `${channel.id}:${modelName}`
+        if (!rows.has(key)) {
+          rows.set(key, { channel_id: channel.id, model_name: modelName })
+        }
+      }
+    }
     const keyword = search.trim().toLowerCase()
-    if (!keyword) return query.data?.items ?? []
-    return (query.data?.items ?? []).filter((item) => {
-      const channelName = channelsById.get(item.channel_id)?.name ?? ''
-      return `${item.model_name} ${channelName}`.toLowerCase().includes(keyword)
-    })
-  }, [channelsById, query.data?.items, search])
+    return [...rows.values()]
+      .filter((item) => {
+        const channel = channelsById.get(item.channel_id)
+        const label =
+          CHANNEL_DEPLOYMENT_LABELS[channel?.deployment_type ?? 'unknown']
+        return `${item.model_name} ${channel?.name ?? ''} ${t(label)}`
+          .toLowerCase()
+          .includes(keyword)
+      })
+      .sort(
+        (a, b) =>
+          a.model_name.localeCompare(b.model_name) ||
+          a.channel_id - b.channel_id
+      )
+  }, [channelsById, query.data, search, t])
 
   const openEditor = (record?: ChannelCostRecord) => {
     const next = record ? recordToDraft(record) : emptyDraft()
@@ -279,6 +301,14 @@ export function ChannelCostPricingSection() {
     if (!draft) return
     if (!draft.channelId || !draft.modelName.trim()) {
       toast.error(t('Channel and model are required'))
+      return
+    }
+    if (
+      !modelOptions.some((option) => option.value === draft.modelName) ||
+      channelsById.get(Number(draft.channelId))?.deployment_type ===
+        'self_hosted'
+    ) {
+      toast.error(t('Select a model from a non-self-hosted channel'))
       return
     }
     if (draft.mode === 'per_token') {
@@ -333,7 +363,7 @@ export function ChannelCostPricingSection() {
         <Input
           className='sm:max-w-xs'
           value={search}
-          placeholder={t('Search model or channel')}
+          placeholder={t('Search model, channel or deployment type')}
           onChange={(event) => setSearch(event.target.value)}
         />
         <Button type='button' onClick={() => openEditor()}>
@@ -347,61 +377,87 @@ export function ChannelCostPricingSection() {
             <TableRow>
               <TableHead>{t('Model')}</TableHead>
               <TableHead>{t('Channel')}</TableHead>
+              <TableHead>{t('Deployment type')}</TableHead>
               <TableHead>{t('Pricing mode')}</TableHead>
               <TableHead>{t('Currency')}</TableHead>
               <TableHead className='w-24 text-right'>{t('Actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredItems.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell className='max-w-[320px] truncate font-medium'>
-                  {item.model_name}
-                </TableCell>
-                <TableCell>
-                  {channelsById.get(item.channel_id)?.name ??
-                    `#${item.channel_id}`}
-                </TableCell>
-                <TableCell>
-                  <Badge variant='secondary'>{t(modeLabel(item.mode))}</Badge>
-                </TableCell>
-                <TableCell>{item.currency}</TableCell>
-                <TableCell>
-                  <div className='flex justify-end gap-1'>
-                    <Button
-                      type='button'
-                      size='icon-sm'
-                      variant='ghost'
-                      aria-label={t('Edit')}
-                      onClick={() => openEditor(item)}
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      type='button'
-                      size='icon-sm'
-                      variant='ghost'
-                      aria-label={t('Delete')}
-                      disabled={deleteMutation.isPending}
-                      onClick={() => {
-                        if (window.confirm(t('Delete this channel cost?'))) {
-                          deleteMutation.mutate(item.id)
-                        }
-                      }}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
+            {filteredItems.map((item) => {
+              const deployment =
+                channelsById.get(item.channel_id)?.deployment_type ?? 'unknown'
+              const selfHosted = deployment === 'self_hosted'
+              const cost = item.cost
+              let costLabel = cost ? modeLabel(cost.mode) : 'Not configured'
+              if (selfHosted) costLabel = 'Cost not calculated'
+              return (
+                <TableRow key={`${item.channel_id}:${item.model_name}`}>
+                  <TableCell className='max-w-[320px] truncate font-medium'>
+                    {item.model_name}
+                  </TableCell>
+                  <TableCell>
+                    {channelsById.get(item.channel_id)?.name ??
+                      `#${item.channel_id}`}
+                  </TableCell>
+                  <TableCell>
+                    {t(CHANNEL_DEPLOYMENT_LABELS[deployment])}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant='secondary'>{t(costLabel)} </Badge>
+                  </TableCell>
+                  <TableCell>{cost?.currency ?? '—'}</TableCell>
+                  <TableCell>
+                    <div className='flex justify-end gap-1'>
+                      {!selfHosted && (
+                        <Button
+                          type='button'
+                          size='icon-sm'
+                          variant='ghost'
+                          aria-label={t(cost ? 'Edit' : 'Add channel cost')}
+                          onClick={() =>
+                            cost
+                              ? openEditor(cost)
+                              : setDraft({
+                                  ...emptyDraft(),
+                                  channelId: String(item.channel_id),
+                                  modelName: item.model_name,
+                                })
+                          }
+                        >
+                          {cost ? <Pencil /> : <Plus />}
+                        </Button>
+                      )}
+                      {cost && (
+                        <Button
+                          type='button'
+                          size='icon-sm'
+                          variant='ghost'
+                          aria-label={t('Delete')}
+                          disabled={deleteMutation.isPending}
+                          onClick={() => {
+                            if (
+                              window.confirm(t('Delete this channel cost?'))
+                            ) {
+                              deleteMutation.mutate(cost.id)
+                            }
+                          }}
+                        >
+                          <Trash2 />
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
             {!query.isLoading && filteredItems.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={6}
                   className='text-muted-foreground py-10 text-center'
                 >
-                  {t('No channel costs configured')}
+                  {t('No models found')}
                 </TableCell>
               </TableRow>
             )}
@@ -442,16 +498,22 @@ export function ChannelCostPricingSection() {
                   ) : (
                     <ComboboxInput
                       id='channel-cost-channel'
-                      options={(query.data?.channels ?? []).map((channel) => ({
-                        value: String(channel.id),
-                        label: `${channel.name} (#${channel.id})`,
-                      }))}
+                      options={(query.data?.channels ?? [])
+                        .filter(
+                          (channel) =>
+                            channel.deployment_type !== 'self_hosted' &&
+                            channel.models
+                        )
+                        .map((channel) => ({
+                          value: String(channel.id),
+                          label: `${channel.name} (#${channel.id})`,
+                        }))}
                       value={draft.channelId}
                       className='truncate'
                       placeholder={t('Search or select a channel')}
                       emptyText={t('No channels found')}
                       onValueChange={(channelId) =>
-                        setDraft({ ...draft, channelId })
+                        setDraft({ ...draft, channelId, modelName: '' })
                       }
                     />
                   )}
@@ -460,7 +522,7 @@ export function ChannelCostPricingSection() {
                   <Label htmlFor='channel-cost-model'>
                     {t('Platform model')}
                   </Label>
-                  {draft.id !== undefined ? (
+                  {draft.id !== undefined || !draft.channelId ? (
                     <Input
                       id='channel-cost-model'
                       value={draft.modelName}
@@ -473,8 +535,7 @@ export function ChannelCostPricingSection() {
                       options={modelOptions}
                       value={draft.modelName}
                       className='truncate'
-                      allowCustomValue
-                      placeholder={t('Search or enter a model')}
+                      placeholder={t('Search or select a model')}
                       onValueChange={(modelName) =>
                         setDraft({ ...draft, modelName })
                       }

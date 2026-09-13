@@ -637,6 +637,7 @@ export function aggregateChannelsByTag(
         id: tag as unknown as number,
         tag,
         name: tag,
+        deployment_type: 'unknown',
         type: 0,
         status: undefined as unknown as number,
         group: '',

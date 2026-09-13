@@ -74,7 +74,7 @@ import {
   type TagRow,
 } from '../lib'
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
-import type { Channel } from '../types'
+import { CHANNEL_DEPLOYMENT_LABELS, type Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
@@ -631,6 +631,13 @@ export function useChannelsColumns(
                     className='font-medium'
                     maxWidth='max-w-[180px]'
                   />
+                  <span className='text-muted-foreground text-xs whitespace-nowrap'>
+                    {t(
+                      CHANNEL_DEPLOYMENT_LABELS[
+                        channel.deployment_type ?? 'unknown'
+                      ]
+                    )}
+                  </span>
                   {isPassThrough && (
                     <TooltipProvider delay={100}>
                       <Tooltip>

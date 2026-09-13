@@ -31,10 +31,12 @@ func TestChannelHasSensitiveChanges(t *testing.T) {
 		updated := PatchChannel{Channel: *origin}
 		updated.Models = "gpt-4o,gpt-4o-mini"
 		updated.Group = "vip"
+		updated.DeploymentType = model.ChannelDeploymentThirdParty
 
 		assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
-			"models": updated.Models,
-			"group":  updated.Group,
+			"models":          updated.Models,
+			"group":           updated.Group,
+			"deployment_type": updated.DeploymentType,
 		}))
 	})
 
@@ -201,4 +203,11 @@ func TestChannelFieldsAreClassified(t *testing.T) {
 		assert.Truef(t, classified(name),
 			"channel field %q is not classified; add it to channelSensitiveFields, channelNonSensitiveFields, channelOperationalFields, or channelReadOnlyFields in channel_authz.go", name)
 	}
+}
+
+func TestChannelDeploymentValidation(t *testing.T) {
+	for _, value := range []string{"", model.ChannelDeploymentUnknown, model.ChannelDeploymentSelfHosted, model.ChannelDeploymentThirdParty} {
+		require.NoError(t, validateChannel(&model.Channel{DeploymentType: value}, false))
+	}
+	assert.ErrorContains(t, validateChannel(&model.Channel{DeploymentType: "invalid"}, false), "deployment_type")
 }

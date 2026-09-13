@@ -20,6 +20,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const (
+	ChannelDeploymentUnknown    = "unknown"
+	ChannelDeploymentSelfHosted = "self_hosted"
+	ChannelDeploymentThirdParty = "third_party"
+)
+
 type Channel struct {
 	SupplierID         int64   `json:"supplier_id" gorm:"index"`
 	Id                 int     `json:"id"`
@@ -29,6 +35,7 @@ type Channel struct {
 	TestModel          *string `json:"test_model"`
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`
+	DeploymentType     string  `json:"deployment_type" gorm:"type:varchar(16);not null;default:'unknown'"`
 	Weight             *uint   `json:"weight" gorm:"default:0"`
 	CreatedTime        int64   `json:"created_time" gorm:"bigint"`
 	TestTime           int64   `json:"test_time" gorm:"bigint"`

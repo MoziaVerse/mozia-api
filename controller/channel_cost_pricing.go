@@ -13,9 +13,11 @@ import (
 )
 
 type channelCostChannel struct {
-	Id     int    `json:"id"`
-	Name   string `json:"name"`
-	Models string `json:"models"`
+	Id             int    `json:"id"`
+	Name           string `json:"name"`
+	Models         string `json:"models"`
+	DeploymentType string `json:"deployment_type"`
+	Status         int    `json:"status"`
 }
 
 func GetChannelCostPricing(c *gin.Context) {
@@ -33,6 +35,7 @@ func GetChannelCostPricing(c *gin.Context) {
 	for _, channel := range allChannels {
 		channels = append(channels, channelCostChannel{
 			Id: channel.Id, Name: channel.Name, Models: channel.Models,
+			DeploymentType: channel.DeploymentType, Status: channel.Status,
 		})
 	}
 	common.ApiSuccess(c, gin.H{

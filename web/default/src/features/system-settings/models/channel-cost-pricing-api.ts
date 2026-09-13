@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { Channel } from '@/features/channels/types'
 import { api } from '@/lib/api'
 
 export type ChannelCostMode =
@@ -50,6 +51,8 @@ export type ChannelCostData = {
     id: number
     name: string
     models: string
+    deployment_type: Channel['deployment_type']
+    status: number
   }>
   models: string[]
 }

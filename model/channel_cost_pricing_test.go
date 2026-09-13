@@ -44,6 +44,17 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 	require.NotNil(t, costs[0].Config.BasePrice)
 	assert.Equal(t, 0.16, *costs[0].Config.BasePrice)
 
+	cost.ModelName = "unrelated-ocr"
+	assert.ErrorContains(t, UpsertChannelCostPricing(db, &cost), "model does not belong")
+	cost.ModelName = "video-model"
+	require.NoError(t, db.Model(&channel).Update("deployment_type", ChannelDeploymentSelfHosted).Error)
+	assert.ErrorContains(t, UpsertChannelCostPricing(db, &cost), "self-hosted")
+	costs, err = ListChannelCostPricing()
+	require.NoError(t, err)
+	require.Len(t, costs, 1)
+	assert.Equal(t, 0.16, *costs[0].Config.BasePrice)
+	require.NoError(t, db.Model(&channel).Update("deployment_type", ChannelDeploymentThirdParty).Error)
+
 	cost.Mode = ChannelCostModeParametric
 	err = UpsertChannelCostPricing(db, &cost)
 	assert.ErrorContains(t, err, "task billing mode must be parametric")
@@ -70,4 +81,23 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 	deleted, err := DeleteChannelCostPricing(cost.Id)
 	require.NoError(t, err)
 	assert.True(t, deleted)
+}
+
+func TestChannelDeploymentUpdatesPreserveRouting(t *testing.T) {
+	db := setupResellerPricingTestDB(t)
+	require.NoError(t, db.AutoMigrate(&Channel{}, &Ability{}))
+	channel := Channel{Name: "source", Key: "test", Models: "model", Type: 1}
+	require.NoError(t, channel.Insert())
+	assert.Equal(t, ChannelDeploymentUnknown, channel.DeploymentType)
+	for _, deployment := range []string{ChannelDeploymentSelfHosted, ChannelDeploymentThirdParty, ChannelDeploymentUnknown} {
+		patch := Channel{Id: channel.Id, DeploymentType: deployment}
+		require.NoError(t, patch.Update())
+		assert.Equal(t, deployment, patch.DeploymentType)
+		assert.Equal(t, channel.Models, patch.Models)
+		assert.Equal(t, channel.Key, patch.Key)
+		assert.Equal(t, channel.Status, patch.Status)
+		omitted := Channel{Id: channel.Id, Name: "renamed"}
+		require.NoError(t, omitted.Update())
+		assert.Equal(t, deployment, omitted.DeploymentType)
+	}
 }

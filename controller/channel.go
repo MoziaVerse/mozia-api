@@ -465,6 +465,11 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
+	switch channel.DeploymentType {
+	case "", model.ChannelDeploymentUnknown, model.ChannelDeploymentSelfHosted, model.ChannelDeploymentThirdParty:
+	default:
+		return fmt.Errorf("deployment_type must be unknown, self_hosted or third_party")
+	}
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
@@ -1077,6 +1082,9 @@ func UpdateChannel(c *gin.Context) {
 	service.ResetProxyClientCache()
 	// 记录变更的字段名（语言无关的字段标识），密钥仅记录"已更换"绝不记录内容。
 	changedFields := make([]string, 0)
+	if channel.DeploymentType != originChannel.DeploymentType {
+		changedFields = append(changedFields, "deployment_type")
+	}
 	if channel.Models != originChannel.Models {
 		changedFields = append(changedFields, "models")
 	}
