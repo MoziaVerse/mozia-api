@@ -33,7 +33,9 @@ func TestSupplierPublicationPreservesChannelSettingsAndRejectsStaleEditor(t *tes
 	require.NoError(t, err)
 	assert.Equal(t, cfg.Revision, current.Revision)
 	cfg.Pools[0].Limits.Concurrency = 0
-	assert.ErrorContains(t, ValidateSupplierRoutingConfig(&cfg), "positive")
+	require.NoError(t, ValidateSupplierRoutingConfig(&cfg))
+	cfg.Pools[0].Limits.Concurrency = -1
+	assert.ErrorContains(t, ValidateSupplierRoutingConfig(&cfg), "non-negative")
 }
 
 func TestSupplierDatabaseCompatibility(t *testing.T) {
@@ -139,4 +141,41 @@ func TestSupplierCandidatesPreserveGroupAndChannelStatusAcrossCacheModes(t *test
 		require.NoError(t, err)
 		assert.Empty(t, candidates)
 	}
+}
+
+func TestSupplierComparableProcurementQuotes(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		price ChannelCostPricing
+		want  string
+	}{
+		{"complete", ChannelCostPricing{Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 1, "output": 10, "cache_read": 0.5}}}, "0.00065"},
+		{"tiny-positive", ChannelCostPricing{Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 1e-18, "output": 1e-18}}}, "0.00000000000000000000025"},
+		{"free", ChannelCostPricing{Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 0, "output": 0}}}, "0"},
+		{"missing-output", ChannelCostPricing{Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 0}}}, ""},
+		{"unsupported", ChannelCostPricing{Currency: "CNY", Mode: "per_second"}, ""},
+		{"currency", ChannelCostPricing{Currency: "EUR", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 1, "output": 1}}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			amount, err := SupplierPriceAmount(tc.price, 200, 50, 100)
+			if tc.want == "" {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, amount.String())
+		})
+	}
+	cfg := SupplierRoutingConfig{
+		Pools:    []SupplierPool{{ID: 1, SupplierID: 1}},
+		Bindings: []SupplierBinding{{PoolID: 1, ChannelID: 1, Model: "test"}, {PoolID: 1, ChannelID: 2, Model: "test"}},
+		Prices: []ChannelCostPricing{
+			{ChannelId: 1, ModelName: "test", Currency: "CNY", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 1, "output": 1}}},
+			{ChannelId: 2, ModelName: "test", Currency: "USD", Mode: "per_token", Config: ChannelCostConfig{Items: map[string]float64{"input": 1, "output": 1}}},
+		},
+	}
+	rule := SupplierRoutingRule{Model: "test", Targets: []SupplierTarget{{SupplierID: 1}}}
+	require.ErrorContains(t, ValidateSupplierRulePrices(&cfg, rule), "one currency")
+	cfg.Prices[1].Currency = "CNY"
+	require.NoError(t, ValidateSupplierRulePrices(&cfg, rule))
 }

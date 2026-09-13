@@ -184,11 +184,13 @@ function PoolModels(props: { poolIndex: number; data: SupplierRoutingData }) {
                 </summary>
                 <p className='text-muted-foreground my-3 text-sm'>
                   {t(
-                    'Zero inherits the shared pool limit. Model limits cannot exceed the pool limits.'
+                    'Leave blank to inherit the pool limit. If neither is declared, this dimension has no configured cap.'
                   )}
                 </p>
                 <div className='grid gap-4 sm:grid-cols-3'>
                   <ConfigField
+                    emptyAsZero
+                    placeholder={t('Inherit pool limit')}
                     name={`${path}.limits.concurrency`}
                     type='number'
                     min={0}
@@ -196,6 +198,8 @@ function PoolModels(props: { poolIndex: number; data: SupplierRoutingData }) {
                     label={t('Concurrent requests')}
                   />
                   <ConfigField
+                    emptyAsZero
+                    placeholder={t('Inherit pool limit')}
                     name={`${path}.limits.rpm`}
                     type='number'
                     min={0}
@@ -203,6 +207,8 @@ function PoolModels(props: { poolIndex: number; data: SupplierRoutingData }) {
                     label='RPM'
                   />
                   <ConfigField
+                    emptyAsZero
+                    placeholder={t('Inherit pool limit')}
                     name={`${path}.limits.tpm`}
                     type='number'
                     min={0}
@@ -277,33 +283,41 @@ export function PoolFields(props: {
             name={`pools.${i}.acceptance`}
             label={t('Acceptance or load-test reference')}
             description={t(
-              'Required before enabling a pool. Enter the reference to your verified capacity report.'
+              'Required before enabling a pool. Record the manual model verification; a capacity report is optional.'
             )}
           />
         </div>
       </FieldSet>
       <FieldSet>
         <FieldLegend>{t('Shared capacity limits')}</FieldLegend>
+        <FieldDescription>
+          {t(
+            'All capacity fields are optional. Leave blank when undeclared; entered limits remain enforced across channels.'
+          )}
+        </FieldDescription>
         <div className='grid gap-4 sm:grid-cols-3'>
           <ConfigField
+            emptyAsZero
             name={`pools.${i}.limits.concurrency`}
             type='number'
-            min={1}
+            min={0}
             max={10000}
             label={t('Concurrent requests')}
           />
           <ConfigField
+            emptyAsZero
             name={`pools.${i}.limits.rpm`}
             type='number'
-            min={1}
+            min={0}
             max={100000}
             label='RPM'
             description={t('Request starts in the last 60 seconds.')}
           />
           <ConfigField
+            emptyAsZero
             name={`pools.${i}.limits.tpm`}
             type='number'
-            min={1}
+            min={0}
             max={1000000000}
             label='TPM'
             description={t(
@@ -336,7 +350,7 @@ export function PoolFields(props: {
         name={`pools.${i}.enabled`}
         label={t('Pool available')}
         description={t(
-          'Enable only after verifying the model specifications and capacity limits.'
+          'Enable after verifying model specifications and any declared limits. Capacity declarations are optional.'
         )}
       />
     </FieldGroup>

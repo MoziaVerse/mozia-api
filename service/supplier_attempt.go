@@ -19,7 +19,6 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
-	"github.com/shopspring/decimal"
 )
 
 // PrepareSupplierRequest is the final guard on the OpenAI adaptor, including
@@ -174,6 +173,9 @@ func ObserveSupplierResponse(c *gin.Context, info *relaycommon.RelayInfo, data [
 	}
 	for _, choice := range response.Choices {
 		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			if *choice.FinishReason == "error" {
+				s.ResponseError = true
+			}
 			s.Complete = true
 		}
 		if stream && s.FirstContent.IsZero() && (choice.Delta.Content != "" || choice.Delta.Reasoning != "" || len(choice.Delta.ToolCalls) > 0) {
@@ -188,57 +190,33 @@ func SupplierStreamError(c *gin.Context, info *relaycommon.RelayInfo) *types.New
 	if s == nil || s.Current == nil {
 		return nil
 	}
-	if !s.Complete || (info.IsStream && (info.StreamStatus == nil || info.StreamStatus.HasErrors() || (info.StreamStatus.EndReason != relaycommon.StreamEndReasonDone && info.StreamStatus.EndReason != relaycommon.StreamEndReasonEOF))) {
+	if s.ResponseError || !s.Complete || (info.IsStream && (info.StreamStatus == nil || info.StreamStatus.HasErrors() || (info.StreamStatus.EndReason != relaycommon.StreamEndReasonDone && info.StreamStatus.EndReason != relaycommon.StreamEndReasonEOF))) {
 		return types.NewErrorWithStatusCode(errors.New("supplier response did not complete"), types.ErrorCodeBadResponseBody, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
 	}
 	return nil
 }
 
 func SupplierCost(priceJSON string, usage *dto.Usage) (string, error) {
-	if usage == nil || usage.PromptTokens < 0 || usage.CompletionTokens < 0 {
-		return "", errors.New("upstream usage unavailable")
-	}
 	var cost model.ChannelCostPricing
 	if err := common.UnmarshalJsonStr(priceJSON, &cost); err != nil {
 		return "", err
 	}
-	if cost.Mode == model.ChannelCostModePerRequest && cost.Config.BasePrice != nil {
-		return decimal.NewFromFloat(*cost.Config.BasePrice).StringFixed(8), nil
+	if usage == nil && cost.Mode == model.ChannelCostModePerRequest {
+		usage = &dto.Usage{}
 	}
-	if cost.Mode != model.ChannelCostModePerToken {
-		return "", errors.New("supplier cost mode needs reconciliation")
+	if usage == nil || usage.PromptTokens < 0 || usage.CompletionTokens < 0 {
+		return "", errors.New("upstream usage unavailable")
 	}
-	input, ok := cost.Config.Items["input"]
-	if !ok {
-		return "", errors.New("supplier input price missing")
+	amount, err := model.SupplierPriceAmount(cost, int64(usage.PromptTokens), int64(usage.CompletionTokens), int64(usage.PromptTokensDetails.CachedTokens))
+	if err != nil {
+		return "", err
 	}
-	output, ok := cost.Config.Items["output"]
-	if !ok {
-		return "", errors.New("supplier output price missing")
-	}
-	// ponytail: settle the accepted text-token categories; add other contracts only after their usage is verified.
-	for name := range cost.Config.Items {
-		if name != "input" && name != "output" && name != "cache_read" {
-			return "", errors.New("supplier price category needs reconciliation")
-		}
-	}
-	inputTokens := int64(usage.PromptTokens)
-	amount := decimal.Zero
-	if cachedPrice, ok := cost.Config.Items["cache_read"]; ok {
-		cached := int64(usage.PromptTokensDetails.CachedTokens)
-		if cached < 0 || cached > inputTokens {
-			return "", errors.New("invalid upstream cache usage")
-		}
-		inputTokens -= cached
-		amount = decimal.NewFromInt(cached).Mul(decimal.NewFromFloat(cachedPrice))
-	}
-	amount = amount.Add(decimal.NewFromInt(inputTokens).Mul(decimal.NewFromFloat(input))).Add(decimal.NewFromInt(int64(usage.CompletionTokens)).Mul(decimal.NewFromFloat(output)))
-	return amount.Div(decimal.NewFromInt(1000000)).StringFixed(8), nil
+	return amount.StringFixed(8), nil
 }
 
 func FinishSupplierAttempt(c *gin.Context, info *relaycommon.RelayInfo, apiErr *types.NewAPIError, cancelled bool) {
 	s := SupplierRoutingState(c)
-	if s == nil || s.Current == nil || s.Finished {
+	if s == nil || s.Current == nil || s.Finished || s.ReservationID == "" {
 		return
 	}
 	s.Finished = true
@@ -258,7 +236,7 @@ func FinishSupplierAttempt(c *gin.Context, info *relaycommon.RelayInfo, apiErr *
 		if apiErr.StatusCode == 429 {
 			class = "overload"
 		}
-		if apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 && apiErr.StatusCode != 429 {
+		if apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 && apiErr.StatusCode != 429 && apiErr.StatusCode != 401 && apiErr.StatusCode != 402 && apiErr.StatusCode != 404 && apiErr.StatusCode != 408 {
 			class = "excluded"
 		}
 		if apiErr.GetErrorCode() == types.ErrorCodeDoRequestFailed || (info.IsStream && !s.Complete && apiErr.StatusCode >= 500) {
@@ -271,16 +249,18 @@ func FinishSupplierAttempt(c *gin.Context, info *relaycommon.RelayInfo, apiErr *
 		class = "failure"
 		release = false
 	}
-	if c.Request.Context().Err() != nil && !cancelled {
+	// The request context enforces the platform total budget. Upstream HTTP/stream
+	// timeouts arrive as relay errors while this context is still live.
+	if c.Request.Context().Err() != nil && !cancelled && (apiErr != nil || !s.Complete) {
 		class = "excluded"
 		a.Status = "unknown"
 		release = false
 	}
 	a.OutcomeClass = class
-	a.LatencyMs = time.Since(s.Started).Milliseconds()
+	a.LatencyMs = max(1, time.Since(s.Started).Milliseconds())
 	a.FinishedAt = time.Now().Unix()
 	if !s.FirstContent.IsZero() {
-		a.TTFTMs = s.FirstContent.Sub(s.Started).Milliseconds()
+		a.TTFTMs = max(1, s.FirstContent.Sub(s.Started).Milliseconds())
 	}
 	tokens := int64(-1)
 	if s.Usage != nil {
@@ -289,10 +269,10 @@ func FinishSupplierAttempt(c *gin.Context, info *relaycommon.RelayInfo, apiErr *
 		tokens = a.InputTokens + a.OutputTokens
 		data, _ := common.Marshal(s.Usage)
 		a.UsageJSON = string(data)
-		if amount, err := SupplierCost(a.PriceJSON, s.Usage); err == nil && s.Complete && a.Status != "unknown" {
-			a.Cost = amount
-			a.CostStatus = "calculated"
-		}
+	}
+	if amount, err := SupplierCost(a.PriceJSON, s.Usage); err == nil && s.Complete && a.Status != "unknown" {
+		a.Cost = amount
+		a.CostStatus = "calculated"
 	}
 	if cancelled {
 		a.Cost = "0.00000000"
@@ -300,7 +280,7 @@ func FinishSupplierAttempt(c *gin.Context, info *relaycommon.RelayInfo, apiErr *
 	}
 	ctx, stop := context.WithTimeout(context.Background(), 3*time.Second)
 	defer stop()
-	input, _ := common.Marshal(map[string]any{"id": s.ReservationID, "cancel": cancelled, "release": release, "tokens": tokens, "class": class, "ttft": a.TTFTMs})
+	input, _ := common.Marshal(map[string]any{"id": s.ReservationID, "cancel": cancelled, "release": release, "tokens": tokens, "class": class, "ttft": a.TTFTMs, "latency": a.LatencyMs, "output": a.OutputTokens, "retry_after": s.RetryAfterSeconds})
 	if err := supplierAdmission.Run(ctx, common.RDB, []string{supplierRuntimeKey}, "finish", string(input)).Err(); err != nil {
 		common.SysError("supplier capacity completion failed: " + err.Error())
 	}

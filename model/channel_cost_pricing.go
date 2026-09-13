@@ -41,6 +41,10 @@ type ChannelCostPricing struct {
 }
 
 func ValidateChannelCostPricing(cost *ChannelCostPricing) error {
+	return validateChannelCostPricing(DB, cost)
+}
+
+func validateChannelCostPricing(db *gorm.DB, cost *ChannelCostPricing) error {
 	cost.ModelName = strings.TrimSpace(cost.ModelName)
 	cost.Currency = strings.ToUpper(strings.TrimSpace(cost.Currency))
 	cost.Mode = strings.TrimSpace(cost.Mode)
@@ -57,7 +61,7 @@ func ValidateChannelCostPricing(cost *ChannelCostPricing) error {
 	if len(cost.Note) > 20000 {
 		return fmt.Errorf("note is too long")
 	}
-	if _, err := GetChannelById(cost.ChannelId, false); err != nil {
+	if err := db.Select("id").First(&Channel{}, cost.ChannelId).Error; err != nil {
 		return fmt.Errorf("channel does not exist: %w", err)
 	}
 
@@ -134,7 +138,11 @@ func ListChannelCostPricing() ([]ChannelCostPricing, error) {
 }
 
 func UpsertChannelCostPricing(cost *ChannelCostPricing) error {
-	if err := ValidateChannelCostPricing(cost); err != nil {
+	return UpsertChannelCostPricingWithDB(DB, cost)
+}
+
+func UpsertChannelCostPricingWithDB(db *gorm.DB, cost *ChannelCostPricing) error {
+	if err := validateChannelCostPricing(db, cost); err != nil {
 		return err
 	}
 	config, err := common.Marshal(cost.Config)
@@ -142,7 +150,7 @@ func UpsertChannelCostPricing(cost *ChannelCostPricing) error {
 		return err
 	}
 	cost.ConfigJson = string(config)
-	return DB.Where("channel_id = ? AND model_name = ?", cost.ChannelId, cost.ModelName).
+	return db.Where("channel_id = ? AND model_name = ?", cost.ChannelId, cost.ModelName).
 		Assign(map[string]any{
 			"currency":    cost.Currency,
 			"mode":        cost.Mode,

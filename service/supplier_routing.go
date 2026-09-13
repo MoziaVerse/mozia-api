@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"sort"
 	"strconv"
 	"time"
@@ -35,37 +37,49 @@ type SupplierRuntime struct {
 }
 
 type SupplierCandidate struct {
-	Expires    int64 `json:"expires"`
-	ChannelID  int   `json:"channel_id"`
-	PoolID     int64 `json:"pool_id"`
-	SupplierID int64 `json:"supplier_id"`
-	Priority   int64 `json:"priority"`
-	Weight     int64 `json:"weight"`
-	Tokens     int64 `json:"tokens"`
+	Cost           float64 `json:"cost"`
+	EstimatedCost  string  `json:"estimated_cost"`
+	PriceJSON      string  `json:"price_json"`
+	Currency       string  `json:"currency"`
+	PerformanceKey string  `json:"performance_key"`
+	OutputScope    string  `json:"output_scope"`
+	Measure        bool    `json:"measure"`
+	Streaming      bool    `json:"streaming"`
+	HealthState    string  `json:"health_state"`
+	RoutingWeight  int64   `json:"routing_weight"`
+	Expires        int64   `json:"expires"`
+	ChannelID      int     `json:"channel_id"`
+	PoolID         int64   `json:"pool_id"`
+	SupplierID     int64   `json:"supplier_id"`
+	Priority       int64   `json:"priority"`
+	Weight         int64   `json:"weight"`
+	Tokens         int64   `json:"tokens"`
 }
 
 type SupplierRouteState struct {
-	Cancel          context.CancelFunc
-	Runtime         *SupplierRuntime
-	Rule            model.SupplierRoutingRule
-	Group           string
-	RequestID       string
-	AttemptNumber   int
-	Excluded        map[int]bool
-	ExcludedPools   map[int64]bool
-	ExcludedDomains map[string]bool
-	Current         *model.SupplierAttempt
-	ReservationID   string
-	ReservedTokens  int64
-	Started         time.Time
-	FirstContent    time.Time
-	Usage           *dto.Usage
-	Sent            bool
-	Complete        bool
-	Finished        bool
-	Managed         bool
-	Shadow          bool
-	ShadowRecorded  bool
+	Cancel            context.CancelFunc
+	ResponseError     bool
+	RetryAfterSeconds int64
+	Runtime           *SupplierRuntime
+	Rule              model.SupplierRoutingRule
+	Group             string
+	RequestID         string
+	AttemptNumber     int
+	Excluded          map[int]bool
+	ExcludedPools     map[int64]bool
+	ExcludedDomains   map[string]bool
+	Current           *model.SupplierAttempt
+	ReservationID     string
+	ReservedTokens    int64
+	Started           time.Time
+	FirstContent      time.Time
+	Usage             *dto.Usage
+	Sent              bool
+	Complete          bool
+	Finished          bool
+	Managed           bool
+	Shadow            bool
+	ShadowRecorded    bool
 }
 
 func DefaultSupplierHealth() model.SupplierHealthPolicy {
@@ -247,17 +261,22 @@ func SupplierCandidateTokens(request *dto.GeneralOpenAIRequest, info *relaycommo
 	if output <= 0 || output > spec.MaxOutputTokens {
 		return 0, errors.New("requested output exceeds accepted supplier specification")
 	}
+	prompt := SupplierPromptTokens(request, info)
+	prompt = (prompt*pool.InputSafetyPercent + 99) / 100
+	if prompt+output > spec.ContextTokens {
+		return 0, errors.New("request exceeds supplier context capacity")
+	}
+	return prompt + output, nil
+}
+
+func SupplierPromptTokens(request *dto.GeneralOpenAIRequest, info *relaycommon.RelayInfo) int64 {
 	// Count independently of the customer billing token-count feature flag.
 	meta := request.GetTokenCountMeta()
 	prompt := int64(CountTextToken(meta.CombineText, info.OriginModelName) + meta.ToolsCount*8 + meta.MessagesCount*3 + meta.NameCount*3 + 3)
 	if int64(info.GetEstimatePromptTokens()) > prompt {
 		prompt = int64(info.GetEstimatePromptTokens())
 	}
-	prompt = (prompt*pool.InputSafetyPercent + 99) / 100
-	if prompt+output > spec.ContextTokens {
-		return 0, errors.New("request exceeds supplier context capacity")
-	}
-	return prompt + output, nil
+	return prompt
 }
 
 func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *model.Channel) (*model.Channel, error) {
@@ -277,6 +296,26 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 		channels, err = model.GetSatisfiedChannelCandidates(s.Group, info.OriginModelName, c.Request.URL.Path)
 		if err != nil {
 			return nil, err
+		}
+	}
+	adaptive := s.Rule.Mode == "adaptive" && s.Managed && (!s.Shadow || locked == nil)
+	outputScope := fmt.Sprintf("supplier-routing:output:%q:%q:%t", info.OriginModelName, s.Group, info.IsStream)
+	outputEstimate := s.Rule.Health.ReferenceOutputTokens
+	promptEstimate := SupplierPromptTokens(request, info)
+	if adaptive {
+		var err error
+		outputEstimate, err = SupplierExpectedOutput(c.Request.Context(), outputScope, outputEstimate)
+		if err != nil {
+			return nil, err
+		}
+		if request.GetMaxTokens() > 0 {
+			outputEstimate = min(outputEstimate, int64(request.GetMaxTokens()))
+		}
+	}
+	prices := map[int]model.ChannelCostPricing{}
+	for _, price := range s.Runtime.Config.Prices {
+		if price.ModelName == info.OriginModelName {
+			prices[price.ChannelId] = price
 		}
 	}
 	weights := make(map[int64]int64)
@@ -308,11 +347,40 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 		if err != nil {
 			continue
 		}
-		candidates = append(candidates, SupplierCandidate{ChannelID: ch.Id, PoolID: poolID, SupplierID: pool.SupplierID, Priority: ch.GetPriority(), Weight: weight, Tokens: tokens})
+		candidate := SupplierCandidate{ChannelID: ch.Id, PoolID: poolID, SupplierID: pool.SupplierID, Priority: ch.GetPriority(), Weight: weight, Tokens: tokens, OutputScope: outputScope, Measure: !info.IsChannelTest, Streaming: info.IsStream}
+		for _, spec := range pool.Models {
+			if spec.Name == info.OriginModelName {
+				scope := fmt.Sprintf("%q:%q:%q:%t:%q", spec.Name, spec.Version, s.Group, info.IsStream, s.Rule.ID)
+				candidate.PerformanceKey = fmt.Sprintf("supplier-routing:performance:%d:%x", poolID, sha256.Sum256([]byte(scope)))
+			}
+		}
+		if adaptive {
+			price, found := prices[ch.Id]
+			if !found {
+				continue
+			}
+			// Pool safety margins affect admission, never the shared cost comparison.
+			amount, err := model.SupplierPriceAmount(price, promptEstimate, outputEstimate, 0)
+			if err != nil {
+				continue
+			}
+			candidate.Cost, _ = amount.Float64()
+			if math.IsInf(candidate.Cost, 0) || (candidate.Cost == 0 && !amount.IsZero()) {
+				continue
+			}
+			candidate.EstimatedCost = amount.String()
+			candidate.Currency = price.Currency
+			raw, err := common.Marshal(price)
+			if err != nil {
+				return nil, err
+			}
+			candidate.PriceJSON = string(raw)
+		}
+		candidates = append(candidates, candidate)
 		byID[ch.Id] = ch
 	}
 	if len(candidates) == 0 {
-		return nil, errors.New("no eligible supplier capacity for this request")
+		return nil, errors.New("no eligible supplier model, capacity or comparable procurement quote for this request")
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ChannelID < candidates[j].ChannelID })
 	s.ReservationID = fmt.Sprintf("%s:%d", s.RequestID, s.AttemptNumber+1)
@@ -321,7 +389,11 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	if s.AttemptNumber > 0 || info.IsChannelTest {
 		schedule += ":auxiliary"
 	}
-	input := map[string]any{"id": s.ReservationID, "candidates": candidates, "model": info.OriginModelName, "group": s.Group, "health": s.Rule.Health, "mode": s.Rule.Mode, "schedule": schedule, "share_scope": shareScope, "timeout_seconds": s.Rule.TimeoutSeconds, "max_supplier_percent": s.Rule.MaxSupplierPercent, "first": s.AttemptNumber == 0 && info.RetryIndex == 0 && !info.IsChannelTest}
+	mode := s.Rule.Mode
+	if !adaptive && mode == "adaptive" {
+		mode = "capacity"
+	}
+	input := map[string]any{"id": s.ReservationID, "revision": s.Runtime.Config.Revision, "candidates": candidates, "model": info.OriginModelName, "group": s.Group, "health": s.Rule.Health, "mode": mode, "schedule": schedule, "share_scope": shareScope, "timeout_seconds": s.Rule.TimeoutSeconds, "max_supplier_percent": s.Rule.MaxSupplierPercent, "first": s.AttemptNumber == 0 && info.RetryIndex == 0 && !info.IsChannelTest}
 	data, err := common.Marshal(input)
 	if err != nil {
 		return nil, err
@@ -349,7 +421,7 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	}
 	if op == "preview" {
 		s.ShadowRecorded = true
-		observation := model.SupplierAttempt{RequestID: s.RequestID, Attempt: 0, SupplierID: selected.SupplierID, PoolID: selected.PoolID, ChannelID: selected.ChannelID, UserID: info.UserId, Model: info.OriginModelName, GroupName: s.Group, Revision: s.Runtime.Config.Revision, Reason: "shadow:" + s.Rule.Mode, Kind: "shadow", Status: "observed", CreatedAt: time.Now().Unix(), CostStatus: "not_applicable"}
+		observation := model.SupplierAttempt{RequestID: s.RequestID, Attempt: 0, SupplierID: selected.SupplierID, PoolID: selected.PoolID, ChannelID: selected.ChannelID, UserID: info.UserId, Model: info.OriginModelName, GroupName: s.Group, Revision: s.Runtime.Config.Revision, Reason: "shadow:" + s.Rule.Mode, Kind: "shadow", Status: "observed", CreatedAt: time.Now().Unix(), CostStatus: "not_applicable", EstimatedCost: selected.EstimatedCost, Currency: selected.Currency, RoutingWeight: selected.RoutingWeight, HealthState: selected.HealthState}
 		if err := model.DB.Create(&observation).Error; err != nil {
 			return nil, err
 		}
@@ -363,6 +435,8 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	s.Sent = false
 	s.Complete = false
 	s.Finished = false
+	s.ResponseError = false
+	s.RetryAfterSeconds = 0
 	reason := s.Rule.Mode
 	if s.Shadow {
 		reason = "shadow:legacy"
@@ -372,7 +446,7 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	}
 	fallback := false
 	for _, candidate := range candidates {
-		if candidate.Priority > selected.Priority {
+		if !adaptive && candidate.Priority > selected.Priority {
 			fallback = true
 		}
 	}
@@ -386,13 +460,15 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	if info.IsChannelTest {
 		kind = "probe"
 	}
-	s.Current = &model.SupplierAttempt{PriorityFallback: fallback, CapacityUntil: selected.Expires, RequestID: s.RequestID, Attempt: s.AttemptNumber, SupplierID: selected.SupplierID, PoolID: selected.PoolID, ChannelID: selected.ChannelID, UserID: info.UserId, Model: info.OriginModelName, GroupName: s.Group, Revision: s.Runtime.Config.Revision, Reason: reason, Kind: kind, Status: "pending", CreatedAt: time.Now().Unix(), CostStatus: "pending"}
+	s.Current = &model.SupplierAttempt{EstimatedCost: selected.EstimatedCost, RoutingWeight: selected.RoutingWeight, HealthState: selected.HealthState, PerformanceKey: selected.PerformanceKey, PriceJSON: selected.PriceJSON, Currency: selected.Currency, PriorityFallback: fallback, CapacityUntil: selected.Expires, RequestID: s.RequestID, Attempt: s.AttemptNumber, SupplierID: selected.SupplierID, PoolID: selected.PoolID, ChannelID: selected.ChannelID, UserID: info.UserId, Model: info.OriginModelName, GroupName: s.Group, Revision: s.Runtime.Config.Revision, Reason: reason, Kind: kind, Status: "pending", CreatedAt: time.Now().Unix(), CostStatus: "pending"}
 	var cost model.ChannelCostPricing
-	if err := model.DB.Where("channel_id = ? AND model_name = ?", selected.ChannelID, info.OriginModelName).First(&cost).Error; err == nil {
-		if err := common.UnmarshalJsonStr(cost.ConfigJson, &cost.Config); err == nil {
-			snapshot, _ := common.Marshal(cost)
-			s.Current.PriceJSON = string(snapshot)
-			s.Current.Currency = cost.Currency
+	if !adaptive {
+		if err := model.DB.Where("channel_id = ? AND model_name = ?", selected.ChannelID, info.OriginModelName).First(&cost).Error; err == nil {
+			if err := common.UnmarshalJsonStr(cost.ConfigJson, &cost.Config); err == nil {
+				snapshot, _ := common.Marshal(cost)
+				s.Current.PriceJSON = string(snapshot)
+				s.Current.Currency = cost.Currency
+			}
 		}
 	}
 	if err := model.DB.Create(s.Current).Error; err != nil {

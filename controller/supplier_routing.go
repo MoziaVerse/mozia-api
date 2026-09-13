@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/shopspring/decimal"
@@ -44,6 +45,7 @@ func GetSupplierRouting(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	cfg.Prices = nil // Procurement quotes retain their separate permission boundary.
 	common.ApiSuccess(c, gin.H{"config": cfg, "settings": settings, "revisions": revisions, "channels": channels})
 }
 
@@ -86,24 +88,26 @@ func GetSupplierAttempts(c *gin.Context) {
 
 func GetSupplierRoutingStats(c *gin.Context) {
 	var rows []struct {
-		SupplierID       int64   `json:"supplier_id"`
-		PoolID           int64   `json:"pool_id"`
-		Model            string  `json:"model"`
-		GroupName        string  `json:"group_name"`
-		Kind             string  `json:"kind"`
-		Status           string  `json:"status"`
-		Requests         int64   `json:"requests"`
-		AvgTTFTMs        float64 `json:"avg_ttft_ms"`
-		AvgLatencyMs     float64 `json:"avg_latency_ms"`
-		OutputTokens     int64   `json:"output_tokens"`
-		FirstShare       float64 `json:"first_share_percent"`
-		HealthState      string  `json:"health_state"`
-		HealthScale      int64   `json:"health_scale"`
-		PriorityFallback bool    `json:"priority_fallback"`
-		OutcomeClass     string  `json:"outcome_class"`
+		PerformanceScope string                       `json:"performance_scope"`
+		Performance      *service.SupplierPerformance `json:"performance,omitempty"`
+		SupplierID       int64                        `json:"supplier_id"`
+		PoolID           int64                        `json:"pool_id"`
+		Model            string                       `json:"model"`
+		GroupName        string                       `json:"group_name"`
+		Kind             string                       `json:"kind"`
+		Status           string                       `json:"status"`
+		Requests         int64                        `json:"requests"`
+		AvgTTFTMs        float64                      `json:"avg_ttft_ms"`
+		AvgLatencyMs     float64                      `json:"avg_latency_ms"`
+		OutputTokens     int64                        `json:"output_tokens"`
+		FirstShare       float64                      `json:"first_share_percent"`
+		HealthState      string                       `json:"health_state"`
+		HealthScale      int64                        `json:"health_scale"`
+		PriorityFallback bool                         `json:"priority_fallback"`
+		OutcomeClass     string                       `json:"outcome_class"`
 	}
 	start := time.Now().Truncate(time.Hour).Unix()
-	err := model.DB.Model(&model.SupplierAttempt{}).Select("supplier_id, pool_id, model, group_name, kind, status, priority_fallback, outcome_class, COUNT(*) AS requests, COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms ELSE NULL END), 0) AS avg_ttft_ms, AVG(latency_ms) AS avg_latency_ms, SUM(output_tokens) AS output_tokens").Where("created_at >= ? AND status <> ?", start, "cancelled").Group("supplier_id, pool_id, model, group_name, kind, status, priority_fallback, outcome_class").Find(&rows).Error
+	err := model.DB.Model(&model.SupplierAttempt{}).Select("performance_key AS performance_scope, supplier_id, pool_id, model, group_name, kind, status, priority_fallback, outcome_class, COUNT(*) AS requests, COALESCE(AVG(CASE WHEN ttft_ms > 0 THEN ttft_ms ELSE NULL END), 0) AS avg_ttft_ms, AVG(latency_ms) AS avg_latency_ms, SUM(output_tokens) AS output_tokens").Where("created_at >= ? AND status <> ?", start, "cancelled").Group("performance_key, supplier_id, pool_id, model, group_name, kind, status, priority_fallback, outcome_class").Find(&rows).Error
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -120,6 +124,7 @@ func GetSupplierRoutingStats(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
+	performance := map[string]service.SupplierPerformance{}
 	for i := range rows {
 		row := &rows[i]
 		scope := fmt.Sprintf("%q:%q", row.Model, row.GroupName)
@@ -127,7 +132,19 @@ func GetSupplierRoutingStats(c *gin.Context) {
 			row.FirstShare = 100 * float64(numerators[fmt.Sprintf("%d:%s", row.SupplierID, scope)]) / float64(total)
 		}
 		row.HealthState = "unavailable"
-		if common.RedisEnabled && common.RDB != nil {
+		if common.RedisEnabled && common.RDB != nil && row.PerformanceScope != "" {
+			view, found := performance[row.PerformanceScope]
+			if !found {
+				var err error
+				view, err = service.ReadSupplierPerformance(ctx, row.PerformanceScope)
+				if err != nil {
+					view.State = "unavailable"
+				}
+				performance[row.PerformanceScope] = view
+			}
+			row.Performance = &view
+			row.HealthState = view.State
+		} else if common.RedisEnabled && common.RDB != nil {
 			key := fmt.Sprintf("supplier-routing:health:%d:%d:%s:%s", row.PoolID, len(row.Model), row.Model, row.GroupName)
 			health, err := common.RDB.HGetAll(ctx, key).Result()
 			if err == nil {
@@ -152,7 +169,23 @@ func GetSupplierRoutingStats(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"hour_start": start, "rows": rows, "summary": summary})
+	var costs []struct {
+		Currency           string `json:"currency"`
+		Total              string `json:"total"`
+		RetryCost          string `json:"retry_cost"`
+		FailedCost         string `json:"failed_cost"`
+		Pending            int64  `json:"pending"`
+		SuccessfulRequests int64  `json:"successful_requests"`
+	}
+	if authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ModelPricingRead) {
+		known := "cost_status IN ('calculated','reconciled')"
+		err = model.DB.Model(&model.SupplierAttempt{}).Select("currency, COALESCE(SUM(CASE WHEN "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS total, COALESCE(SUM(CASE WHEN kind = 'retry' AND "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS retry_cost, COALESCE(SUM(CASE WHEN status <> 'success' AND "+known+" THEN CAST(cost AS DECIMAL(30,8)) ELSE 0 END),0) AS failed_cost, SUM(CASE WHEN cost_status = 'pending' THEN 1 ELSE 0 END) AS pending, COUNT(DISTINCT CASE WHEN status = 'success' THEN request_id END) AS successful_requests").Where("created_at >= ? AND kind IN ? AND status <> ?", start, []string{"first", "retry"}, "cancelled").Group("currency").Scan(&costs).Error
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+	common.ApiSuccess(c, gin.H{"hour_start": start, "rows": rows, "summary": summary, "costs": costs})
 }
 
 func ReconcileSupplierAttempt(c *gin.Context) {

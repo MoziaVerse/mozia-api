@@ -114,6 +114,8 @@ export function SupplierMonitor() {
     normal: t('Healthy'),
     degraded: t('Degraded'),
     paused: t('Paused'),
+    overloaded: t('Overloaded'),
+    calculated: t('Calculated'),
     unavailable: t('Unavailable'),
   }
   if (!canRead) return null
@@ -196,6 +198,46 @@ export function SupplierMonitor() {
               'Summary covers all suppliers this hour and excludes probes and recommendations. Filters below apply to tables only.'
             )}
           </p>
+          {canReadCost &&
+            stats.data?.costs?.map((cost) => (
+              <Card key={cost.currency || 'unknown'}>
+                <CardHeader>
+                  <CardTitle>
+                    {t('Procurement this hour')} ·{' '}
+                    {cost.currency || t('Unknown')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className='flex flex-wrap gap-x-8 gap-y-3 text-sm'>
+                  <span>
+                    {t('Procurement cost')}: {cost.total}
+                  </span>
+                  <span>
+                    {t('Retry cost')}: {cost.retry_cost}
+                  </span>
+                  <span>
+                    {t('Failed call cost')}: {cost.failed_cost}
+                  </span>
+                  <span>
+                    {t('Cost per successful request')}:{' '}
+                    {cost.successful_requests > 0
+                      ? (Number(cost.total) / cost.successful_requests).toFixed(
+                          8
+                        )
+                      : '—'}
+                  </span>
+                  <span>
+                    {t('Pending reconciliation')}: {cost.pending}
+                  </span>
+                  {cost.pending > 0 && (
+                    <p className='text-muted-foreground w-full'>
+                      {t(
+                        'Costs are provisional until pending calls are reconciled.'
+                      )}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
           <div className='flex flex-wrap items-end gap-4'>
             <div className='space-y-2'>
               <Label htmlFor='monitor-supplier'>{t('Supplier')}</Label>
@@ -244,6 +286,11 @@ export function SupplierMonitor() {
                   'First-dispatch share is calculated per supplier for the same model and group. It is not a percentage of all platform requests.'
                 )}
               </p>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Service performance uses recent five-minute samples. Streamed and non-streamed calls are measured separately.'
+                )}
+              </p>
               {stats.isPending ? (
                 <p>{t('Loading...')}</p>
               ) : (
@@ -260,6 +307,7 @@ export function SupplierMonitor() {
                           t('Status'),
                           t('Requests'),
                           t('TTFT (ms)'),
+                          t('Recent service performance'),
                           t('First-dispatch share'),
                           t('Health'),
                           t('Priority fallback'),
@@ -271,7 +319,7 @@ export function SupplierMonitor() {
                     <TableBody>
                       {traffic.map((row) => (
                         <TableRow
-                          key={`${row.pool_id}:${row.model}:${row.group_name}:${row.kind}:${row.status}:${row.priority_fallback}:${row.outcome_class}`}
+                          key={`${row.performance_scope}:${row.pool_id}:${row.model}:${row.group_name}:${row.kind}:${row.status}:${row.priority_fallback}:${row.outcome_class}`}
                         >
                           <TableCell>
                             {suppliers.get(row.supplier_id) ||
@@ -299,6 +347,31 @@ export function SupplierMonitor() {
                             {row.avg_ttft_ms > 0
                               ? Math.round(row.avg_ttft_ms)
                               : '—'}
+                          </TableCell>
+                          <TableCell className='whitespace-nowrap'>
+                            {row.performance ? (
+                              <>
+                                <div>
+                                  {t('Samples')}: {row.performance.samples} ·{' '}
+                                  {t('Success rate')}:{' '}
+                                  {row.performance.success_rate.toFixed(1)}%
+                                </div>
+                                <div>
+                                  {t('Overload rate')}:{' '}
+                                  {row.performance.overload_rate.toFixed(1)}% ·{' '}
+                                  {row.performance.throughput.toFixed(1)}{' '}
+                                  tokens/s
+                                </div>
+                                <div>
+                                  {t('TTFT (ms)')}:{' '}
+                                  {row.performance.ttft_ms > 0
+                                    ? Math.round(row.performance.ttft_ms)
+                                    : '—'}
+                                </div>
+                              </>
+                            ) : (
+                              '—'
+                            )}
                           </TableCell>
                           <TableCell>
                             {row.kind === 'first'
@@ -359,7 +432,7 @@ export function SupplierMonitor() {
                   <TableBody>
                     {observations.map((row) => (
                       <TableRow
-                        key={`${row.pool_id}:${row.model}:${row.group_name}:${row.status}`}
+                        key={`${row.performance_scope}:${row.pool_id}:${row.model}:${row.group_name}:${row.status}`}
                       >
                         <TableCell>
                           {suppliers.get(row.supplier_id) ||
@@ -430,6 +503,7 @@ export function SupplierMonitor() {
                             t('Status'),
                             t('Input tokens'),
                             t('Output tokens'),
+                            t('Estimated procurement cost'),
                             t('Procurement cost'),
                             t('Reconciliation'),
                           ].map((label) => (
@@ -458,12 +532,27 @@ export function SupplierMonitor() {
                             <TableCell>
                               {labels[attempt.kind] || attempt.kind}
                             </TableCell>
-                            <TableCell>{attempt.reason}</TableCell>
+                            <TableCell>
+                              {attempt.reason === 'adaptive'
+                                ? t('Experience qualified, cost first')
+                                : attempt.reason}
+                              {attempt.health_state && (
+                                <div className='text-muted-foreground text-xs'>
+                                  {labels[attempt.health_state] ||
+                                    attempt.health_state}{' '}
+                                  · {t('Routing weight')}:{' '}
+                                  {attempt.routing_weight}
+                                </div>
+                              )}
+                            </TableCell>
                             <TableCell>
                               {labels[attempt.status] || attempt.status}
                             </TableCell>
                             <TableCell>{attempt.input_tokens}</TableCell>
                             <TableCell>{attempt.output_tokens}</TableCell>
+                            <TableCell>
+                              {attempt.estimated_cost || '—'} {attempt.currency}
+                            </TableCell>
                             <TableCell>
                               {attempt.cost || t('Pending reconciliation')}{' '}
                               {attempt.currency}

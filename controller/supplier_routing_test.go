@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -91,4 +92,55 @@ func TestSupplierPublicationCannotUseGenericOptions(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPut, "/api/option", strings.NewReader(`{"key":"SupplierRoutingPublication","value":"{}"}`))
 	UpdateOption(c)
 	assert.Contains(t, recorder.Body.String(), "dedicated publication endpoint")
+}
+
+func TestSupplierProcurementSummaryPermissionAndRetryCosts(t *testing.T) {
+	db := setupMaterialControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.SupplierAttempt{}))
+	oldRedis := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() { common.RedisEnabled = oldRedis })
+	now := time.Now().Unix()
+	rows := []model.SupplierAttempt{
+		{RequestID: "r", Attempt: 1, Kind: "first", Status: "failed", Currency: "CNY", Cost: "0.1", CostStatus: "calculated", CreatedAt: now},
+		{RequestID: "r", Attempt: 2, Kind: "retry", Status: "success", Currency: "CNY", Cost: "0.2", CostStatus: "reconciled", CreatedAt: now},
+		{RequestID: "u", Attempt: 1, Kind: "first", Status: "unknown", Currency: "CNY", CostStatus: "pending", CreatedAt: now},
+		{RequestID: "p", Attempt: 1, Kind: "probe", Status: "success", Currency: "CNY", Cost: "10", CostStatus: "calculated", CreatedAt: now},
+	}
+	require.NoError(t, db.Create(&rows).Error)
+	for _, role := range []int{common.RoleCommonUser, common.RoleRootUser} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodGet, "/stats", nil)
+		c.Set("role", role)
+		c.Set("id", 1)
+		GetSupplierRoutingStats(c)
+		var response struct {
+			Success bool
+			Data    struct {
+				Costs []struct {
+					Total   string
+					Retry   string `json:"retry_cost"`
+					Failed  string `json:"failed_cost"`
+					Pending int
+					Success int `json:"successful_requests"`
+				}
+			}
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		require.True(t, response.Success, recorder.Body.String())
+		if role == common.RoleCommonUser {
+			assert.Empty(t, response.Data.Costs)
+			continue
+		}
+		require.Len(t, response.Data.Costs, 1)
+		cost := response.Data.Costs[0]
+		total, err := strconv.ParseFloat(cost.Total, 64)
+		require.NoError(t, err)
+		assert.InDelta(t, 0.3, total, 1e-8)
+		assert.Equal(t, "0.2", cost.Retry)
+		assert.Equal(t, "0.1", cost.Failed)
+		assert.Equal(t, 1, cost.Pending)
+		assert.Equal(t, 1, cost.Success)
+	}
 }

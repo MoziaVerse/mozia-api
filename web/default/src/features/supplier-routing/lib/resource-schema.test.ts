@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import type { SupplierRoutingData } from '../api'
+import { newSupplierModel, newSupplierRule } from './config-schema'
 import {
   editableSupplierResource,
   parseSupplierResourceJSON,
@@ -206,4 +207,43 @@ test('model choices show all matching channel types with occupancy reasons, with
       [999, undefined],
     ]
   )
+})
+
+test('optional capacity and adaptive settings survive record JSON save', () => {
+  const pool = {
+    name: 'Pool',
+    failure_domain: 'DC',
+    enabled: true,
+    limits: { concurrency: 0, rpm: 0, tpm: 0 },
+    max_execution_seconds: 120,
+    input_safety_percent: 110,
+    acceptance: 'Verified',
+    models: [
+      {
+        ...newSupplierModel('test'),
+        version: 'v1',
+        limits: { concurrency: 0, rpm: 10, tpm: 0 },
+      },
+    ],
+    bindings: [{ channel_id: 1, model: 'test' }],
+  }
+  assert.deepEqual(
+    parseSupplierResourceJSON('pool', JSON.stringify(pool)),
+    pool
+  )
+  assert.throws(() =>
+    parseSupplierResourceJSON(
+      'pool',
+      JSON.stringify({ ...pool, limits: { ...pool.limits, rpm: -1 } })
+    )
+  )
+  const rule = editableSupplierResource(
+    'rule',
+    newSupplierRule('new', 1, 'test')
+  )
+  const saved = parseSupplierResourceJSON('rule', JSON.stringify(rule))
+  assert.equal(saved.mode, 'adaptive')
+  assert.deepEqual(saved.targets, [{ supplier_id: 1, weight: 100 }])
+  assert.equal(saved.max_supplier_percent, 0)
+  assert.deepEqual(saved.health, rule.health)
 })

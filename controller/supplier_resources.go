@@ -248,5 +248,6 @@ func GetSupplierResourceRevision(c *gin.Context) {
 		return
 	}
 	revision.ConfigJSON = ""
+	cfg.Prices = nil
 	common.ApiSuccess(c, gin.H{"revision": revision, "config": cfg})
 }

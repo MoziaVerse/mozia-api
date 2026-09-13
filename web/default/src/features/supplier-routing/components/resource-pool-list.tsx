@@ -141,10 +141,12 @@ export function ResourcePoolList(props: {
       cell: ({ row }) => (
         <div className='text-sm whitespace-nowrap'>
           <p>
-            {t('Concurrent requests')}: {row.original.limits.concurrency}
+            {t('Concurrent requests')}:{' '}
+            {row.original.limits.concurrency || t('Not declared')}
           </p>
           <p>
-            {row.original.limits.rpm} RPM · {row.original.limits.tpm} TPM
+            {row.original.limits.rpm || t('Not declared')} RPM ·{' '}
+            {row.original.limits.tpm || t('Not declared')} TPM
           </p>
         </div>
       ),

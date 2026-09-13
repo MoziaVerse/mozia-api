@@ -49,6 +49,9 @@ export type SupplierRoutingData = {
 }
 
 export type SupplierAttempt = {
+  estimated_cost: string
+  routing_weight: number
+  health_state: string
   id: number
   created_at: number
   request_id: string
@@ -70,6 +73,15 @@ export type SupplierAttempt = {
 }
 
 export type SupplierStat = {
+  performance_scope?: string
+  performance?: {
+    samples: number
+    success_rate: number
+    overload_rate: number
+    throughput: number
+    ttft_ms: number
+    state: string
+  }
   first_share_percent: number
   health_state: string
   health_scale: number
@@ -88,6 +100,14 @@ export type SupplierStat = {
 }
 
 export type SupplierStats = {
+  costs?: {
+    currency: string
+    total: string
+    retry_cost: string
+    failed_cost: string
+    pending: number
+    successful_requests: number
+  }[]
   hour_start: number
   rows: SupplierStat[]
   summary: {

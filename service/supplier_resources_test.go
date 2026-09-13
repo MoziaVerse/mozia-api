@@ -98,7 +98,7 @@ func TestSupplierResourcePatchAndBindingContracts(t *testing.T) {
 	assert.Equal(t, int64(150), pool.Limits.RPM)
 	assert.Equal(t, int64(10), pool.Limits.Concurrency)
 	require.Len(t, pool.Models, 1)
-	for _, body := range []string{`{"limits":{"rpm":0}}`, `{"supplier_id":999}`, `{"models":[{"name":"test","version":""}]}`, `{"limits":{"rpmm":2}}`, `{"enabled":null}`, `{"version":123}`} {
+	for _, body := range []string{`{"limits":{"rpm":-1}}`, `{"supplier_id":999}`, `{"models":[{"name":"test","version":""}]}`, `{"limits":{"rpmm":2}}`, `{"enabled":null}`, `{"version":123}`} {
 		request.IfMatch = SupplierResourceETag("pool", pool)
 		request.Patch = []byte(body)
 		_, err := MutateSupplierResource(context.Background(), request)

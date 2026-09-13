@@ -80,12 +80,16 @@ type SupplierTarget struct {
 }
 
 type SupplierHealthPolicy struct {
-	WindowSeconds   int64 `json:"window_seconds"`
-	MinSamples      int64 `json:"min_samples"`
-	FailurePercent  int64 `json:"failure_percent"`
-	MaxTTFTMs       int64 `json:"max_ttft_ms"`
-	CooldownSeconds int64 `json:"cooldown_seconds"`
-	TrialPercent    int64 `json:"trial_percent"`
+	SuccessPercent        int64 `json:"success_percent,omitempty"`
+	MinThroughput         int64 `json:"min_throughput,omitempty"`
+	ReferenceOutputTokens int64 `json:"reference_output_tokens,omitempty"`
+	TrialConcurrency      int64 `json:"trial_concurrency,omitempty"`
+	WindowSeconds         int64 `json:"window_seconds"`
+	MinSamples            int64 `json:"min_samples"`
+	FailurePercent        int64 `json:"failure_percent"`
+	MaxTTFTMs             int64 `json:"max_ttft_ms"`
+	CooldownSeconds       int64 `json:"cooldown_seconds"`
+	TrialPercent          int64 `json:"trial_percent"`
 }
 
 type SupplierRoutingRule struct {
@@ -105,6 +109,7 @@ type SupplierRoutingRule struct {
 }
 
 type SupplierRoutingConfig struct {
+	Prices        []ChannelCostPricing  `json:"prices,omitempty"`
 	Revision      int64                 `json:"revision"`
 	Enabled       bool                  `json:"enabled"`
 	Shadow        bool                  `json:"shadow"`
@@ -126,6 +131,10 @@ type RoutingRevision struct {
 }
 
 type SupplierAttempt struct {
+	EstimatedCost     string `json:"estimated_cost" gorm:"type:varchar(96)"`
+	RoutingWeight     int64  `json:"routing_weight"`
+	HealthState       string `json:"health_state" gorm:"type:varchar(32)"`
+	PerformanceKey    string `json:"-" gorm:"type:varchar(512)"`
 	OutcomeClass      string `json:"outcome_class" gorm:"type:varchar(32)"`
 	PriorityFallback  bool   `json:"priority_fallback"`
 	CapacityUntil     int64  `json:"capacity_until"`
@@ -196,8 +205,8 @@ func ValidateSupplierRoutingConfigWithDB(db *gorm.DB, cfg *SupplierRoutingConfig
 		if p.ID <= 0 || p.ID > 9007199254740991 || pools[p.ID].ID != 0 || !suppliers[p.SupplierID] || strings.TrimSpace(p.Name) == "" || len(p.Name) > 191 || strings.TrimSpace(p.FailureDomain) == "" || len(p.FailureDomain) > 191 {
 			return errors.New("pool must have a unique ID, supplier, name and failure domain")
 		}
-		if p.Limits.Concurrency <= 0 || p.Limits.RPM <= 0 || p.Limits.TPM <= 0 || p.Limits.Concurrency > 10000 || p.Limits.RPM > 100000 || p.Limits.TPM > 1000000000 {
-			return errors.New("pool concurrency, RPM and TPM must be positive and within supported bounds")
+		if p.Limits.Concurrency < 0 || p.Limits.RPM < 0 || p.Limits.TPM < 0 || p.Limits.Concurrency > 10000 || p.Limits.RPM > 100000 || p.Limits.TPM > 1000000000 {
+			return errors.New("pool limits must be non-negative and within supported bounds; zero is undeclared")
 		}
 		if p.MaxExecutionSeconds < 1 || p.MaxExecutionSeconds > 3600 || p.InputSafetyPercent < 100 || p.InputSafetyPercent > 200 {
 			return errors.New("pool execution timeout must be 1..3600 seconds and input safety 100..200 percent")
@@ -213,7 +222,7 @@ func ValidateSupplierRoutingConfigWithDB(db *gorm.DB, cfg *SupplierRoutingConfig
 			if spec.Name == "" || len(spec.Name) > 191 || names[spec.Name] || spec.Version == "" || len(spec.Version) > 191 || spec.ContextTokens <= 0 || spec.ContextTokens > 10000000 || spec.MaxOutputTokens <= 0 || spec.MaxOutputTokens > spec.ContextTokens {
 				return errors.New("model name, version, context and output bounds must be valid")
 			}
-			if spec.Limits.Concurrency < 0 || spec.Limits.RPM < 0 || spec.Limits.TPM < 0 || spec.Limits.Concurrency > p.Limits.Concurrency || spec.Limits.RPM > p.Limits.RPM || spec.Limits.TPM > p.Limits.TPM {
+			if spec.Limits.Concurrency < 0 || spec.Limits.RPM < 0 || spec.Limits.TPM < 0 || (p.Limits.Concurrency > 0 && spec.Limits.Concurrency > p.Limits.Concurrency) || (p.Limits.RPM > 0 && spec.Limits.RPM > p.Limits.RPM) || (p.Limits.TPM > 0 && spec.Limits.TPM > p.Limits.TPM) || spec.Limits.Concurrency > 10000 || spec.Limits.RPM > 100000 || spec.Limits.TPM > 1000000000 {
 				return errors.New("model limits must fit the shared pool; zero inherits the pool limit")
 			}
 			names[spec.Name] = true
@@ -254,14 +263,17 @@ func ValidateSupplierRoutingConfigWithDB(db *gorm.DB, cfg *SupplierRoutingConfig
 		if r.ID == "" || len(r.ID) > 96 || ruleIDs[r.ID] || matches[match] || r.Model == "" || len(r.Model) > 191 || len(r.Group) > 191 || r.UserID < 0 {
 			return errors.New("rule IDs and customer/group/model matches must be unique")
 		}
-		if r.Mode != "capacity" && r.Mode != "share" && r.Mode != "failover" {
-			return errors.New("supported routing modes: capacity, share, failover")
+		if r.Mode != "adaptive" && r.Mode != "capacity" && r.Mode != "share" && r.Mode != "failover" {
+			return errors.New("supported routing modes: adaptive, capacity, share, failover")
 		}
 		if r.MaxAttempts < 1 || r.MaxAttempts > 10 || r.TimeoutSeconds < 1 || r.TimeoutSeconds > 3600 {
 			return errors.New("rule attempts must be 1..10 and timeout 1..3600 seconds")
 		}
 		if r.MaxSupplierPercent < 0 || r.MaxSupplierPercent > 100 {
 			return errors.New("supplier concentration percent must be 0..100; zero means no additional cap")
+		}
+		if err := ValidateSupplierAdaptiveRule(&r); err != nil {
+			return err
 		}
 		h := r.Health
 		if h.WindowSeconds < 10 || h.WindowSeconds > 3600 || h.MinSamples < 1 || h.MinSamples > 10000 || h.FailurePercent < 1 || h.FailurePercent > 100 || h.MaxTTFTMs < 1 || h.CooldownSeconds < 1 || h.CooldownSeconds > 3600 || h.TrialPercent < 1 || h.TrialPercent > 100 {
@@ -282,6 +294,9 @@ func ValidateSupplierRoutingConfigWithDB(db *gorm.DB, cfg *SupplierRoutingConfig
 				if p.SupplierID != target.SupplierID || b.Model != r.Model {
 					continue
 				}
+				if r.Mode == "capacity" && (p.Limits.Concurrency == 0 || p.Limits.RPM == 0 || p.Limits.TPM == 0) {
+					return errors.New("capacity balancing requires declared pool limits; use adaptive routing for undeclared capacity")
+				}
 				for _, spec := range p.Models {
 					if spec.Name == r.Model {
 						if version != "" && version != spec.Version {
@@ -296,6 +311,11 @@ func ValidateSupplierRoutingConfigWithDB(db *gorm.DB, cfg *SupplierRoutingConfig
 				return errors.New("target supplier has no binding for the rule model")
 			}
 			targets[target.SupplierID] = true
+		}
+		if r.Mode == "adaptive" {
+			if err := ValidateSupplierRulePrices(cfg, r); err != nil {
+				return err
+			}
 		}
 		ruleIDs[r.ID] = true
 		matches[match] = true

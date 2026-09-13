@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -70,4 +71,22 @@ func TestSupplierResourceHTTPContract(t *testing.T) {
 	recorder = httptest.NewRecorder()
 	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/legacy", strings.NewReader(`{}`)))
 	assert.Equal(t, 410, recorder.Code)
+}
+
+func TestSupplierRevisionDoesNotExposeProcurementQuotes(t *testing.T) {
+	db := setupMaterialControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.RoutingRevision{}))
+	data, err := common.Marshal(model.SupplierRoutingConfig{Prices: []model.ChannelCostPricing{{ModelName: "confidential-quote"}}})
+	require.NoError(t, err)
+	revision := model.RoutingRevision{ConfigJSON: string(data)}
+	require.NoError(t, db.Create(&revision).Error)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/revisions/1", nil)
+	c.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(revision.ID, 10)}}
+	GetSupplierResourceRevision(c)
+	assert.Equal(t, 200, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	assert.NotContains(t, recorder.Body.String(), "confidential-quote")
+	assert.NotContains(t, recorder.Body.String(), `"prices"`)
 }

@@ -116,7 +116,7 @@ export function supplierResourceFormValues(
             name: '',
             failure_domain: '',
             enabled: false,
-            limits: { concurrency: 10, rpm: 100, tpm: 100000 },
+            limits: { concurrency: 0, rpm: 0, tpm: 0 },
             max_execution_seconds: 120,
             input_safety_percent: 110,
             acceptance: '',

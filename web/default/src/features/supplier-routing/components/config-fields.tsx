@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import { Controller, useFormContext, type FieldPath } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
@@ -36,6 +36,8 @@ export function ConfigField(props: {
   name: FieldPath<SupplierConfigValues>
   label: string
   description?: string
+  emptyAsZero?: boolean
+  placeholder?: string
   type?: 'number' | 'text'
   min?: number
   max?: number
@@ -47,44 +49,82 @@ export function ConfigField(props: {
   const form = useFormContext<SupplierConfigValues>()
   const error = form.getFieldState(props.name, form.formState).error
   const registration = form.register(props.name, {
-    valueAsNumber: props.type === 'number',
+    valueAsNumber: props.type === 'number' && !props.emptyAsZero,
   })
+  let control: ReactNode
+  if (props.options) {
+    control = (
+      <NativeSelect
+        id={id}
+        className='w-full'
+        aria-invalid={Boolean(error)}
+        aria-describedby={`${id}-description`}
+        {...registration}
+        onChange={(event) => {
+          void registration.onChange(event)
+          props.onValueChange?.()
+        }}
+      >
+        <NativeSelectOption value=''>
+          {t('Select an option')}
+        </NativeSelectOption>
+        {props.options.map((option) => (
+          <NativeSelectOption key={option.value} value={option.value}>
+            {option.label}
+          </NativeSelectOption>
+        ))}
+      </NativeSelect>
+    )
+  } else if (props.emptyAsZero) {
+    control = (
+      <Controller
+        control={form.control}
+        name={props.name}
+        render={({ field }) => (
+          <Input
+            id={id}
+            type='number'
+            min={props.min}
+            max={props.max}
+            step={1}
+            name={field.name}
+            ref={field.ref}
+            onBlur={field.onBlur}
+            value={
+              typeof field.value === 'number' && field.value !== 0
+                ? field.value
+                : ''
+            }
+            onChange={(event) =>
+              field.onChange(
+                event.target.value === '' ? 0 : Number(event.target.value)
+              )
+            }
+            placeholder={props.placeholder ?? t('Not declared')}
+            aria-invalid={Boolean(error)}
+            aria-describedby={`${id}-description`}
+          />
+        )}
+      />
+    )
+  } else {
+    control = (
+      <Input
+        id={id}
+        type={props.type ?? 'text'}
+        min={props.min}
+        max={props.max}
+        step={props.type === 'number' ? 1 : undefined}
+        aria-invalid={Boolean(error)}
+        aria-describedby={`${id}-description`}
+        {...registration}
+      />
+    )
+  }
   return (
     <Field data-invalid={Boolean(error)}>
       <FieldLabel htmlFor={id}>{props.label}</FieldLabel>
-      {props.options ? (
-        <NativeSelect
-          id={id}
-          className='w-full'
-          aria-invalid={Boolean(error)}
-          aria-describedby={`${id}-description`}
-          {...registration}
-          onChange={(event) => {
-            void registration.onChange(event)
-            props.onValueChange?.()
-          }}
-        >
-          <NativeSelectOption value=''>
-            {t('Select an option')}
-          </NativeSelectOption>
-          {props.options.map((option) => (
-            <NativeSelectOption key={option.value} value={option.value}>
-              {option.label}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      ) : (
-        <Input
-          id={id}
-          type={props.type ?? 'text'}
-          min={props.min}
-          max={props.max}
-          step={props.type === 'number' ? 1 : undefined}
-          aria-invalid={Boolean(error)}
-          aria-describedby={`${id}-description`}
-          {...registration}
-        />
-      )}
+      {control}
       <FieldDescription id={`${id}-description`}>
         {error
           ? t('Check this value and its allowed range.')

@@ -205,6 +205,8 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
 	}
 
+	// Finish upstream accounting before the final event lets the client start its next request.
+	service.FinishSupplierAttempt(c, info, nil, false)
 	HandleFinalResponse(c, info, lastStreamData, responseId, createAt, model, systemFingerprint, usage, containStreamUsage)
 
 	return usage, nil
@@ -331,6 +333,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 		responseBody = geminiRespStr
 	}
 
+	service.FinishSupplierAttempt(c, info, nil, false)
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
 	return &simpleResponse.Usage, nil

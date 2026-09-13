@@ -200,17 +200,33 @@ export function ChannelCostPricingSection() {
   })
   const mutation = useMutation({
     mutationFn: saveChannelCost,
-    onSuccess: () => {
-      toast.success(t('Channel cost saved'))
+    onSuccess: (result) => {
+      toast.success(
+        t(
+          result.application === 'pending'
+            ? 'Quote saved; routing application pending'
+            : 'Channel cost saved'
+        )
+      )
       setDraft(null)
       queryClient.invalidateQueries({ queryKey: ['channel-cost-pricing'] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-routing'] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-status'] })
     },
   })
   const deleteMutation = useMutation({
     mutationFn: deleteChannelCost,
-    onSuccess: () => {
-      toast.success(t('Channel cost deleted'))
+    onSuccess: (result) => {
+      toast.success(
+        t(
+          result.application === 'pending'
+            ? 'Quote saved; routing application pending'
+            : 'Channel cost deleted'
+        )
+      )
       queryClient.invalidateQueries({ queryKey: ['channel-cost-pricing'] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-routing'] })
+      queryClient.invalidateQueries({ queryKey: ['supplier-status'] })
     },
   })
 
@@ -310,7 +326,7 @@ export function ChannelCostPricingSection() {
     <SettingsSection title={t('Channel Cost References')}>
       <div className='text-muted-foreground text-sm'>
         {t(
-          'Channel costs are internal pricing references only and never affect routing, billing, or settlement.'
+          'Channel procurement quotes determine adaptive routing costs and supplier accounting. Customer billing stays independent.'
         )}
       </div>
       <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
@@ -404,7 +420,7 @@ export function ChannelCostPricingSection() {
             </DialogTitle>
             <DialogDescription>
               {t(
-                'This information is used only as an internal pricing reference.'
+                'Adaptive routing supports text input/output and optional cache-read prices per million tokens, or a price per request. Other cost formats remain available for pricing reference.'
               )}
             </DialogDescription>
           </DialogHeader>

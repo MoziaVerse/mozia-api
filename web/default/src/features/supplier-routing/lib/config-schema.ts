@@ -62,11 +62,7 @@ export const supplierConfigSchema = z.object({
         name,
         failure_domain: name,
         enabled: z.boolean(),
-        limits: limits.extend({
-          concurrency: limits.shape.concurrency.min(1),
-          rpm: limits.shape.rpm.min(1),
-          tpm: limits.shape.tpm.min(1),
-        }),
+        limits,
         max_execution_seconds: z.number().int().min(1).max(3600),
         input_safety_percent: z.number().int().min(100).max(200),
         acceptance: z.string().optional(),
@@ -88,7 +84,7 @@ export const supplierConfigSchema = z.object({
         model: name,
         group: z.string().max(191).optional(),
         user_id: z.number().int().min(0).optional(),
-        mode: z.enum(['capacity', 'share', 'failover']),
+        mode: z.enum(['adaptive', 'capacity', 'share', 'failover']),
         targets: z
           .array(
             z.object({
@@ -102,6 +98,15 @@ export const supplierConfigSchema = z.object({
         timeout_seconds: z.number().int().min(1).max(3600),
         max_supplier_percent: z.number().int().min(0).max(100).optional(),
         health: z.object({
+          success_percent: z.number().int().min(1).max(100).optional(),
+          min_throughput: z.number().int().min(1).max(100000).optional(),
+          reference_output_tokens: z
+            .number()
+            .int()
+            .min(1)
+            .max(10000000)
+            .optional(),
+          trial_concurrency: z.number().int().min(1).max(100).optional(),
           window_seconds: z.number().int().min(10).max(3600),
           min_samples: z.number().int().min(1).max(10000),
           failure_percent: z.number().int().min(1).max(100),
@@ -140,18 +145,22 @@ export function newSupplierRule(
     model: modelName,
     group: '',
     user_id: 0,
-    mode: 'capacity',
+    mode: 'adaptive',
     targets: [{ supplier_id: supplierId, weight: 100 }],
     max_attempts: 2,
     timeout_seconds: 120,
     max_supplier_percent: 0,
     health: {
-      window_seconds: 60,
-      min_samples: 10,
+      success_percent: 95,
+      min_throughput: 10,
+      reference_output_tokens: 512,
+      trial_concurrency: 1,
+      window_seconds: 300,
+      min_samples: 20,
       failure_percent: 20,
       max_ttft_ms: 5000,
       cooldown_seconds: 30,
-      trial_percent: 10,
+      trial_percent: 5,
     },
   }
 }

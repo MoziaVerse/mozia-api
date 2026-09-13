@@ -126,6 +126,14 @@ func ReadSupplierResources(db *gorm.DB) (*SupplierRoutingConfig, error) {
 			return nil, err
 		}
 	}
+	for _, rule := range cfg.Rules {
+		if rule.Mode == "adaptive" {
+			if err := LoadSupplierPrices(db, cfg); err != nil {
+				return nil, err
+			}
+			break
+		}
+	}
 	return cfg, nil
 }
 
@@ -417,7 +425,7 @@ func ValidateSupplierResourceFields(value any) error {
 			if key == "tpm" {
 				max = 1000000000
 			}
-			if n < 1 || n > max {
+			if n < 0 || n > max {
 				return SupplierFieldError("limits."+key, "shared limit is outside the supported range")
 			}
 		}
@@ -448,7 +456,7 @@ func ValidateSupplierResourceFields(value any) error {
 				return SupplierFieldError(path+"max_output_tokens", "output limit must fit the context")
 			}
 			for key, pair := range map[string][2]int64{"concurrency": {m.Limits.Concurrency, v.Limits.Concurrency}, "rpm": {m.Limits.RPM, v.Limits.RPM}, "tpm": {m.Limits.TPM, v.Limits.TPM}} {
-				if pair[0] < 0 || pair[0] > pair[1] {
+				if pair[0] < 0 || (pair[1] > 0 && pair[0] > pair[1]) || (key == "concurrency" && pair[0] > 10000) || (key == "rpm" && pair[0] > 100000) || (key == "tpm" && pair[0] > 1000000000) {
 					return SupplierFieldError(path+"limits."+key, "model limit must fit the shared pool")
 				}
 			}
@@ -473,8 +481,11 @@ func ValidateSupplierResourceFields(value any) error {
 		if v.UserID < 0 {
 			return SupplierFieldError("user_id", "customer ID cannot be negative")
 		}
-		if v.Mode != "capacity" && v.Mode != "share" && v.Mode != "failover" {
+		if v.Mode != "adaptive" && v.Mode != "capacity" && v.Mode != "share" && v.Mode != "failover" {
 			return SupplierFieldError("mode", "unsupported routing mode")
+		}
+		if err := ValidateSupplierAdaptiveRule(v); err != nil {
+			return err
 		}
 		if v.MaxAttempts < 1 || v.MaxAttempts > 10 {
 			return SupplierFieldError("max_attempts", "attempts must be 1..10")
