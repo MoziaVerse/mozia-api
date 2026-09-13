@@ -107,3 +107,38 @@ func TestSupplierRealtimeWindowAndComparableRanks(t *testing.T) {
 	}
 	assert.Equal(t, map[int64]int{1: 4, 2: 3, 3: 2, 4: 1, 5: 0, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1}, ranks)
 }
+
+func TestSupplierPerformancePassRatesDoNotGateAvailability(t *testing.T) {
+	client, _ := supplierRedisFixture(t)
+	ctx := context.Background()
+	oldClient := common.RDB
+	common.RDB = client
+	t.Cleanup(func() { common.RDB = oldClient })
+	candidates := []SupplierCandidate{{ChannelID: 1, PoolID: 1, SupplierID: 1, Tokens: 1, Measure: true, Streaming: true, PerformanceKey: "measured:1", OutputScope: "measured:output"}}
+	for i := 0; i < 20; i++ {
+		id := fmt.Sprintf("measured-%d", i)
+		require.NotNil(t, adaptiveAdmission(t, client, id, "acquire", candidates))
+		ttft := 1000
+		if i < 3 {
+			ttft = 20000
+		}
+		// 100 tokens/s including first-token wait; TTFT tails are the only violation.
+		raw, err := common.Marshal(map[string]any{"id": id, "release": true, "class": "success", "tokens": 3000, "output": 3000, "latency": 30000, "ttft": ttft})
+		require.NoError(t, err)
+		require.NoError(t, supplierAdmission.Run(ctx, client, []string{supplierRuntimeKey}, "finish", string(raw)).Err())
+	}
+	selected := adaptiveAdmission(t, client, "measured-decision", "acquire", candidates)
+	require.NotNil(t, selected)
+	assert.Equal(t, "normal", selected.HealthState)
+	assert.Equal(t, "slow", selected.PerformanceState)
+	supplierFinishForTest(t, client, "measured-decision", true, true, 0)
+	rows, _, err := ReadSupplierRealtime(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, float64(100), rows[0].SuccessRate)
+	assert.Equal(t, float64(85), rows[0].TTFTPassRate)
+	assert.Equal(t, float64(100), rows[0].ThroughputPassRate)
+	assert.Equal(t, float64(3850), rows[0].TTFTMs, "an acceptable mean must not hide three very slow requests")
+	assert.Equal(t, "normal", rows[0].State)
+	assert.Equal(t, "slow", rows[0].PerformanceState)
+}

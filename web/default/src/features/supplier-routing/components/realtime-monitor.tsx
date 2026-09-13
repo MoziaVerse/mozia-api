@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/table'
 
 import { getSupplierRealtime } from '../api'
+import { supplierRoutingReasonLabel } from '../lib/config-schema'
 
 export function SupplierRealtimeMonitor(props: {
   suppliers: Map<number, string>
@@ -66,6 +67,9 @@ export function SupplierRealtimeMonitor(props: {
     degraded: t('Degraded'),
     paused: t('Paused'),
     overloaded: t('Overloaded'),
+    qualified: t('Performance qualified'),
+    slow: t('Below performance target'),
+    unmeasured: t('Insufficient performance samples'),
   }
   return (
     <div className='space-y-4'>
@@ -85,7 +89,7 @@ export function SupplierRealtimeMonitor(props: {
         </p>
         <p className='text-muted-foreground mt-2'>
           {t(
-            'Success rate includes provider failures and HTTP 429 in its denominator. Speed metrics average successful measured calls. New and recovering pools may still be in trial even when their recent ranking is high.'
+            'The five-minute success rate includes HTTP 429. Availability excludes 429; the last routing decision may use up to one hour of evidence for low-volume pools. Performance pass rates measure each speed target separately. Decision details are snapshots, not a live traffic guarantee.'
           )}
         </p>
       </details>
@@ -174,7 +178,9 @@ export function SupplierRealtimeMonitor(props: {
                   t('Overload rate'),
                   t('Throughput (tokens/s)'),
                   t('TTFT (ms)'),
-                  t('Health'),
+                  t('Availability'),
+                  t('Performance'),
+                  t('Last routing decision'),
                 ].map((label) => (
                   <TableHead key={label}>{label}</TableHead>
                 ))}
@@ -224,11 +230,41 @@ export function SupplierRealtimeMonitor(props: {
                   </TableCell>
                   <TableCell>
                     {row.throughput_samples ? row.throughput.toFixed(1) : '—'}
+                    {row.throughput_samples > 0 && (
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Pass rate')}: {row.throughput_pass_rate.toFixed(1)}%
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     {row.ttft_samples ? Math.round(row.ttft_ms) : '—'}
+                    {row.ttft_samples > 0 && (
+                      <div className='text-muted-foreground text-xs'>
+                        {t('Pass rate')}: {row.ttft_pass_rate.toFixed(1)}%
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>{labels[row.state] || row.state}</TableCell>
+                  <TableCell>{labels[row.performance_state] || '—'}</TableCell>
+                  <TableCell>
+                    {row.routing_reason
+                      ? t(supplierRoutingReasonLabel(row.routing_reason))
+                      : '—'}
+                    {row.decision_at > 0 && (
+                      <div className='text-muted-foreground text-xs'>
+                        {new Date(row.decision_at * 1000).toLocaleTimeString()}
+                        {' · '}
+                        {t(
+                          'Evidence: {{minutes}} min, {{samples}} calls, {{rate}}% availability',
+                          {
+                            minutes: row.observation_minutes,
+                            samples: row.availability_samples,
+                            rate: row.availability_rate.toFixed(1),
+                          }
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

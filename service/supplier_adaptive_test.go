@@ -43,7 +43,7 @@ func TestAdaptiveCostRoutingCapacityAndPreview(t *testing.T) {
 		pool.Limits = model.SupplierLimits{}
 		runtime.Pools[id] = pool
 		require.NoError(t, client.HSet(ctx, "performance:"+id, "state", "normal").Err())
-		require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:%s:g0:%d", id, now.Unix()/60), "success", 20, "ttft", 20000, "ttft_n", 20, "tps", 2000, "tps_n", 20).Err())
+		require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:%s:g0:%d", id, now.Unix()/60), "success", 20, "ttft", 20000, "ttft_n", 20, "ttft_pass", 20, "tps", 2000, "tps_n", 20, "tps_pass", 20).Err())
 	}
 	runtime.Bindings["11:test"] = 1
 	runtime.Bindings["12:test"] = 1
@@ -69,10 +69,10 @@ func TestAdaptiveCostRoutingCapacityAndPreview(t *testing.T) {
 		supplierFinishForTest(t, client, id, false, true, 20)
 	}
 	assert.Equal(t, map[int]int{1: 8, 2: 4, 11: 8}, counts, "inverse-square pool weights ignore channel priority and duplicates; cheapest tied channels rotate evenly")
-	// Speed is a gate: a cheaper but slow candidate cannot displace a healthy one.
-	require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:1:g0:%d", now.Unix()/60), "tps", 20).Err())
+	// Qualified pools receive the majority; slow pools retain a separate positive share.
+	require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:1:g0:%d", now.Unix()/60), "tps", 20, "tps_pass", 0).Err())
 	assert.Equal(t, 2, adaptiveAdmission(t, client, "slow", "preview", candidates).ChannelID)
-	require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:1:g0:%d", now.Unix()/60), "tps", 2000).Err())
+	require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:1:g0:%d", now.Unix()/60), "tps", 2000, "tps_pass", 20).Err())
 	// A declared cap still wins over lower cost; undeclared dimensions remain usable.
 	pool := runtime.Pools["1"]
 	pool.Limits.RPM = 20
@@ -117,7 +117,7 @@ func TestAdaptiveColdStartOverloadAndZeroPrice(t *testing.T) {
 	supplierFinishForTest(t, client, "recovered", true, true, 0)
 	now, err := client.Time(ctx).Result()
 	require.NoError(t, err)
-	require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:cold:g1:%d", now.Unix()/60), "success", 20, "tps", 1000, "tps_n", 20).Err())
+	require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:cold:g0:%d", now.Unix()/60), "success", 20, "tps", 1000, "tps_n", 20, "tps_pass", 20).Err())
 	assert.Equal(t, "normal", adaptiveAdmission(t, client, "zero", "acquire", candidates).HealthState)
 }
 
@@ -144,7 +144,7 @@ func TestAdaptiveSelfHostedPreferenceRespectsHealthAndCapacity(t *testing.T) {
 			now, err := client.Time(ctx).Result()
 			require.NoError(t, err)
 			for _, id := range []int{1, 2} {
-				require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:%d:g0:%d", id, now.Unix()/60), "success", 20, "tps", 2000, "tps_n", 20).Err())
+				require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:%d:g0:%d", id, now.Unix()/60), "success", 20, "tps", 2000, "tps_n", 20, "tps_pass", 20).Err())
 			}
 			candidates := []SupplierCandidate{
 				{ChannelID: 1, PoolID: 1, SupplierID: 1, Tokens: 1, Cost: tc.thirdCost, Currency: "USD", PerformanceKey: "performance:1"},
@@ -156,7 +156,7 @@ func TestAdaptiveSelfHostedPreferenceRespectsHealthAndCapacity(t *testing.T) {
 				candidates[1].PerformanceKey = "performance:1"
 			}
 			if tc.slow {
-				require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:2:g0:%d", now.Unix()/60), "tps", 20).Err())
+				require.NoError(t, client.HSet(ctx, fmt.Sprintf("performance:2:g0:%d", now.Unix()/60), "tps", 20, "tps_pass", 0).Err())
 			}
 			if tc.cooldown {
 				require.NoError(t, client.HSet(ctx, "performance:2", "state", "paused", "until", now.UnixMilli()+60000).Err())
@@ -210,6 +210,7 @@ func TestAdaptivePricePublicationAndOptionalPoolLimits(t *testing.T) {
 	runtime, err := ReadSupplierRuntime(context.Background())
 	require.NoError(t, err)
 	require.Len(t, runtime.Config.Prices, 2)
+	assert.Equal(t, rule.Health, runtime.Config.Rules[0].Health)
 	assert.Equal(t, float64(2), runtime.Config.Prices[0].Config.Items["output"])
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -304,7 +305,7 @@ func TestAdaptiveTrialsAreSharedAndFaultsRecover(t *testing.T) {
 	require.NoError(t, err)
 	key := "performance:healthy"
 	bucket := fmt.Sprintf("%s:g0:%d", key, now.Unix()/60)
-	require.NoError(t, client.HSet(ctx, bucket, "success", 20, "tps", 2000, "tps_n", 20).Err())
+	require.NoError(t, client.HSet(ctx, bucket, "success", 20, "tps", 2000, "tps_n", 20, "tps_pass", 20).Err())
 	candidates := []SupplierCandidate{
 		{ChannelID: 1, PoolID: 1, SupplierID: 1, Cost: 1, Tokens: 1, PerformanceKey: key},
 		{ChannelID: 2, PoolID: 2, SupplierID: 2, Cost: 0, SelfHosted: true, Tokens: 1, PerformanceKey: "performance:new-2"},
@@ -376,4 +377,128 @@ func TestAdaptiveOutcomeAttribution(t *testing.T) {
 			assert.Equal(t, tc.class, state.Current.OutcomeClass)
 		})
 	}
+}
+
+func TestAdaptivePerformanceSharesAndAvailabilityPrecedence(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		firstTPS, secondTPS      int
+		firstTTFT, firstTTFTPass int
+		secondFailures           int
+		firstSelfHosted          bool
+		calls                    int
+		want                     map[int64]int
+	}{
+		{name: "slow self-hosted keeps ten percent", firstTPS: 1, secondTPS: 100, firstSelfHosted: true, calls: 20, want: map[int64]int{1: 2, 2: 18}},
+		{name: "all slow favors performance over zero cost", firstTPS: 1, secondTPS: 5, firstSelfHosted: true, calls: 60, want: map[int64]int{1: 10, 2: 50}},
+		{name: "reliable slow beats unreliable fast", firstTPS: 1, secondTPS: 100, secondFailures: 2, calls: 20, want: map[int64]int{1: 20}},
+		{name: "tail latency fails despite qualified average", firstTPS: 100, secondTPS: 100, firstTTFT: 4800, firstTTFTPass: 16, calls: 20, want: map[int64]int{1: 2, 2: 18}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, _ := supplierRedisFixture(t)
+			ctx := context.Background()
+			now, err := client.Time(ctx).Result()
+			require.NoError(t, err)
+			candidates := []SupplierCandidate{
+				{ChannelID: 1, PoolID: 1, SupplierID: 1, Cost: 0, SelfHosted: tc.firstSelfHosted, Tokens: 1, PerformanceKey: "soft:1", Streaming: tc.firstTTFT > 0},
+				{ChannelID: 2, PoolID: 2, SupplierID: 2, Cost: 100, Tokens: 1, PerformanceKey: "soft:2", Streaming: tc.firstTTFT > 0},
+			}
+			for i, tps := range []int{tc.firstTPS, tc.secondTPS} {
+				passed := 0
+				if tps >= 10 {
+					passed = 20
+				}
+				failure, ttft, ttftPass := 0, 1000, 20
+				if i == 1 {
+					failure = tc.secondFailures
+				}
+				if i == 0 && tc.firstTTFT > 0 {
+					ttft, ttftPass = tc.firstTTFT, tc.firstTTFTPass
+				}
+				require.NoError(t, client.HSet(ctx, fmt.Sprintf("soft:%d:g0:%d", i+1, now.Unix()/60-1), "success", 20, "failure", failure, "tps", tps*20, "tps_n", 20, "tps_pass", passed, "ttft", ttft*20, "ttft_n", 20, "ttft_pass", ttftPass).Err())
+			}
+			counts := map[int64]int{}
+			for i := 0; i < tc.calls; i++ {
+				id := fmt.Sprintf("soft-%d", i)
+				selected := adaptiveAdmission(t, client, id, "acquire", candidates)
+				require.NotNil(t, selected)
+				assert.Equal(t, "normal", selected.HealthState, "speed alone cannot degrade availability")
+				counts[selected.PoolID]++
+				supplierFinishForTest(t, client, id, false, true, 1)
+			}
+			assert.Equal(t, tc.want, counts)
+		})
+	}
+}
+
+func TestAdaptiveLowVolumeEvidenceAndMissingSpeed(t *testing.T) {
+	client, _ := supplierRedisFixture(t)
+	ctx := context.Background()
+	now, err := client.Time(ctx).Result()
+	require.NoError(t, err)
+	candidates := []SupplierCandidate{{ChannelID: 1, PoolID: 1, SupplierID: 1, Cost: 1, Tokens: 1, PerformanceKey: "sparse:1", Measure: true}}
+	oldBucket := fmt.Sprintf("sparse:1:g0:%d", now.Unix()/60-15)
+	require.NoError(t, client.HSet(ctx, oldBucket, "success", 20).Err())
+	selected := adaptiveAdmission(t, client, "sparse", "acquire", candidates)
+	require.NotNil(t, selected)
+	assert.Equal(t, "normal", selected.HealthState, "low volume and missing usage must not force perpetual trial")
+	assert.Equal(t, "unmeasured", selected.PerformanceState)
+	assert.Equal(t, "performance_share", selected.RoutingReason)
+	oldClient := common.RDB
+	common.RDB = client
+	t.Cleanup(func() { common.RDB = oldClient })
+	rows, _, err := ReadSupplierRealtime(ctx)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, int64(20), rows[0].AvailabilitySamples)
+	assert.Equal(t, float64(100), rows[0].AvailabilityRate)
+	assert.Greater(t, rows[0].ObservationMinutes, int64(5))
+	assert.Equal(t, "unmeasured", rows[0].PerformanceState)
+	assert.Equal(t, "performance_share", rows[0].RoutingReason)
+	assert.Positive(t, rows[0].DecisionAt)
+	supplierFinishForTest(t, client, "sparse", true, true, 1)
+	require.NoError(t, client.Del(ctx, oldBucket).Err())
+	require.NoError(t, client.HSet(ctx, fmt.Sprintf("sparse:1:g0:%d", now.Unix()/60-61), "success", 1000).Err())
+	assert.Equal(t, "trial", adaptiveAdmission(t, client, "expired", "preview", candidates).HealthState)
+	// A recent complete window takes precedence over older good calls.
+	require.NoError(t, client.HSet(ctx, oldBucket, "success", 1000).Err())
+	require.NoError(t, client.HSet(ctx, fmt.Sprintf("sparse:1:g0:%d", now.Unix()/60-1), "success", 15, "failure", 5).Err())
+	assert.Nil(t, adaptiveAdmission(t, client, "recent-fault", "preview", candidates))
+}
+
+func TestAdaptiveOverloadBackoffPreservesEvidence(t *testing.T) {
+	client, _ := supplierRedisFixture(t)
+	ctx := context.Background()
+	now, err := client.Time(ctx).Result()
+	require.NoError(t, err)
+	key := "backoff:1"
+	require.NoError(t, client.HSet(ctx, fmt.Sprintf("%s:g0:%d", key, now.Unix()/60-1), "success", 20, "tps", 2000, "tps_n", 20, "tps_pass", 20).Err())
+	candidates := []SupplierCandidate{{ChannelID: 1, PoolID: 1, SupplierID: 1, Cost: 1, Tokens: 1, PerformanceKey: key, Measure: true}}
+	for i, seconds := range []int64{1, 2, 7} {
+		id := fmt.Sprintf("overload-%d", i)
+		require.NotNil(t, adaptiveAdmission(t, client, id, "acquire", candidates))
+		retryAfter := int64(0)
+		if i == 2 {
+			retryAfter = seconds
+		}
+		body, err := common.Marshal(map[string]any{"id": id, "class": "overload", "release": true, "tokens": -1, "retry_after": retryAfter})
+		require.NoError(t, err)
+		before, err := client.Time(ctx).Result()
+		require.NoError(t, err)
+		require.NoError(t, supplierAdmission.Run(ctx, client, []string{supplierRuntimeKey}, "finish", string(body)).Err())
+		after, err := client.Time(ctx).Result()
+		require.NoError(t, err)
+		until, err := client.HGet(ctx, key, "until").Int64()
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, until, before.UnixMilli()+seconds*1000)
+		assert.LessOrEqual(t, until, after.UnixMilli()+seconds*1000)
+		assert.False(t, client.HExists(ctx, key, "generation").Val(), "429 must not discard reliability evidence")
+		assert.Nil(t, adaptiveAdmission(t, client, id+"-paused", "preview", candidates))
+		require.NoError(t, client.HSet(ctx, key, "until", 0).Err())
+	}
+	selected := adaptiveAdmission(t, client, "backoff-success", "acquire", candidates)
+	require.NotNil(t, selected)
+	assert.Equal(t, "normal", selected.HealthState)
+	supplierFinishForTest(t, client, "backoff-success", false, true, 1)
+	assert.Equal(t, "0", client.HGet(ctx, key, "overloads").Val())
 }

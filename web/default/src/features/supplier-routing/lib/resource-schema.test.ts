@@ -83,6 +83,38 @@ test('an editor saves only its selected record and preserves explicit false, zer
     contact: '',
   })
   assert.equal(data.config.suppliers?.[1].name, 'B')
+  const rule = {
+    ...newSupplierRule('saved-rule', 1, 'test'),
+    version: 1,
+    runtime_revision: 3,
+  }
+  delete rule.health.performance_pass_percent
+  delete rule.health.slow_traffic_percent
+  const original = JSON.stringify(rule)
+  const draft = supplierResourceFormValues(data, 'rule', rule)
+  assert.equal(draft.rules[0].health.performance_pass_percent, 90)
+  assert.equal(draft.rules[0].health.slow_traffic_percent, 10)
+  draft.rules[0].health.slow_traffic_percent = 7
+  assert.equal(
+    JSON.stringify(rule),
+    original,
+    'opening and editing a rule cannot mutate the query cache'
+  )
+  const saved = parseSupplierResourceJSON(
+    'rule',
+    JSON.stringify(supplierFormResource('rule', draft))
+  )
+  assert.equal(
+    (saved.health as { slow_traffic_percent: number }).slow_traffic_percent,
+    7
+  )
+  draft.rules[0].health.slow_traffic_percent = 50
+  assert.throws(() =>
+    parseSupplierResourceJSON(
+      'rule',
+      JSON.stringify(supplierFormResource('rule', draft))
+    )
+  )
   assert.deepEqual(
     editableSupplierResource('settings', {
       version: 7,

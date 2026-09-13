@@ -18,7 +18,7 @@ func SupplierSelfHostedPrice(channelID int, model string) ChannelCostPricing {
 }
 
 func DefaultSupplierAdaptiveHealth() SupplierHealthPolicy {
-	return SupplierHealthPolicy{WindowSeconds: 300, MinSamples: 20, FailurePercent: 20, SuccessPercent: 95, MaxTTFTMs: 5000, MinThroughput: 10, CooldownSeconds: 30, TrialPercent: 5, TrialConcurrency: 1, ReferenceOutputTokens: 512}
+	return SupplierHealthPolicy{WindowSeconds: 300, MinSamples: 20, FailurePercent: 20, SuccessPercent: 95, MaxTTFTMs: 5000, MinThroughput: 10, PerformancePassPercent: 90, SlowTrafficPercent: 10, CooldownSeconds: 30, TrialPercent: 5, TrialConcurrency: 1, ReferenceOutputTokens: 512}
 }
 
 func ValidateSupplierAdaptiveRule(r *SupplierRoutingRule) error {
@@ -34,6 +34,13 @@ func ValidateSupplierAdaptiveRule(r *SupplierRoutingRule) error {
 		}
 	}
 	h := r.Health
+	// Zero keeps existing rules compatible: omitted fields use 90% / 10% at runtime.
+	if h.PerformancePassPercent < 0 || h.PerformancePassPercent > 100 {
+		return SupplierFieldError("health.performance_pass_percent", "performance pass percentage must be 1..100, or zero for default 90")
+	}
+	if h.SlowTrafficPercent < 0 || h.SlowTrafficPercent >= 50 {
+		return SupplierFieldError("health.slow_traffic_percent", "slow traffic percentage must be 1..49, or zero for default 10")
+	}
 	if h.WindowSeconds != 300 {
 		return SupplierFieldError("health.window_seconds", "adaptive metrics use a five-minute window")
 	}

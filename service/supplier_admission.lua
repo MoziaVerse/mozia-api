@@ -24,54 +24,79 @@ local function limitsState(key)
 end
 
 
--- ponytail: five minute buckets bound Redis work per candidate; use histograms
--- only if request-length cohorts and tail-latency routing become necessary.
-local function performanceMetrics(key, generation)
-    local m = {success=0, failure=0, overload=0, ttft=0, ttft_n=0, tps=0, tps_n=0}
+-- ponytail: at most 60 buckets per unique pool/rule at low volume; maintain rolling
+-- aggregates if this Redis work becomes material. Five-minute evidence wins when sufficient.
+local metricCache = {}
+local function performanceMetrics(key, generation, minimum)
+    local cacheKey = key .. ':g' .. generation
+    if metricCache[cacheKey] then return metricCache[cacheKey] end
+    local m = {success=0, failure=0, overload=0, ttft=0, ttft_n=0, ttft_pass=0, tps=0, tps_n=0, tps_pass=0}
     local minute = math.floor(now / 60000)
-    for i = 0, 4 do
-        local values = redis.call('HGETALL', key .. ':g' .. generation .. ':' .. (minute-i))
+    for i = 0, 59 do
+        local values = redis.call('HGETALL', cacheKey .. ':' .. (minute-i))
         for j=1,#values,2 do
             if m[values[j]] ~= nil then m[values[j]] = m[values[j]] + tonumber(values[j+1]) end
         end
+        m.samples = m.success + m.failure
+        m.window_minutes = i + 1
+        if i >= 4 and m.samples >= minimum then break end
     end
-    m.samples = m.success + m.failure
+    metricCache[cacheKey] = m
     return m
 end
 
-local function performanceTier(c, h)
+local function availabilityTier(c, h)
     local key = c.performance_key
-    local state = redis.call('HGET', key, 'state') or 'trial'
     if tonumber(redis.call('HGET', key, 'until') or '0') > now then return nil end
     c.performance_generation = tonumber(redis.call('HGET', key, 'generation') or '0')
-    local m = performanceMetrics(key, c.performance_generation)
-    if m.samples < h.min_samples or m.tps_n < h.min_samples or (c.streaming and m.ttft_n < h.min_samples) then return 2 end
+    local m = performanceMetrics(key, c.performance_generation, h.min_samples)
+    c.observation_minutes = m.window_minutes
+    c.availability_samples = m.samples
+    c.availability_rate = m.samples > 0 and m.success * 100/m.samples or 0
+    c.performance_state = 'unmeasured'
+    c.performance_factor = 0.5
+    if m.tps_n >= h.min_samples and (not c.streaming or m.ttft_n >= h.min_samples) then
+        local target = (h.performance_pass_percent or 90) / 100
+        local pass = m.tps_pass/m.tps_n
+        local factor = math.min(1, (m.tps/m.tps_n)/h.min_throughput)
+        if c.streaming then
+            pass = math.min(pass, m.ttft_pass/m.ttft_n)
+            factor = math.min(factor, h.max_ttft_ms/math.max(1, m.ttft/m.ttft_n))
+        end
+        c.performance_state = pass >= target and 'qualified' or 'slow'
+        -- A positive closeness weight keeps every slow pool eligible, including
+        -- when all pools miss the target. Procurement cannot overpower this fallback.
+        c.performance_factor = math.max(0.01, factor * (1 + pass)/2)
+    end
+    if m.samples < h.min_samples then return 2 end
     if m.failure * 100 >= m.samples * h.failure_percent then return nil end
-    if m.success * 100 < m.samples * h.success_percent or m.tps/m.tps_n < h.min_throughput or (c.streaming and m.ttft/m.ttft_n > h.max_ttft_ms) then return 1 end
-    if state == 'degraded' and tonumber(redis.call('HGET', key, 'good_periods') or '0') < 2 then return 1 end
+    if c.availability_rate < h.success_percent then return 1 end
+    if redis.call('HGET', key, 'state') == 'degraded' and tonumber(redis.call('HGET', key, 'good_periods') or '0') < 2 then return 1 end
     return 0
 end
 
-local function recordPerformance(bucket)
+local function recordPerformance(bucket, h, ttl)
     redis.call('HINCRBY', bucket, input.class, 1)
     if input.class == 'success' then
         if input.ttft > 0 then
             redis.call('HINCRBYFLOAT', bucket, 'ttft', input.ttft)
             redis.call('HINCRBY', bucket, 'ttft_n', 1)
+            if input.ttft <= h.max_ttft_ms then redis.call('HINCRBY', bucket, 'ttft_pass', 1) end
         end
         if input.tokens >= 0 and (input.latency or 0) > 0 then
             redis.call('HINCRBYFLOAT', bucket, 'tps', input.output * 1000/input.latency)
             redis.call('HINCRBY', bucket, 'tps_n', 1)
+            if input.output * 1000/input.latency >= (h.min_throughput or 0) then redis.call('HINCRBY', bucket, 'tps_pass', 1) end
         end
     end
-    redis.call('EXPIRE', bucket, 360)
+    redis.call('EXPIRE', bucket, ttl)
 end
 
 local function finishPerformance(a)
     if not a.performance_key or not a.measure or input.cancel or (input.class ~= 'success' and input.class ~= 'failure' and input.class ~= 'overload') then return end
     local key = a.performance_key
     local loadKey = key .. ':load:' .. math.floor(now/60000)
-    recordPerformance(loadKey)
+    recordPerformance(loadKey, a.health, 360)
     redis.call('ZADD', prefix .. 'live', now, key)
     redis.call('ZREMRANGEBYSCORE', prefix .. 'live', '-inf', now-300000)
     redis.call('EXPIRE', prefix .. 'live', 360)
@@ -79,9 +104,10 @@ local function finishPerformance(a)
     if generation ~= (a.performance_generation or 0) then return end
     local minute = math.floor(now / 60000)
     local bucket = key .. ':g' .. generation .. ':' .. minute
-    recordPerformance(bucket)
+    recordPerformance(bucket, a.health, 3660)
     if input.class == 'success' then
         redis.call('HSET', key, 'consecutive_failures', 0)
+        if now >= tonumber(redis.call('HGET', key, 'until') or '0') then redis.call('HSET', key, 'overloads', 0) end
         if input.tokens >= 0 and (input.latency or 0) > 0 then
             local outputKey = a.output_scope .. ':' .. minute
             redis.call('HINCRBY', outputKey, 'output', input.output)
@@ -93,25 +119,32 @@ local function finishPerformance(a)
     redis.call('EXPIRE', key, 86400)
     if not a.adaptive then return end
     local h = a.health
-    local m = performanceMetrics(key, generation)
+    local m = performanceMetrics(key, generation, h.min_samples)
     local consecutive = tonumber(redis.call('HGET', key, 'consecutive_failures') or '0')
     if input.class == 'failure' then consecutive = redis.call('HINCRBY', key, 'consecutive_failures', 1) end
-    if input.class == 'overload' or consecutive >= 3 or (m.samples >= h.min_samples and m.failure*100 >= m.samples*h.failure_percent) then
-        local delay = h.cooldown_seconds
-        local state = 'paused'
-        if input.class == 'overload' then state = 'overloaded'; delay = math.max(delay, math.min(86400, input.retry_after or 0)) end
-        redis.call('HSET', key, 'state', state, 'until', now+delay*1000, 'consecutive_failures', 0, 'good_periods', 0)
+    if input.class == 'overload' then
+        local count = redis.call('HINCRBY', key, 'overloads', 1)
+        local delay = math.min(h.cooldown_seconds, 2^math.min(12, count-1))
+        if (input.retry_after or 0) > 0 then delay = math.min(86400, input.retry_after) end
+        local untilTime = math.max(now+delay*1000, tonumber(redis.call('HGET', key, 'until') or '0'))
+        -- Overload is temporary: preserve availability evidence and fault generations.
+        redis.call('HSET', key, 'state', 'overloaded', 'until', untilTime)
+        return
+    end
+    if consecutive >= 3 or (m.samples >= h.min_samples and m.failure*100 >= m.samples*h.failure_percent) then
+        redis.call('HSET', key, 'state', 'paused', 'until', now+h.cooldown_seconds*1000, 'consecutive_failures', 0, 'good_periods', 0)
         redis.call('HINCRBY', key, 'generation', 1)
         return
     end
-    local tier = performanceTier(a, h)
+    local tier = availabilityTier(a, h)
+    if tier == nil then return end -- Late completions must not reopen an active cooldown.
     if tier == 2 then redis.call('HSET', key, 'state', 'trial'); return end
-    local good = m.samples >= h.min_samples and m.success*100 >= m.samples*h.success_percent and m.tps_n >= h.min_samples and m.tps/m.tps_n >= h.min_throughput and (not a.streaming or (m.ttft_n >= h.min_samples and m.ttft/m.ttft_n <= h.max_ttft_ms))
+    local good = a.availability_rate >= h.success_percent
     if not good then redis.call('HSET', key, 'state', 'degraded', 'good_periods', 0); return end
     if redis.call('HGET', key, 'state') == 'degraded' then
         local prior = tonumber(redis.call('HGET', key, 'good_minute') or '0')
         if prior ~= minute then
-            local count = prior == minute-1 and tonumber(redis.call('HGET', key, 'good_periods') or '0')+1 or 1
+            local count = tonumber(redis.call('HGET', key, 'good_periods') or '0')+1
             redis.call('HSET', key, 'good_minute', minute, 'good_periods', count)
             if count < 2 then return end
         elseif tonumber(redis.call('HGET', key, 'good_periods') or '0') < 2 then return end
@@ -213,7 +246,7 @@ for _, c in ipairs(input.candidates) do
         c.adaptive = adaptive
         if c.performance_key then c.performance_generation = tonumber(redis.call('HGET', c.performance_key, 'generation') or '0') end
         if adaptive then
-            c.tier = performanceTier(c, input.health)
+            c.tier = availabilityTier(c, input.health)
             fits = fits and c.tier ~= nil
             if c.tier == 2 then
                 c.trial_key = prefix .. 'trial:' .. c.pool_id
@@ -289,7 +322,22 @@ if adaptive then
     for sid, c in pairs(suppliers) do
         if (explore and c.tier ~= 2) or (not explore and c.tier ~= bestTier) then suppliers[sid] = nil end
     end
-    if explore then scheduleKey = scheduleKey .. ':trial' end
+    scheduleKey = scheduleKey .. (explore and ':trial' or ':availability-' .. bestTier)
+end
+local slowLane = false
+local performanceKey = scheduleKey .. ':performance'
+local hasQualified, hasSlow = false, false
+if adaptive and not explore then
+    for _, c in pairs(suppliers) do
+        if c.performance_state == 'qualified' then hasQualified = true else hasSlow = true end
+    end
+    local slowPercent = input.health.slow_traffic_percent or 10
+    local step = tonumber(redis.call('GET', performanceKey) or '0')
+    slowLane = hasSlow and (not hasQualified or math.floor((step+1)*slowPercent/100) > math.floor(step*slowPercent/100))
+    for sid, c in pairs(suppliers) do
+        if (c.performance_state ~= 'qualified') ~= slowLane then suppliers[sid] = nil end
+    end
+    scheduleKey = scheduleKey .. (slowLane and ':slow' or ':qualified')
 end
 local minimumCost = nil
 local hasSelfHosted = false
@@ -307,9 +355,10 @@ for sid, c in pairs(suppliers) do
     local weight = math.max(1, math.floor(c.weight * c.scale / 100))
     if adaptive then
         weight = 1
-        if not explore and minimumCost > 0 then weight = math.max(1, math.floor(1000*(minimumCost/c.cost)^2+0.5)) end
-        if not explore and minimumCost == 0 and c.cost > 0 then weight = 0 end
-        if not explore and hasSelfHosted and not c.self_hosted then weight = 0 end
+        if not explore and not slowLane and minimumCost > 0 then weight = math.max(1, math.floor(1000*(minimumCost/c.cost)^2+0.5)) end
+        if not explore and not slowLane and minimumCost == 0 and c.cost > 0 then weight = 0 end
+        if not explore and not slowLane and hasSelfHosted and not c.self_hosted then weight = 0 end
+        if slowLane then weight = math.max(1, math.floor(1000*c.performance_factor+0.5)) end
     end
     if weight > 0 then
         c.routing_weight = weight
@@ -332,9 +381,13 @@ if adaptive then
     selected.currency = chosen.currency
     if op ~= 'preview' then redis.call('INCR', rotation); redis.call('EXPIRE', rotation, 7200) end
 end
+if adaptive then
+    selected.routing_reason = explore and 'trial' or (slowLane and 'performance_share' or 'cost')
+    if bestTier == 1 and not explore then selected.routing_reason = 'availability_fallback:' .. selected.routing_reason end
+end
 if op == 'preview' then return cjson.encode(selected) end
 if selected.measure and selected.performance_key then
-    redis.call('HSET', selected.performance_key, 'metadata', cjson.encode({pool_id=selected.pool_id, supplier_id=selected.supplier_id, model=input.model, model_version=selected.model_version, group_name=input.group, is_stream=selected.streaming, rule_id=selected.rule_id, min_samples=input.health.min_samples}))
+    redis.call('HSET', selected.performance_key, 'metadata', cjson.encode({pool_id=selected.pool_id, supplier_id=selected.supplier_id, model=input.model, model_version=selected.model_version, group_name=input.group, is_stream=selected.streaming, rule_id=selected.rule_id, min_samples=input.health.min_samples, performance_state=selected.performance_state, observation_minutes=selected.observation_minutes, availability_rate=selected.availability_rate, availability_samples=selected.availability_samples, routing_reason=selected.routing_reason, decision_at=selected.adaptive and math.floor(now/1000) or nil}))
     redis.call('EXPIRE', selected.performance_key, 86400)
     redis.call('ZADD', prefix .. 'live', now, selected.performance_key)
     redis.call('ZREMRANGEBYSCORE', prefix .. 'live', '-inf', now-300000)
@@ -343,6 +396,7 @@ end
 if adaptive then
     redis.call('INCR', explorationKey); redis.call('EXPIRE', explorationKey, 7200)
     redis.call('HSET', selected.performance_key, 'state', selected.health_state)
+    if not explore and hasQualified and hasSlow then redis.call('INCR', performanceKey); redis.call('EXPIRE', performanceKey, 7200) end
     if selected.trial_key then redis.call('ZADD', selected.trial_key, selected.expires, input.id); redis.call('EXPIRE', selected.trial_key, 86400) end
 end
 -- Expelled/recovering suppliers do not accumulate historical share debt.

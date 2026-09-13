@@ -37,26 +37,28 @@ type SupplierRuntime struct {
 }
 
 type SupplierCandidate struct {
-	SelfHosted     bool    `json:"self_hosted"`
-	ModelVersion   string  `json:"model_version"`
-	RuleID         string  `json:"rule_id"`
-	Cost           float64 `json:"cost"`
-	EstimatedCost  string  `json:"estimated_cost"`
-	PriceJSON      string  `json:"price_json"`
-	Currency       string  `json:"currency"`
-	PerformanceKey string  `json:"performance_key"`
-	OutputScope    string  `json:"output_scope"`
-	Measure        bool    `json:"measure"`
-	Streaming      bool    `json:"streaming"`
-	HealthState    string  `json:"health_state"`
-	RoutingWeight  int64   `json:"routing_weight"`
-	Expires        int64   `json:"expires"`
-	ChannelID      int     `json:"channel_id"`
-	PoolID         int64   `json:"pool_id"`
-	SupplierID     int64   `json:"supplier_id"`
-	Priority       int64   `json:"priority"`
-	Weight         int64   `json:"weight"`
-	Tokens         int64   `json:"tokens"`
+	SelfHosted       bool    `json:"self_hosted"`
+	ModelVersion     string  `json:"model_version"`
+	RuleID           string  `json:"rule_id"`
+	Cost             float64 `json:"cost"`
+	EstimatedCost    string  `json:"estimated_cost"`
+	PriceJSON        string  `json:"price_json"`
+	Currency         string  `json:"currency"`
+	PerformanceKey   string  `json:"performance_key"`
+	OutputScope      string  `json:"output_scope"`
+	Measure          bool    `json:"measure"`
+	Streaming        bool    `json:"streaming"`
+	HealthState      string  `json:"health_state"`
+	PerformanceState string  `json:"performance_state"`
+	RoutingReason    string  `json:"routing_reason"`
+	RoutingWeight    int64   `json:"routing_weight"`
+	Expires          int64   `json:"expires"`
+	ChannelID        int     `json:"channel_id"`
+	PoolID           int64   `json:"pool_id"`
+	SupplierID       int64   `json:"supplier_id"`
+	Priority         int64   `json:"priority"`
+	Weight           int64   `json:"weight"`
+	Tokens           int64   `json:"tokens"`
 }
 
 type SupplierRouteState struct {
@@ -353,6 +355,9 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 				candidate.ModelVersion = spec.Version
 				candidate.RuleID = s.Rule.ID
 				scope := fmt.Sprintf("%q:%q:%q:%t:%q", spec.Name, spec.Version, s.Group, info.IsStream, s.Rule.ID)
+				// Pass counts belong to the thresholds that measured them. Keep cost-only
+				// publications from resetting evidence, and never mix pre-upgrade averages.
+				scope += fmt.Sprintf(":v2:%d:%d", s.Rule.Health.MaxTTFTMs, s.Rule.Health.MinThroughput)
 				candidate.PerformanceKey = fmt.Sprintf("supplier-routing:performance:%d:%x", poolID, sha256.Sum256([]byte(scope)))
 			}
 		}
@@ -425,6 +430,9 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	if op == "preview" {
 		s.ShadowRecorded = true
 		observation := model.SupplierAttempt{RequestID: s.RequestID, Attempt: 0, SupplierID: selected.SupplierID, PoolID: selected.PoolID, ChannelID: selected.ChannelID, UserID: info.UserId, Model: info.OriginModelName, GroupName: s.Group, Revision: s.Runtime.Config.Revision, Reason: "shadow:" + s.Rule.Mode, Kind: "shadow", Status: "observed", CreatedAt: time.Now().Unix(), CostStatus: "not_applicable", EstimatedCost: selected.EstimatedCost, Currency: selected.Currency, RoutingWeight: selected.RoutingWeight, HealthState: selected.HealthState}
+		if adaptive {
+			observation.Reason += ":" + selected.RoutingReason
+		}
 		if err := model.DB.Create(&observation).Error; err != nil {
 			return nil, err
 		}
@@ -441,6 +449,9 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	s.ResponseError = false
 	s.RetryAfterSeconds = 0
 	reason := s.Rule.Mode
+	if adaptive {
+		reason += ":" + selected.RoutingReason
+	}
 	if s.Shadow {
 		reason = "shadow:legacy"
 	}

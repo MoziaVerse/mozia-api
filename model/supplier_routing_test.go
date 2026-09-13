@@ -185,3 +185,21 @@ func TestSupplierComparableProcurementQuotes(t *testing.T) {
 	cfg.Prices = cfg.Prices[:1]
 	require.NoError(t, ValidateSupplierRulePrices(&cfg, rule), "self-hosted-only rules need no quote")
 }
+
+func TestSupplierAdaptivePerformancePolicyValidation(t *testing.T) {
+	for _, tc := range []struct {
+		pass, slow int64
+		valid      bool
+	}{
+		{90, 10, true}, {0, 0, true}, {100, 49, true}, {101, 10, false}, {-1, 10, false}, {90, 50, false}, {90, -1, false},
+	} {
+		rule := SupplierRoutingRule{Mode: "adaptive", Health: DefaultSupplierAdaptiveHealth()}
+		rule.Health.PerformancePassPercent, rule.Health.SlowTrafficPercent = tc.pass, tc.slow
+		err := ValidateSupplierAdaptiveRule(&rule)
+		if tc.valid {
+			require.NoError(t, err)
+		} else {
+			assert.Error(t, err)
+		}
+	}
+}

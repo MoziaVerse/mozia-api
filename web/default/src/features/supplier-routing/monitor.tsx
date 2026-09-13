@@ -57,6 +57,7 @@ import {
 } from './api'
 import { SupplierRealtimeMonitor } from './components/realtime-monitor'
 import { SupplierReconciliation } from './components/reconciliation'
+import { supplierRoutingReasonLabel } from './lib/config-schema'
 
 export function SupplierMonitor() {
   const { t } = useTranslation()
@@ -603,9 +604,9 @@ export function SupplierMonitor() {
                                   {labels[attempt.kind] || attempt.kind}
                                 </TableCell>
                                 <TableCell>
-                                  {attempt.reason === 'adaptive'
-                                    ? t('Experience qualified, cost first')
-                                    : attempt.reason}
+                                  {t(
+                                    supplierRoutingReasonLabel(attempt.reason)
+                                  )}
                                   {attempt.health_state && (
                                     <div className='text-muted-foreground text-xs'>
                                       {labels[attempt.health_state] ||

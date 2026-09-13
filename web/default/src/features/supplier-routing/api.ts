@@ -143,6 +143,14 @@ export type SupplierRealtimeRow = {
   ttft_ms: number
   ttft_samples: number
   state: string
+  performance_state: string
+  observation_minutes: number
+  availability_rate: number
+  availability_samples: number
+  routing_reason: string
+  decision_at: number
+  throughput_pass_rate: number
+  ttft_pass_rate: number
 }
 export type SupplierRealtime = {
   available: boolean

@@ -98,6 +98,8 @@ export const supplierConfigSchema = z.object({
         timeout_seconds: z.number().int().min(1).max(3600),
         max_supplier_percent: z.number().int().min(0).max(100).optional(),
         health: z.object({
+          performance_pass_percent: z.number().int().min(0).max(100).optional(),
+          slow_traffic_percent: z.number().int().min(0).max(49).optional(),
           success_percent: z.number().int().min(1).max(100).optional(),
           min_throughput: z.number().int().min(1).max(100000).optional(),
           reference_output_tokens: z
@@ -151,6 +153,8 @@ export function newSupplierRule(
     timeout_seconds: 120,
     max_supplier_percent: 0,
     health: {
+      performance_pass_percent: 90,
+      slow_traffic_percent: 10,
       success_percent: 95,
       min_throughput: 10,
       reference_output_tokens: 512,
@@ -172,4 +176,17 @@ export function supplierRoutingMode(
   if (config.shadow || config.canary_percent === 0) return 'observe'
   if (config.canary_percent === 100) return 'active'
   return 'canary'
+}
+
+export function supplierRoutingReasonLabel(reason: string) {
+  const labels: Record<string, string> = {
+    adaptive: 'Experience qualified, cost first',
+    cost: 'Qualified pool, procurement priority',
+    performance_share: 'Performance-weighted traffic',
+    trial: 'Limited trial traffic',
+    'availability_fallback:cost': 'Availability fallback, procurement priority',
+    'availability_fallback:performance_share':
+      'Availability fallback, performance weighted',
+  }
+  return labels[reason.replace(/^(shadow:)?adaptive:/, '')] ?? reason
 }

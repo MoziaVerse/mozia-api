@@ -80,16 +80,18 @@ type SupplierTarget struct {
 }
 
 type SupplierHealthPolicy struct {
-	SuccessPercent        int64 `json:"success_percent,omitempty"`
-	MinThroughput         int64 `json:"min_throughput,omitempty"`
-	ReferenceOutputTokens int64 `json:"reference_output_tokens,omitempty"`
-	TrialConcurrency      int64 `json:"trial_concurrency,omitempty"`
-	WindowSeconds         int64 `json:"window_seconds"`
-	MinSamples            int64 `json:"min_samples"`
-	FailurePercent        int64 `json:"failure_percent"`
-	MaxTTFTMs             int64 `json:"max_ttft_ms"`
-	CooldownSeconds       int64 `json:"cooldown_seconds"`
-	TrialPercent          int64 `json:"trial_percent"`
+	PerformancePassPercent int64 `json:"performance_pass_percent,omitempty"`
+	SlowTrafficPercent     int64 `json:"slow_traffic_percent,omitempty"`
+	SuccessPercent         int64 `json:"success_percent,omitempty"`
+	MinThroughput          int64 `json:"min_throughput,omitempty"`
+	ReferenceOutputTokens  int64 `json:"reference_output_tokens,omitempty"`
+	TrialConcurrency       int64 `json:"trial_concurrency,omitempty"`
+	WindowSeconds          int64 `json:"window_seconds"`
+	MinSamples             int64 `json:"min_samples"`
+	FailurePercent         int64 `json:"failure_percent"`
+	MaxTTFTMs              int64 `json:"max_ttft_ms"`
+	CooldownSeconds        int64 `json:"cooldown_seconds"`
+	TrialPercent           int64 `json:"trial_percent"`
 }
 
 type SupplierRoutingRule struct {

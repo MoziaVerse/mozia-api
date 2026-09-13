@@ -130,14 +130,22 @@ export function supplierResourceFormValues(
     }
   }
   if (kind === 'rule') {
+    const rule = resource
+      ? (resource as unknown as SupplierConfigValues['rules'][number])
+      : newSupplierRule(
+          'new',
+          values.suppliers[0]?.id ?? 0,
+          values.bindings[0]?.model ?? ''
+        )
     values.rules = [
-      resource
-        ? (resource as unknown as SupplierConfigValues['rules'][number])
-        : newSupplierRule(
-            'new',
-            values.suppliers[0]?.id ?? 0,
-            values.bindings[0]?.model ?? ''
-          ),
+      {
+        ...rule,
+        health: {
+          ...rule.health,
+          performance_pass_percent: rule.health.performance_pass_percent || 90,
+          slow_traffic_percent: rule.health.slow_traffic_percent || 10,
+        },
+      },
     ]
   }
   if (kind === 'settings') {

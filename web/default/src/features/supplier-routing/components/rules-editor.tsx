@@ -131,7 +131,7 @@ export function RuleFields(props: { index: number }) {
   const adaptive = rules[i]?.mode === 'adaptive'
   const descriptions = {
     adaptive: t(
-      'Prefer lower procurement costs among healthy pools meeting latency and throughput requirements. Customer prices stay unchanged.'
+      'Availability determines primary and backup pools. Performance changes traffic shares, never excludes a pool. Procurement costs decide distribution among qualified pools; customer prices stay unchanged.'
     ),
     capacity: t(
       'Prefer pools with lower shared capacity usage within the eligible priority tier.'
@@ -168,7 +168,10 @@ export function RuleFields(props: { index: number }) {
         name={`rules.${i}.mode`}
         label={t('Routing strategy')}
         options={[
-          { value: 'adaptive', label: t('Experience qualified, cost first') },
+          {
+            value: 'adaptive',
+            label: t('Availability first, performance weighted, cost aware'),
+          },
           { value: 'capacity', label: t('Capacity balancing') },
           { value: 'share', label: t('Supplier target shares') },
           { value: 'failover', label: t('Primary and backup') },
@@ -195,7 +198,7 @@ export function RuleFields(props: { index: number }) {
       {adaptive && (
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Self-hosted channels need no quote and have the lowest routing cost within the same health tier. Other channels require complete procurement quotes in one currency. Trial traffic and capacity limits still apply.'
+            'Qualified self-hosted pools take cost priority. Slow pools retain traffic even when self-hosted alternatives exist. Other channels need complete quotes in one currency. Capacity limits still apply.'
           )}{' '}
           <Link
             to='/system-settings/billing/$section'
@@ -209,8 +212,8 @@ export function RuleFields(props: { index: number }) {
       <RuleTargets index={i} />
       {adaptive && (
         <FieldSet>
-          <FieldLegend>{t('Experience requirements')}</FieldLegend>
-          <div className='grid gap-4 sm:grid-cols-3'>
+          <FieldLegend>{t('Availability requirements')}</FieldLegend>
+          <div className='grid gap-4 sm:grid-cols-2'>
             <ConfigField
               name={`rules.${i}.health.success_percent`}
               type='number'
@@ -218,6 +221,18 @@ export function RuleFields(props: { index: number }) {
               max={100}
               label={t('Minimum success rate (%)')}
             />
+          </div>
+        </FieldSet>
+      )}
+      {adaptive && (
+        <FieldSet>
+          <FieldLegend>{t('Performance targets')}</FieldLegend>
+          <p className='text-muted-foreground text-sm'>
+            {t(
+              'Set targets for this platform model; all candidate suppliers use the same targets. Calibrate them with representative requests.'
+            )}
+          </p>
+          <div className='grid gap-4 sm:grid-cols-2'>
             <ConfigField
               name={`rules.${i}.health.max_ttft_ms`}
               type='number'
@@ -231,10 +246,24 @@ export function RuleFields(props: { index: number }) {
               max={100000}
               label={t('Minimum effective throughput (tokens/s)')}
             />
+            <ConfigField
+              name={`rules.${i}.health.performance_pass_percent`}
+              type='number'
+              min={1}
+              max={100}
+              label={t('Required performance pass rate (%)')}
+            />
+            <ConfigField
+              name={`rules.${i}.health.slow_traffic_percent`}
+              type='number'
+              min={1}
+              max={49}
+              label={t('Traffic for slow pools (%)')}
+            />
           </div>
           <p className='text-muted-foreground text-sm'>
             {t(
-              'Metrics use recent five-minute averages. Slow services are fallbacks; new or unmeasured pools receive limited trial traffic.'
+              'By default, 90% of measured requests must meet each speed target. Within the selected availability tier, slow or unmeasured pools share 10% of non-trial traffic. If none qualify, traffic favors pools closer to the targets. Slow pools are never blocked for speed alone.'
             )}
           </p>
         </FieldSet>
@@ -268,6 +297,13 @@ export function RuleFields(props: { index: number }) {
           />
         )}
       </div>
+      {adaptive && (
+        <p className='text-muted-foreground text-sm'>
+          {t(
+            'Use five-minute evidence first; low-volume pools may accumulate up to one hour. New pools share trial traffic. HTTP 429 uses separate exponential backoff from one second, respecting Retry-After. Failures keep their own circuit breaker.'
+          )}
+        </p>
+      )}
       <details>
         <summary className='cursor-pointer text-sm font-medium'>
           {t('Health and recovery thresholds')}

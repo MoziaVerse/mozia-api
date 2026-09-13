@@ -12,24 +12,32 @@ import (
 )
 
 type SupplierRealtimeRow struct {
-	Scope             string  `json:"scope"`
-	SupplierID        int64   `json:"supplier_id"`
-	PoolID            int64   `json:"pool_id"`
-	Model             string  `json:"model"`
-	ModelVersion      string  `json:"model_version"`
-	GroupName         string  `json:"group_name"`
-	IsStream          bool    `json:"is_stream"`
-	RuleID            string  `json:"rule_id"`
-	MinSamples        int64   `json:"min_samples"`
-	Rank              int     `json:"rank"`
-	Samples           int64   `json:"samples"`
-	SuccessRate       float64 `json:"success_rate"`
-	OverloadRate      float64 `json:"overload_rate"`
-	Throughput        float64 `json:"throughput"`
-	ThroughputSamples int64   `json:"throughput_samples"`
-	TTFTMs            float64 `json:"ttft_ms"`
-	TTFTSamples       int64   `json:"ttft_samples"`
-	State             string  `json:"state"`
+	Scope               string  `json:"scope"`
+	SupplierID          int64   `json:"supplier_id"`
+	PoolID              int64   `json:"pool_id"`
+	Model               string  `json:"model"`
+	ModelVersion        string  `json:"model_version"`
+	GroupName           string  `json:"group_name"`
+	IsStream            bool    `json:"is_stream"`
+	RuleID              string  `json:"rule_id"`
+	MinSamples          int64   `json:"min_samples"`
+	Rank                int     `json:"rank"`
+	Samples             int64   `json:"samples"`
+	SuccessRate         float64 `json:"success_rate"`
+	OverloadRate        float64 `json:"overload_rate"`
+	Throughput          float64 `json:"throughput"`
+	ThroughputSamples   int64   `json:"throughput_samples"`
+	TTFTMs              float64 `json:"ttft_ms"`
+	TTFTSamples         int64   `json:"ttft_samples"`
+	State               string  `json:"state"`
+	PerformanceState    string  `json:"performance_state"`
+	ObservationMinutes  int64   `json:"observation_minutes"`
+	AvailabilityRate    float64 `json:"availability_rate"`
+	AvailabilitySamples int64   `json:"availability_samples"`
+	RoutingReason       string  `json:"routing_reason"`
+	DecisionAt          int64   `json:"decision_at"`
+	TTFTPassRate        float64 `json:"ttft_pass_rate"`
+	ThroughputPassRate  float64 `json:"throughput_pass_rate"`
 }
 
 // ReadSupplierRealtime is independent of SQL history and routing generations:
@@ -87,9 +95,11 @@ func ReadSupplierRealtime(ctx context.Context) ([]SupplierRealtimeRow, time.Time
 		row.ThroughputSamples, row.TTFTSamples = int64(sums["tps_n"]), int64(sums["ttft_n"])
 		if row.ThroughputSamples > 0 {
 			row.Throughput = sums["tps"] / sums["tps_n"]
+			row.ThroughputPassRate = 100 * sums["tps_pass"] / sums["tps_n"]
 		}
 		if row.TTFTSamples > 0 {
 			row.TTFTMs = sums["ttft"] / sums["ttft_n"]
+			row.TTFTPassRate = 100 * sums["ttft_pass"] / sums["ttft_n"]
 		}
 		rows = append(rows, row)
 	}
