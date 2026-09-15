@@ -12,6 +12,7 @@ func TestSeedanceCompatibleChannelsAdvertiseVideoEndpoint(t *testing.T) {
 		constant.ChannelTypeMoziaSeedanceGen,
 		constant.ChannelTypeMoziaSeedanceVideos,
 		constant.ChannelTypeMoziaH3,
+		constant.ChannelTypeMoziaH3VDN,
 	} {
 		assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIVideo}, GetEndpointTypesByChannelType(channelType, "video-model"))
 	}

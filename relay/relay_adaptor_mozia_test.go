@@ -59,6 +59,15 @@ func TestMoziaH3ChannelRegistration(t *testing.T) {
 	adaptor := GetMoziaTaskAdaptor(constant.ChannelTypeMoziaH3)
 	require.NotNil(t, adaptor)
 	assert.Equal(t, "moziah3", adaptor.GetChannelName())
-	assert.Equal(t, []string{"minimax/minimax-h3-fl2va", "minimax/minimax-h3-ref2va"}, adaptor.GetModelList())
+	assert.Equal(t, []string{"minimax/minimax-h3-t2va", "minimax/minimax-h3-fl2va", "minimax/minimax-h3-ref2va"}, adaptor.GetModelList())
 	require.NotNil(t, GetTaskAdaptor(constant.TaskPlatform("207")))
+}
+
+func TestMoziaH3VDNChannelRegistration(t *testing.T) {
+	assert.Equal(t, "MoziaH3-VDN", constant.ChannelTypeNames[constant.ChannelTypeMoziaH3VDN])
+	assert.Empty(t, constant.ChannelBaseURLs[constant.ChannelTypeMoziaH3VDN])
+	adaptor := GetTaskAdaptor(constant.TaskPlatform("208"))
+	require.NotNil(t, adaptor)
+	assert.Equal(t, "moziah3-vdn", adaptor.GetChannelName())
+	assert.Empty(t, adaptor.GetModelList())
 }

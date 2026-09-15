@@ -92,6 +92,7 @@ func TestCompatibleVideoChannelsSkipChatCompletionTest(t *testing.T) {
 		constant.ChannelTypeMoziaSeedanceVideos,
 		constant.ChannelTypeMoziaArtsapi,
 		constant.ChannelTypeMoziaH3,
+		constant.ChannelTypeMoziaH3VDN,
 	} {
 		result := testChannel(nil, &model.Channel{Type: channelType}, 0, "", "", false)
 

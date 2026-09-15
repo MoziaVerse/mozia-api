@@ -41,6 +41,14 @@ func TestResolveMoziaVideoContentURL(t *testing.T) {
 			wantAuth:    true,
 		},
 		{
+			name:        "VDN content uses accepting instance and authentication",
+			channelType: constant.ChannelTypeMoziaH3VDN,
+			baseURL:     "https://vdn-instance.example/v1/",
+			resultURL:   "https://gateway.example/v1/videos/task_public/content",
+			wantURL:     "https://vdn-instance.example/v1/videos/upstream-task/content",
+			wantAuth:    true,
+		},
+		{
 			name:        "seedance public alias does not recurse",
 			channelType: constant.ChannelTypeMoziaSeedanceGen,
 			baseURL:     "https://provider.example/v1",

@@ -228,7 +228,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 4. 计费配置先基于已应用渠道参数覆盖的请求体求值。
 	info.OriginModelName = modelName
-	taskBillingEvaluation, taskBillingConfig, hasTaskBillingConfig, err := helper.TaskBillingEvaluation(c, modelName)
+	var billingBody []byte
+	if provider, ok := adaptor.(channel.TaskBillingRequestProvider); ok {
+		var err error
+		billingBody, err = provider.BillingRequestBody()
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "invalid_task_billing", http.StatusBadRequest)
+		}
+	}
+	taskBillingEvaluation, taskBillingConfig, hasTaskBillingConfig, err := helper.TaskBillingEvaluation(c, modelName, billingBody)
 	if err != nil {
 		return nil, service.TaskErrorWrapperLocal(err, "invalid_task_billing", http.StatusBadRequest)
 	}
