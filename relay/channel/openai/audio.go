@@ -63,6 +63,8 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 			return usage
 		}
 
+		WarmTTSVoiceCache(info.Request)
+
 		// 必须在写响应头前设置，避免客户端退回 chunked 传输。
 		c.Writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(bodyBytes)))
 		c.Writer.WriteHeaderNow()
