@@ -67,8 +67,9 @@ func (a *VDNTaskAdaptor) readRequest(c *gin.Context) error {
 	if err := common.UnmarshalBodyReusable(c, &fields); err != nil {
 		return err
 	}
-	// Only these output parameters can be stated explicitly, and cannot change
-	// the recipe. Reject unsupported generation controls rather than ignore them.
+	// Accept the platform's output parameter aliases and normalize equivalent
+	// specifications before checking VDN's fixed recipe. These fields are not
+	// forwarded to the upstream multipart API.
 	for key, value := range fields {
 		var expected string
 		switch key {
@@ -80,11 +81,24 @@ func (a *VDNTaskAdaptor) readRequest(c *gin.Context) error {
 			expected = "1344x768"
 		case "resolution":
 			expected = "768p"
+		case "ratio", "aspect_ratio":
+			expected = "16:9"
 		default:
 			return fmt.Errorf("MoziaH3-VDN does not support parameter %q", key)
 		}
 		actual := string(value)
 		_ = common.Unmarshal(value, &actual) // Multipart values and numeric strings.
+		actual = strings.TrimSpace(actual)
+		switch key {
+		case "size":
+			actual = strings.ReplaceAll(strings.ToLower(actual), "*", "x")
+			if actual == "768x448" {
+				// Existing H3 clients use this as a 768P landscape alias.
+				actual = expected
+			}
+		case "resolution":
+			actual = strings.TrimSuffix(strings.ToLower(actual), "p") + "p"
+		}
 		matches := actual == expected
 		if number, err := strconv.ParseFloat(expected, 64); err == nil {
 			actualNumber, err := strconv.ParseFloat(actual, 64)

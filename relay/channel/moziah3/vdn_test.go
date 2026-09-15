@@ -40,7 +40,13 @@ func TestVDNMultipartGenerationModes(t *testing.T) {
 					for _, frame := range frames {
 						content = append(content, map[string]any{"type": "image_url", "role": frame, "image_url": map[string]string{"url": dataURL}})
 					}
-					body, err := common.Marshal(map[string]any{"model": "my-video", "content": content, "seed": 0})
+					payload := map[string]any{"model": "my-video", "content": content, "seed": 0}
+					if len(frames) > 0 {
+						payload["duration"] = 14.375
+						payload["resolution"] = "768P"
+						payload["ratio"] = "16:9"
+					}
+					body, err := common.Marshal(payload)
 					require.NoError(t, err)
 					input.Write(body)
 				} else {
@@ -48,6 +54,11 @@ func TestVDNMultipartGenerationModes(t *testing.T) {
 					require.NoError(t, writer.WriteField("model", "my-video"))
 					require.NoError(t, writer.WriteField("prompt", "animate"))
 					require.NoError(t, writer.WriteField("seed", "0"))
+					if len(frames) > 0 {
+						require.NoError(t, writer.WriteField("seconds", "14.375"))
+						require.NoError(t, writer.WriteField("size", "1344X768"))
+						require.NoError(t, writer.WriteField("aspect_ratio", "16:9"))
+					}
 					for _, frame := range frames {
 						part, err := writer.CreateFormFile(frame, "frame.png")
 						require.NoError(t, err)
@@ -137,11 +148,43 @@ func TestVDNMultipartGenerationModes(t *testing.T) {
 	}
 }
 
+func TestVDNPlatformOutputAliases(t *testing.T) {
+	for _, tc := range []struct{ name, fields string }{
+		{"resolution without suffix", `"resolution":"768"`},
+		{"resolution whitespace", `"resolution":" 768P "`},
+		{"landscape size alias", `"size":"768x448"`},
+		{"size separator", `"size":"1344*768"`},
+		{"matching aliases", `"duration":14.375,"seconds":"14.375","resolution":"768p","size":"1344x768","ratio":"16:9","aspect_ratio":"16:9"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cleanup := requestContext(t, `{"model":"my-video","prompt":"animate",`+tc.fields+`}`)
+			t.Cleanup(cleanup)
+			adaptor := &VDNTaskAdaptor{}
+			info := relayInfo("my-video")
+			require.Nil(t, adaptor.ValidateRequestAndSetAction(ctx, info))
+			body, err := adaptor.BuildRequestBody(ctx, info)
+			require.NoError(t, err)
+			request := httptest.NewRequest(http.MethodPost, "/v1/videos", body)
+			require.NoError(t, adaptor.BuildRequestHeader(ctx, request, info))
+			require.NoError(t, request.ParseMultipartForm(1<<20))
+			defer request.MultipartForm.RemoveAll()
+			assert.Equal(t, map[string][]string{
+				"model": {defaultUpstreamModel}, "prompt": {"animate"},
+			}, request.MultipartForm.Value)
+		})
+	}
+}
+
 func TestVDNRejectsUnsupportedRequests(t *testing.T) {
 	for _, tc := range []struct{ name, fields, message string }{
 		{"duration", `"duration":5`, "fixes duration"},
 		{"null duration", `"duration":null`, "fixes duration"},
 		{"size", `"size":"768x1344"`, "fixes size"},
+		{"unknown size", `"size":"1920x1080"`, "fixes size"},
+		{"resolution", `"resolution":"720P"`, "fixes resolution"},
+		{"portrait ratio", `"ratio":"9:16"`, "fixes ratio"},
+		{"adaptive ratio", `"ratio":"adaptive"`, "fixes ratio"},
+		{"conflicting ratio aliases", `"ratio":"16:9","aspect_ratio":"9:16"`, "fixes aspect_ratio"},
 		{"fps", `"fps":24`, "does not support"},
 		{"frames", `"num_frames":345`, "does not support"},
 		{"inference steps", `"num_inference_steps":8`, "does not support"},

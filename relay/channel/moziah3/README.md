@@ -44,7 +44,13 @@
 - multipart 可上传文件字段 `first_frame` / `last_frame`，文字字段为 `model`、`prompt`、可选 `seed`。
 - `seed` 缺省时不发送，由上游使用默认值 42；显式 `0` 会保留。
 - `prompt` 为 1–16,384 个字符，每张图片最多 10 MiB，multipart 请求最多 21 MiB。
-- 输出固定为 1344×768、345 帧、24 FPS、8 NFE，约 14.375 秒。建议省略规格参数；如指定 `duration`、`seconds`、`size` 或 `resolution`，必须与固定值一致（`resolution=768p`）。不接受 `fps`、`num_frames`、`num_inference_steps` 或 `nfe` 参数。
+- 输出固定为 1344×768、345 帧、24 FPS、8 NFE，约 14.375 秒。适配器接受平台统一的规格字段，并在内部转换；不会将这些字段直接传给 VDN 上游：
+  - `duration` / `seconds`：14.375，接受数字或数字字符串。确定使用 VDN 时可省略；旧 `MoziaH3` 渠道仍要求显式时长。
+  - `resolution`：兼容 `768P`、`768p`、`"768"`，忽略首尾空白。
+  - `ratio` / `aspect_ratio`：支持平台的 `16:9` 横屏档位，对应 H3 对齐后的 1344×768 输出；这是平台档位映射，不代表像素宽高比恰好等于 16:9。
+  - `size`：支持 `1344x768`，兼容大写 `X`、`*` 分隔符及旧 H3 的 `768x448` 横屏档位别名。
+  - 其他时长、清晰度、比例或未知尺寸仍返回 400，不会静默生成另一种规格。多个规格字段同时提供时都必须匹配固定输出。
+- 不接受 `fps`、`num_frames`、`num_inference_steps` 或 `nfe` 参数。
 - 其他字段会返回 400，包括 `task`、`task_type`、`target`、`conditions`、`metadata`；不支持参考音频、参考视频或参考图片模式。
 
 创建响应沿用平台公开 `task_...` ID；查询、下载继续使用这个 ID，不向客户端暴露实例密钥。
