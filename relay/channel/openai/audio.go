@@ -35,8 +35,9 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 		}
 		c.Writer.Header().Set(k, v[0])
 	}
+	c.Writer.WriteHeader(resp.StatusCode)
+
 	if info.IsStream {
-		c.Writer.WriteHeader(resp.StatusCode)
 		helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 			if service.SundaySearch(data, "usage") {
 				var simpleResponse dto.SimpleResponse
@@ -63,8 +64,7 @@ func OpenaiTTSHandler(c *gin.Context, resp *http.Response, info *relaycommon.Rel
 			return usage
 		}
 
-		// 必须在写响应头前设置，避免客户端退回 chunked 传输。
-		c.Writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(bodyBytes)))
+		// 写入响应到客户端
 		c.Writer.WriteHeaderNow()
 		_, err = c.Writer.Write(bodyBytes)
 		if err != nil {
