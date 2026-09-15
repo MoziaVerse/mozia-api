@@ -59,6 +59,11 @@ export const CHANNEL_OPTIONS = [
     color: 'purple',
     label: 'MoziaH3（SGLang 异步视频）',
   },
+  {
+    value: 208,
+    color: 'purple',
+    label: 'MoziaH3-VDN',
+  },
   { value: 1, color: 'green', label: 'OpenAI' },
   {
     value: 2,

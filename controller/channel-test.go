@@ -89,6 +89,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		constant.ChannelTypeMoziaSeedanceVideos,
 		constant.ChannelTypeMoziaArtsapi,
 		constant.ChannelTypeMoziaH3,
+		constant.ChannelTypeMoziaH3VDN,
 		constant.ChannelTypeVidu,
 	}
 	if lo.Contains(unsupportedTestChannelTypes, channel.Type) {

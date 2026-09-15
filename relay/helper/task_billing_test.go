@@ -48,7 +48,7 @@ func TestTaskBillingEvaluationUsesExplicitModelConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = storage.Close() })
 
-	evaluation, rule, isConfigured, err := TaskBillingEvaluation(ctx, model)
+	evaluation, rule, isConfigured, err := TaskBillingEvaluation(ctx, model, nil)
 	require.NoError(t, err)
 	assert.True(t, isConfigured)
 	assert.Equal(t, taskbilling.ModePerSecond, rule.Mode)
@@ -57,7 +57,16 @@ func TestTaskBillingEvaluationUsesExplicitModelConfiguration(t *testing.T) {
 	assert.Equal(t, 1, evaluation.Surcharge.BillableCount)
 	assert.InDelta(t, 0.2, evaluation.Surcharge.Price, 0.000001)
 
-	_, _, isConfigured, err = TaskBillingEvaluation(ctx, "unconfigured-task-billing-model")
+	// A fixed-recipe provider supplies the actual duration without altering
+	// the client body used by logging or a later channel attempt.
+	evaluation, _, _, err = TaskBillingEvaluation(ctx, model, []byte(`{"duration":14.375}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{"duration": 15}, evaluation.Ratios)
+	unchanged, err := storage.Bytes()
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"duration":4.2,"images":["1","2","3","4","5","6"]}`, string(unchanged))
+
+	_, _, isConfigured, err = TaskBillingEvaluation(ctx, "unconfigured-task-billing-model", nil)
 	require.NoError(t, err)
 	assert.False(t, isConfigured)
 }
@@ -80,7 +89,7 @@ func TestTaskBillingEvaluationPerRequestDoesNotReadTheBody(t *testing.T) {
 		})
 	})
 
-	evaluation, rule, isConfigured, err := TaskBillingEvaluation(nil, model)
+	evaluation, rule, isConfigured, err := TaskBillingEvaluation(nil, model, nil)
 	require.NoError(t, err)
 	assert.True(t, isConfigured)
 	assert.Equal(t, taskbilling.ModePerRequest, rule.Mode)
@@ -123,7 +132,7 @@ func TestTaskBillingEvaluationTokenParametricDetectsReferenceVideo(t *testing.T)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = storage.Close() })
 
-	evaluation, rule, configuredRule, err := TaskBillingEvaluation(ctx, modelName)
+	evaluation, rule, configuredRule, err := TaskBillingEvaluation(ctx, modelName, nil)
 	require.NoError(t, err)
 	assert.True(t, configuredRule)
 	assert.Equal(t, taskbilling.ModeTokenParametric, rule.Mode)

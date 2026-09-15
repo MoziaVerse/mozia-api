@@ -81,3 +81,9 @@ type TaskAdaptor interface {
 type OpenAIVideoConverter interface {
 	ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error)
 }
+
+// TaskBillingRequestProvider supplies normalized JSON when the provider fixes
+// output parameters or accepts multipart input. Other adaptors use the client body.
+type TaskBillingRequestProvider interface {
+	BillingRequestBody() ([]byte, error)
+}

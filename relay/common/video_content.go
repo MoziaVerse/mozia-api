@@ -57,6 +57,15 @@ func (s VideoContentSummary) LegacyImages() []string {
 }
 
 func (t *TaskSubmitReq) ParseVideoContent() (VideoContentSummary, error) {
+	return t.parseVideoContent(false)
+}
+
+// ParseVideoContentWithLastFrameOnly is for providers supporting tail-only conditioning.
+func (t *TaskSubmitReq) ParseVideoContentWithLastFrameOnly() (VideoContentSummary, error) {
+	return t.parseVideoContent(true)
+}
+
+func (t *TaskSubmitReq) parseVideoContent(allowLastFrameOnly bool) (VideoContentSummary, error) {
 	var summary VideoContentSummary
 	if t == nil {
 		return summary, nil
@@ -124,7 +133,7 @@ func (t *TaskSubmitReq) ParseVideoContent() (VideoContentSummary, error) {
 		}
 	}
 
-	if summary.LastFrameURL != "" && summary.FirstFrameURL == "" {
+	if !allowLastFrameOnly && summary.LastFrameURL != "" && summary.FirstFrameURL == "" {
 		return VideoContentSummary{}, fmt.Errorf("last_frame requires first_frame")
 	}
 	if (summary.FirstFrameURL != "" || summary.LastFrameURL != "") &&

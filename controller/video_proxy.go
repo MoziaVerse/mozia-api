@@ -163,7 +163,7 @@ func serveVideoProxy(c *gin.Context, attachmentFilename string) {
 		}
 		videoURL = fmt.Sprintf("%s/v1/videos/%s/content", baseURL, task.GetUpstreamTaskID())
 		req.Header.Set("Authorization", "Bearer "+channel.Key)
-	case constant.ChannelTypeMoziaSeedanceGen, constant.ChannelTypeMoziaSeedanceVideos, constant.ChannelTypeMoziaH3:
+	case constant.ChannelTypeMoziaSeedanceGen, constant.ChannelTypeMoziaSeedanceVideos, constant.ChannelTypeMoziaH3, constant.ChannelTypeMoziaH3VDN:
 		videoURL, videoURLFromChannelBase = resolveMoziaVideoContentURL(channel.Type, baseURL, task)
 		if videoURLFromChannelBase {
 			req.Header.Set("Authorization", "Bearer "+channel.Key)
@@ -267,7 +267,7 @@ func resolveMoziaVideoContentURL(channelType int, baseURL string, task *model.Ta
 		baseURL += "/v1"
 	}
 	resourcePath := "/video/generations/"
-	if channelType == constant.ChannelTypeMoziaSeedanceVideos || channelType == constant.ChannelTypeMoziaH3 {
+	if channelType == constant.ChannelTypeMoziaSeedanceVideos || channelType == constant.ChannelTypeMoziaH3 || channelType == constant.ChannelTypeMoziaH3VDN {
 		resourcePath = "/videos/"
 	}
 	return baseURL + resourcePath + url.PathEscape(task.GetUpstreamTaskID()) + "/content", true

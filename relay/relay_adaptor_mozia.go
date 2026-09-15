@@ -45,6 +45,8 @@ func GetMoziaTaskAdaptor(channelType int) channel.TaskAdaptor {
 		return &artsapi.TaskAdaptor{}
 	case constant.ChannelTypeMoziaH3:
 		return &moziah3.TaskAdaptor{}
+	case constant.ChannelTypeMoziaH3VDN:
+		return &moziah3.VDNTaskAdaptor{}
 	case constant.ChannelTypeMoziaMulerun:
 		// mulerun studio 多模态走 OpenAI Sora 标准 video task 接口
 		// （/v1/video/generations + GET /v1/video/generations/:task_id），
