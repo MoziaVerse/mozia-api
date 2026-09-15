@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -307,7 +308,16 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 			return ""
 		}
 		return strings.TrimSpace(c.Request.Header.Get(src.Key))
-	case "gjson":
+	case "gjson", "claude_session":
+		if src.Type == "claude_session" {
+			if c == nil || c.Request == nil {
+				return ""
+			}
+			if sessionID := strings.TrimSpace(c.Request.Header.Get("X-Claude-Code-Session-Id")); sessionID != "" {
+				return sessionID
+			}
+			src.Path = "metadata.user_id"
+		}
 		if src.Path == "" {
 			return ""
 		}
@@ -321,6 +331,24 @@ func extractChannelAffinityValue(c *gin.Context, src operation_setting.ChannelAf
 		}
 		res := gjson.GetBytes(body, src.Path)
 		if !res.Exists() {
+			return ""
+		}
+		if src.Type == "claude_session" {
+			// Claude Code sends either a JSON string or the legacy user_..._session_... format.
+			if res.Type != gjson.String {
+				return ""
+			}
+			value := strings.TrimSpace(res.Str)
+			if strings.HasPrefix(value, "{") {
+				if !gjson.Valid(value) {
+					return ""
+				}
+				return strings.TrimSpace(gjson.Get(value, "session_id").Str)
+			}
+			if strings.HasPrefix(value, "user_") {
+				_, sessionID, _ := strings.Cut(value, "_session_")
+				return strings.TrimSpace(sessionID)
+			}
 			return ""
 		}
 		switch res.Type {
@@ -562,6 +590,9 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 	}
 
 	for _, rule := range setting.Rules {
+		if len(rule.UserIDs) > 0 && (c == nil || c.GetInt("id") <= 0 || !slices.Contains(rule.UserIDs, c.GetInt("id"))) {
+			continue
+		}
 		if !matchAnyRegexCached(rule.ModelRegex, modelName) {
 			continue
 		}
@@ -585,6 +616,13 @@ func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup 
 		}
 		if rule.ValueRegex != "" && !matchAnyRegexCached([]string{rule.ValueRegex}, affinityValue) {
 			continue
+		}
+		if rule.IncludeTokenID {
+			if c == nil || c.GetInt("token_id") <= 0 {
+				continue
+			}
+			// Keep API keys isolated, including session and per-key fallback bindings.
+			affinityValue = fmt.Sprintf("token:%d:%s:%s", c.GetInt("token_id"), usedSource.Type, affinityValue)
 		}
 
 		ttlSeconds := rule.TTLSeconds

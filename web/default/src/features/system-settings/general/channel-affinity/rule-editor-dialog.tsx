@@ -16,11 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Plus, Trash2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
+import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -39,7 +41,7 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Textarea } from '@/components/ui/textarea'
-import { Dialog } from '@/components/dialog'
+
 import { SettingsSwitchField } from '../../components/settings-form-layout'
 import { RULE_TEMPLATES } from './constants'
 import type { AffinityRule, KeySource } from './types'
@@ -53,6 +55,7 @@ const KEY_SOURCE_TYPES = [
   'context_string',
   'request_header',
   'gjson',
+  'claude_session',
 ] as const
 
 const CONTEXT_KEY_PRESETS = [
@@ -92,6 +95,7 @@ function normalizeStringList(text: string): string[] {
 
 function normalizeKeySource(src: Partial<KeySource>): KeySource {
   const type = (src?.type || 'gjson') as KeySource['type']
+  if (type === 'claude_session') return { type }
   if (type === 'gjson') return { type, key: '', path: src?.path || '' }
   return { type, key: src?.key || '', path: '' }
 }
@@ -193,7 +197,10 @@ export function RuleEditorDialog(props: Props) {
 
     const validKeySources = keySources
       .map(normalizeKeySource)
-      .filter((s) => s.type && (s.type === 'gjson' ? s.path : s.key))
+      .filter(
+        (s) =>
+          s.type === 'claude_session' || (s.type === 'gjson' ? s.path : s.key)
+      )
     if (validKeySources.length === 0) {
       toast.error(t('At least one valid key source is required'))
       return
@@ -220,6 +227,8 @@ export function RuleEditorDialog(props: Props) {
 
     const rule: AffinityRule = {
       id: props.rule?.id,
+      user_ids: props.rule?.user_ids,
+      include_token_id: props.rule?.include_token_id,
       name: values.name.trim(),
       model_regex: modelRegex,
       path_regex: normalizeStringList(values.path_regex_text),
@@ -321,70 +330,80 @@ export function RuleEditorDialog(props: Props) {
             {t('Common Keys')}: {CONTEXT_KEY_PRESETS.join(', ')}
           </p>
           <div className='space-y-2'>
-            {keySources.map((src, idx) => (
-              <div
-                key={src.rowId}
-                className='flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center'
-              >
-                <Select
-                  items={KEY_SOURCE_TYPES.map((t) => ({ value: t, label: t }))}
-                  value={src.type}
-                  onValueChange={(v) => {
-                    if (v === null) return
-                    const next = [...keySources]
-                    next[idx] = {
-                      ...normalizeKeySource({
-                        ...src,
-                        type: v as KeySource['type'],
-                      }),
-                      rowId: src.rowId,
-                    }
-                    setKeySources(next)
-                  }}
+            {keySources.map((src, idx) => {
+              let value = src.type === 'gjson' ? src.path || '' : src.key || ''
+              if (src.type === 'claude_session') {
+                value = 'X-Claude-Code-Session-Id / metadata.user_id'
+              }
+              return (
+                <div
+                  key={src.rowId}
+                  className='flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center'
                 >
-                  <SelectTrigger className='w-full sm:w-[160px]'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent alignItemWithTrigger={false}>
-                    <SelectGroup>
-                      {KEY_SOURCE_TYPES.map((t) => (
-                        <SelectItem key={t} value={t}>
-                          {t}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <Input
-                  className='min-w-0 flex-1'
-                  placeholder={
-                    src.type === 'gjson'
-                      ? 'metadata.conversation_id'
-                      : 'user_id'
-                  }
-                  value={src.type === 'gjson' ? src.path || '' : src.key || ''}
-                  onChange={(e) => {
-                    const next = [...keySources]
-                    if (src.type === 'gjson') {
-                      next[idx] = { ...src, path: e.target.value }
-                    } else {
-                      next[idx] = { ...src, key: e.target.value }
+                  <Select
+                    items={KEY_SOURCE_TYPES.map((t) => ({
+                      value: t,
+                      label: t,
+                    }))}
+                    value={src.type}
+                    onValueChange={(v) => {
+                      if (v === null) return
+                      const next = [...keySources]
+                      next[idx] = {
+                        ...normalizeKeySource({
+                          ...src,
+                          type: v as KeySource['type'],
+                        }),
+                        rowId: src.rowId,
+                      }
+                      setKeySources(next)
+                    }}
+                  >
+                    <SelectTrigger className='w-full sm:w-[160px]'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      <SelectGroup>
+                        {KEY_SOURCE_TYPES.map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {t}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    className='min-w-0 flex-1'
+                    disabled={src.type === 'claude_session'}
+                    placeholder={
+                      src.type === 'gjson'
+                        ? 'metadata.conversation_id'
+                        : 'user_id'
                     }
-                    setKeySources(next)
-                  }}
-                />
-                <Button
-                  type='button'
-                  variant='ghost'
-                  size='icon'
-                  onClick={() =>
-                    setKeySources((prev) => prev.filter((_, i) => i !== idx))
-                  }
-                >
-                  <Trash2 className='h-4 w-4' />
-                </Button>
-              </div>
-            ))}
+                    value={value}
+                    onChange={(e) => {
+                      const next = [...keySources]
+                      if (src.type === 'gjson') {
+                        next[idx] = { ...src, path: e.target.value }
+                      } else {
+                        next[idx] = { ...src, key: e.target.value }
+                      }
+                      setKeySources(next)
+                    }}
+                  />
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    onClick={() =>
+                      setKeySources((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                  >
+                    <Trash2 className='h-4 w-4' />
+                  </Button>
+                </div>
+              )
+            })}
           </div>
         </div>
 

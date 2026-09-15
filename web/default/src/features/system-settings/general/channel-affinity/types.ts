@@ -17,7 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 export interface KeySource {
-  type: 'context_int' | 'context_string' | 'request_header' | 'gjson'
+  type:
+    | 'context_int'
+    | 'context_string'
+    | 'request_header'
+    | 'gjson'
+    | 'claude_session'
   key?: string
   path?: string
 }
@@ -28,6 +33,7 @@ export interface AffinityRule {
   model_regex: string[]
   path_regex: string[]
   user_agent_include?: string[]
+  user_ids?: number[]
   key_sources: KeySource[]
   value_regex?: string
   ttl_seconds: number
@@ -35,6 +41,7 @@ export interface AffinityRule {
   include_using_group: boolean
   include_model_name: boolean
   include_rule_name: boolean
+  include_token_id?: boolean
   param_override_template?: Record<string, unknown> | null
 }
 

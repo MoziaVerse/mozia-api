@@ -73,6 +73,7 @@ const KEY_SOURCE_TYPES = [
   { label: 'context_string', value: 'context_string' },
   { label: 'request_header', value: 'request_header' },
   { label: 'gjson', value: 'gjson' },
+  { label: 'claude_session', value: 'claude_session' },
 ];
 
 const CONTEXT_KEY_PRESETS = [
@@ -148,6 +149,8 @@ const normalizeKeySource = (src) => {
   const key = (src?.key || '').trim();
   const path = (src?.path || '').trim();
 
+  if (type === 'claude_session') return { type };
+
   if (type === 'gjson') {
     return { type, key: '', path };
   }
@@ -199,6 +202,8 @@ const buildChannelAffinityRulePayload = ({
   values,
   isEdit,
   editingRuleId,
+  userIds,
+  includeTokenId,
   rulesLength,
   modelRegex,
   pathRegex,
@@ -207,6 +212,8 @@ const buildChannelAffinityRulePayload = ({
   paramOverrideTemplate,
 }) => ({
   id: isEdit ? editingRuleId : rulesLength,
+  user_ids: userIds,
+  include_token_id: includeTokenId,
   name: (values?.name || '').trim(),
   model_regex: modelRegex,
   path_regex: pathRegex,
@@ -671,7 +678,7 @@ export default function SettingsChannelAffinity(props) {
         if (!x.key) return { ok: false, message: 'Key 不能为空' };
       } else if (x.type === 'gjson') {
         if (!x.path) return { ok: false, message: 'Path 不能为空' };
-      } else {
+      } else if (x.type !== 'claude_session') {
         return { ok: false, message: 'Key 来源类型不合法' };
       }
     }
@@ -756,6 +763,8 @@ export default function SettingsChannelAffinity(props) {
         values,
         isEdit,
         editingRuleId: editingRule?.id,
+        userIds: editingRule?.user_ids,
+        includeTokenId: editingRule?.include_token_id,
         rulesLength: rules.length,
         modelRegex,
         pathRegex: normalizeStringList(values.path_regex_text),
@@ -1385,13 +1394,18 @@ export default function SettingsChannelAffinity(props) {
                     editingRule?.key_sources?.[idx],
                   );
                   const isGjson = src.type === 'gjson';
+                  let value = isGjson ? src.path : src.key;
+                  if (src.type === 'claude_session') {
+                    value = 'X-Claude-Code-Session-Id / metadata.user_id';
+                  }
                   return (
                     <Input
+                      disabled={src.type === 'claude_session'}
                       placeholder={
                         isGjson ? 'metadata.conversation_id' : 'X-Affinity-Key'
                       }
                       aria-label={t('Key 或 Path')}
-                      value={isGjson ? src.path : src.key}
+                      value={value}
                       onChange={(value) =>
                         updateKeySource(
                           idx,

@@ -3,7 +3,7 @@ package operation_setting
 import "github.com/QuantumNous/new-api/setting/config"
 
 type ChannelAffinityKeySource struct {
-	Type string `json:"type"` // context_int, context_string, request_header, gjson
+	Type string `json:"type"` // context_int, context_string, request_header, gjson, claude_session
 	Key  string `json:"key,omitempty"`
 	Path string `json:"path,omitempty"`
 }
@@ -13,6 +13,7 @@ type ChannelAffinityRule struct {
 	ModelRegex       []string                   `json:"model_regex"`
 	PathRegex        []string                   `json:"path_regex"`
 	UserAgentInclude []string                   `json:"user_agent_include,omitempty"`
+	UserIDs          []int                      `json:"user_ids,omitempty"` // Authenticated users; empty matches all users.
 	KeySources       []ChannelAffinityKeySource `json:"key_sources"`
 
 	ValueRegex string `json:"value_regex"`
@@ -25,6 +26,7 @@ type ChannelAffinityRule struct {
 	IncludeUsingGroup bool `json:"include_using_group"`
 	IncludeModelName  bool `json:"include_model_name"`
 	IncludeRuleName   bool `json:"include_rule_name"`
+	IncludeTokenID    bool `json:"include_token_id,omitempty"`
 }
 
 type ChannelAffinitySetting struct {
