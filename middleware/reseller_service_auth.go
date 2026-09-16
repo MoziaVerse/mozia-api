@@ -24,6 +24,7 @@ const (
 	ResellerErrorConflict            = "reseller_conflict"
 	ResellerErrorPricingVersion      = "reseller_pricing_version_conflict"
 	ResellerErrorPricingMargin       = "reseller_pricing_margin_conflict"
+	ResellerErrorModelUnavailable    = "reseller_model_unavailable"
 	ResellerErrorNotFound            = "reseller_not_found"
 	ResellerErrorServiceUnauthorized = "reseller_service_unauthorized"
 	ResellerErrorContextNotFound     = "reseller_context_not_found"

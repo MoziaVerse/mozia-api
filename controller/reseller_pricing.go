@@ -78,7 +78,7 @@ func GetResellerPlatformPricing(c *gin.Context) {
 			wholesale = append(wholesale, record)
 		}
 	}
-	models := resellerPricingModels(wholesale)
+	models := resellerPricingModels()
 	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
 		"models":             models,
 		"official_discounts": resellerPricingOfficialDiscounts(models),
@@ -127,7 +127,7 @@ func GetResellerPlatformCustomerPricing(c *gin.Context) {
 		handleResellerPricingError(c, err)
 		return
 	}
-	models := resellerPricingModels(records)
+	models := resellerPricingModels()
 	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
 		"customer":           customer,
 		"models":             models,
@@ -237,7 +237,7 @@ func GetResellerManagementPricing(c *gin.Context) {
 		handleResellerPricingError(c, err)
 		return
 	}
-	models := resellerPricingModels(records)
+	models := resellerPricingModels()
 	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
 		"models":             models,
 		"official_discounts": resellerPricingOfficialDiscounts(models),
@@ -245,11 +245,8 @@ func GetResellerManagementPricing(c *gin.Context) {
 	})
 }
 
-func resellerPricingModels(records []model.ResellerPriceRuleRecord) []string {
+func resellerPricingModels() []string {
 	models := model.GetEnabledModels()
-	for _, record := range records {
-		models = append(models, record.Model)
-	}
 
 	unique := make(map[string]struct{}, len(models))
 	filtered := make([]string, 0, len(models))
@@ -384,6 +381,9 @@ func resellerPriceRuleBody(c *gin.Context, allowCustomer bool) (resellerPriceRul
 }
 
 func createResellerPriceRule(resellerId int, kind string, request resellerPriceRuleRequest, createdBy string, requiredSubagentMemberId *int) (*model.ResellerPriceRule, error) {
+	if !common.StringsContains(resellerPricingModels(), strings.TrimSpace(request.Model)) {
+		return nil, model.ErrResellerPricingModelUnavailable
+	}
 	multiplierPPM, err := resellerPriceMultiplier(request.Model, request.Multiplier, request.OfficialDiscount)
 	if err != nil {
 		return nil, err
@@ -474,6 +474,8 @@ func optionalPositiveQueryID(c *gin.Context, name string) (*int, bool) {
 
 func handleResellerPricingError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, model.ErrResellerPricingModelUnavailable):
+		middleware.AbortResellerRequest(c, http.StatusConflict, middleware.ResellerErrorModelUnavailable, "model is unavailable; refresh the model list before changing its price")
 	case errors.Is(err, model.ErrInvalidResellerPriceRule), errors.Is(err, model.ErrResellerQuotaOverflow):
 		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid pricing request")
 	case errors.Is(err, model.ErrResellerPriceRuleVersionConflict):

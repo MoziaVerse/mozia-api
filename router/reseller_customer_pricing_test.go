@@ -15,6 +15,7 @@ import (
 func TestPlatformCustomerPricing(t *testing.T) {
 	_, db, request := setupResellerM2Test(t)
 	require.NoError(t, db.AutoMigrate(&model.Ability{}))
+	require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "model-a", ChannelId: 1, Enabled: true}).Error)
 	agency := seedResellerM2(t, db, "Agency", "customer-pricing.example.com", model.ResellerRoleOwner, "owner", "admin", "viewer")
 	otherAgency := seedResellerM2(t, db, "Other", "other-pricing.example.com", model.ResellerRoleOwner, "other-owner", "other-admin", "other-viewer")
 	customer := seedCustomerM2(t, db, agency.Id, "customer-one", model.ResellerCustomerStatusActive)

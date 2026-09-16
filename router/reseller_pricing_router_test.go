@@ -116,7 +116,7 @@ func TestResellerM3PricingContract(t *testing.T) {
 		require.Equal(t, http.StatusOK, list.Code)
 		var listed resellerPricingListEnvelopeData
 		require.NoError(t, common.Unmarshal(listEnvelope.RawData, &listed))
-		assert.Equal(t, []string{"enabled-only-a", "enabled-only-z", "m3-model", "rule-only-disabled"}, listed.Models)
+		assert.Equal(t, []string{"enabled-only-a", "enabled-only-z", "m3-model"}, listed.Models)
 		require.Len(t, listed.Rules, 2)
 		assert.Equal(t, []string{"m3-model", "rule-only-disabled"}, []string{listed.Rules[0].Model, listed.Rules[1].Model})
 		assert.Equal(t, []string{model.ResellerPriceRuleKindWholesale, model.ResellerPriceRuleKindWholesale}, []string{listed.Rules[0].Kind, listed.Rules[1].Kind})
@@ -210,7 +210,7 @@ func TestResellerM3PricingContract(t *testing.T) {
 		require.Equal(t, http.StatusOK, list.Code)
 		var listed resellerPricingListEnvelopeData
 		require.NoError(t, common.Unmarshal(listEnvelope.RawData, &listed))
-		assert.Equal(t, []string{"enabled-only-a", "enabled-only-z", "m3-model", "rule-only-disabled"}, listed.Models)
+		assert.Equal(t, []string{"enabled-only-a", "enabled-only-z", "m3-model"}, listed.Models)
 		require.Len(t, listed.Rules, 3)
 		assert.ElementsMatch(t,
 			[]string{model.ResellerPriceRuleKindWholesale + ":m3-model", model.ResellerPriceRuleKindWholesale + ":rule-only-disabled", model.ResellerPriceRuleKindRetail + ":m3-model"},

@@ -28,6 +28,7 @@ const (
 
 var (
 	ErrInvalidResellerPriceRule         = errors.New("invalid reseller price rule")
+	ErrResellerPricingModelUnavailable  = errors.New("reseller pricing model unavailable")
 	ErrResellerPriceRuleVersionConflict = errors.New("reseller price rule version conflict")
 	ErrResellerPriceMarginConflict      = errors.New("reseller price margin conflict")
 	ErrResellerBillingIdentityConflict  = errors.New("reseller billing identity conflict")

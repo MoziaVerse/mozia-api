@@ -510,6 +510,7 @@ func TestResellerManagementUsageAndTasksContract(t *testing.T) {
 			require.Equal(t, http.StatusNotFound, forged.Code)
 		}
 
+		require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "subagent-model", ChannelId: 1, Enabled: true}).Error)
 		_, err := model.CreateResellerPriceRule(model.CreateResellerPriceRuleParams{
 			ResellerId: resellerA.Id, Kind: model.ResellerPriceRuleKindWholesale, ModelName: "subagent-model",
 			MultiplierPPM: 800000, Enabled: true, EffectiveAt: common.GetTimestamp(), CreatedBy: "platform",
