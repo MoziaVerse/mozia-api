@@ -24,6 +24,7 @@ var auditContentTemplates = map[string]string{
 	"user.quota_subtract":      "Decreased user quota by ${quota}",
 	"user.quota_override":      "Overrode user quota from ${from} to ${to}",
 	"user.group_update":        "Changed user ${username} group from ${from} to ${to}",
+	"token.group_update":       "Changed token ${token_name} (ID: ${token_id}) group from ${from} to ${to}",
 	"user.binding_clear":       "Cleared ${bindingType} binding for user ${username}",
 	"user.2fa_disable":         "Force-disabled two-factor authentication for the user",
 	"user.passkey_register":    "Registered a passkey",

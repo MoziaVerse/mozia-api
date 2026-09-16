@@ -143,6 +143,8 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.POST("/manage", controller.ManageUser)
 				adminRoute.PUT("/", middleware.RequirePermission(authz.UserManageWrite), controller.UpdateUser)
 				adminRoute.PUT("/:id/group", middleware.RequirePermission(authz.UserManageGroupWrite), controller.UpdateUserGroup)
+				adminRoute.GET("/:id/tokens/:token_id/group", middleware.RequirePermission(authz.UserManageRead), controller.GetUserTokenGroup)
+				adminRoute.PUT("/:id/tokens/:token_id/group", middleware.RequirePermission(authz.UserManageGroupWrite), controller.UpdateUserTokenGroup)
 				adminRoute.DELETE("/:id", middleware.RequirePermission(authz.UserManageWrite), controller.DeleteUser)
 				adminRoute.DELETE("/:id/reset_passkey", middleware.RequirePermission(authz.UserManageWrite), controller.AdminResetPasskey)
 

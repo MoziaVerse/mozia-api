@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Token struct {
@@ -304,6 +305,30 @@ func (token *Token) Update() (err error) {
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
 		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
 	return err
+}
+
+// UpdateGroup preserves quota and all other token settings, including concurrent usage.
+func (token *Token) UpdateGroup(group string) (cacheInvalidated bool, err error) {
+	if token.Group != group {
+		result := DB.Model(&Token{}).
+			Where("id = ? AND user_id = ?", token.Id, token.UserId).
+			Where(clause.Eq{Column: "group", Value: token.Group}).
+			Update("group", group)
+		if result.Error != nil {
+			return false, result.Error
+		}
+		if result.RowsAffected != 1 {
+			return false, errors.New("token group changed; reload before updating")
+		}
+		token.Group = group
+	}
+	if common.RedisEnabled {
+		if err := cacheDeleteToken(token.Key); err != nil {
+			common.SysLog(fmt.Sprintf("failed to invalidate token %d cache after group update: %s", token.Id, err))
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (token *Token) SelectUpdate() (err error) {
