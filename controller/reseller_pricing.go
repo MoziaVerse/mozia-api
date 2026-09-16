@@ -103,6 +103,76 @@ func CreateResellerPlatformWholesalePrice(c *gin.Context) {
 	writeResellerAdminSuccess(c, http.StatusCreated, gin.H{"rule": rule.Record()})
 }
 
+func GetResellerPlatformCustomerPricing(c *gin.Context) {
+	resellerId, ok := positivePathID(c)
+	if !ok {
+		return
+	}
+	customerId, ok := resellerCustomerPathID(c)
+	if !ok {
+		return
+	}
+	customer, err := model.GetResellerCustomerRecord(resellerId, customerId, true)
+	if err != nil {
+		handleResellerPricingError(c, err)
+		return
+	}
+	records, err := model.ListResellerPriceRules(resellerId, &customerId)
+	if err != nil {
+		handleResellerPricingError(c, err)
+		return
+	}
+	effective, err := model.ListEffectiveResellerPriceRules(resellerId, &customerId, common.GetTimestamp())
+	if err != nil {
+		handleResellerPricingError(c, err)
+		return
+	}
+	models := resellerPricingModels(records)
+	writeResellerAdminSuccess(c, http.StatusOK, gin.H{
+		"customer":           customer,
+		"models":             models,
+		"official_discounts": resellerPricingOfficialDiscounts(models),
+		"rules":              records,
+		"effective_rules":    effective,
+	})
+}
+
+func resellerCustomerPathID(c *gin.Context) (int, bool) {
+	id, err := strconv.Atoi(c.Param("customer_id"))
+	if err != nil || id < 1 {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "invalid customer id")
+		return 0, false
+	}
+	return id, true
+}
+
+func CreateResellerPlatformCustomerRetailPrice(c *gin.Context) {
+	resellerId, ok := positivePathID(c)
+	if !ok {
+		return
+	}
+	customerId, ok := resellerCustomerPathID(c)
+	if !ok {
+		return
+	}
+	request, ok := resellerPriceRuleBody(c, false)
+	if !ok {
+		return
+	}
+	actor := c.GetHeader("X-Platform-Actor-Subject")
+	if !model.ValidResellerSubject(actor) || request.ExpectedVersion == nil {
+		middleware.AbortResellerRequest(c, http.StatusBadRequest, middleware.ResellerErrorInvalidRequest, "platform actor and expected_version are required")
+		return
+	}
+	request.CustomerId = &customerId
+	rule, err := createResellerPriceRule(resellerId, model.ResellerPriceRuleKindRetail, request, actor, nil)
+	if err != nil {
+		handleResellerPricingError(c, err)
+		return
+	}
+	writeResellerAdminSuccess(c, http.StatusCreated, gin.H{"rule": rule.Record()})
+}
+
 func PreviewResellerPlatformPricing(c *gin.Context) {
 	resellerId, ok := positivePathID(c)
 	if !ok {

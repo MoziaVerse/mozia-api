@@ -298,6 +298,16 @@ func CreateResellerPriceRule(params CreateResellerPriceRuleParams) (*ResellerPri
 }
 
 func ListResellerPriceRules(resellerId int, customerId *int) ([]ResellerPriceRuleRecord, error) {
+	return listResellerPriceRules(resellerId, customerId, nil)
+}
+
+// ListEffectiveResellerPriceRules keeps the latest version that has taken effect
+// in each scope, including disabled versions so callers can apply inheritance.
+func ListEffectiveResellerPriceRules(resellerId int, customerId *int, at int64) ([]ResellerPriceRuleRecord, error) {
+	return listResellerPriceRules(resellerId, customerId, &at)
+}
+
+func listResellerPriceRules(resellerId int, customerId *int, at *int64) ([]ResellerPriceRuleRecord, error) {
 	if resellerId < 1 || customerId != nil && *customerId < 1 {
 		return nil, ErrInvalidResellerPriceRule
 	}
@@ -314,6 +324,9 @@ func ListResellerPriceRules(resellerId int, customerId *int) ([]ResellerPriceRul
 
 	var rules []ResellerPriceRule
 	query := DB.Where("reseller_id = ?", resellerId)
+	if at != nil {
+		query = query.Where("effective_at <= ?", *at)
+	}
 	if customerId != nil {
 		query = query.Where("kind = ? OR (kind = ? AND customer_id IN ?)",
 			ResellerPriceRuleKindWholesale, ResellerPriceRuleKindRetail, []int{0, *customerId})

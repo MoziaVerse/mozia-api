@@ -57,6 +57,8 @@ func registerResellerRoutes(apiRouter *gin.RouterGroup) {
 	resellerAdminRoute.PUT("/:id/payment/bank-transfer", controller.UpdateResellerAdminBankTransfer)
 	resellerAdminRoute.PATCH("/:id/status", controller.UpdateResellerAdminStatus)
 	resellerAdminRoute.GET("/:id/customers", controller.ListResellerAdminCustomers)
+	resellerAdminRoute.GET("/:id/customers/:customer_id/pricing", controller.GetResellerPlatformCustomerPricing)
+	resellerAdminRoute.POST("/:id/customers/:customer_id/pricing/retail", controller.CreateResellerPlatformCustomerRetailPrice)
 	resellerAdminRoute.GET("/:id/usage", controller.GetResellerPlatformUsage)
 	resellerAdminRoute.DELETE("/:id/customers/:customer_id", controller.UnbindResellerAdminCustomer)
 	resellerAdminRoute.POST("/:id/customers/batch-assign", controller.BatchAssignResellerAdminCustomers)
