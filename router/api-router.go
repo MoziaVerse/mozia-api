@@ -455,6 +455,7 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 	walletRoute := moziaRouter.Group("/wallet")
 	walletRoute.Use(middleware.AdminAuth())
 	{
+		walletRoute.GET("/consumption-report", middleware.RequirePermission(authz.UserQuotaRead), controller.GetMoziaConsumptionReport)
 		walletRoute.GET("/users/:id", middleware.RequirePermission(authz.UserQuotaRead), controller.GetMoziaUserWallet)
 		walletRoute.GET("/users/:id/consumption", middleware.RequirePermission(authz.UserQuotaRead), controller.GetMoziaUserConsumption)
 		walletRoute.POST("/users/:id/adjust", middleware.RequirePermission(authz.UserQuotaWrite), controller.AdjustMoziaUserWallet)
