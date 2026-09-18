@@ -86,6 +86,27 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	var err error
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
+	if target := common.GetContextKeyInt(param.Ctx, constant.ContextKeyRouteChannelID); target > 0 {
+		groups := []string{param.TokenGroup}
+		if param.TokenGroup == "auto" {
+			groups = GetUserAutoGroup(userGroup)
+		}
+		for _, group := range groups {
+			candidates, err := model.GetSatisfiedChannelCandidates(group, param.ModelName, param.RequestPath)
+			if err != nil {
+				return nil, group, err
+			}
+			for _, candidate := range candidates {
+				if candidate.Id == target {
+					if param.TokenGroup == "auto" {
+						common.SetContextKey(param.Ctx, constant.ContextKeyAutoGroup, group)
+					}
+					return candidate, group, nil
+				}
+			}
+		}
+		return nil, param.TokenGroup, errors.New("routing target channel is unavailable for this model, group or endpoint")
+	}
 
 	if param.TokenGroup == "auto" {
 		if len(setting.GetAutoGroups()) == 0 {

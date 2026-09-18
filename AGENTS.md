@@ -118,6 +118,9 @@ Do NOT directly import or call `encoding/json` in business code. `json.RawMessag
 
 **Relay and provider behavior:**
 
+- Conditional routing reuses `mozia_setting.user_thinking_disabled_redirects` and the root-only `/api/mozia/user-model-redirect` API. Preserve legacy rule loading and stable rule IDs when editing or deleting.
+- Match the original request once, before channel selection. A rule's target channel must remain locked through affinity, retries and supplier admission; never bypass model/group permissions or resource-pool limits.
+- Routing targets use the channel's configured public model ID; upstream aliases still come from the existing channel model mapping. Video routing does not enable video admission in text-only supplier pools.
 - When implementing a new channel, confirm whether the provider supports `StreamOptions`; if supported, add the channel to `streamSupportedChannels`.
 - For request structs parsed from client JSON and re-marshaled to upstream providers, optional scalar fields MUST use pointer types with `omitempty` (for example, `*int`, `*uint`, `*float64`, `*bool`).
 - Preserve explicit zero values in upstream relay request DTOs: absent client JSON fields must become `nil` and be omitted, while explicit `0`, `0.0`, or `false` values must remain non-`nil` and be sent upstream.

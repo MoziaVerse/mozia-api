@@ -23,6 +23,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSupplierVideoAdmissionPreservesTextOnlyLimit(t *testing.T) {
+	for _, video := range []string{`"https://example.com/a.mp4"`, `{"url":"https://example.com/a.mp4"}`} {
+		var request dto.GeneralOpenAIRequest
+		require.NoError(t, common.UnmarshalJsonStr(`{"messages":[{"role":"user","content":[{"type":"video_url","video_url":`+video+`}]}]}`, &request))
+		parts := request.Messages[0].ParseContent()
+		require.Len(t, parts, 1)
+		assert.Equal(t, &dto.MessageVideoUrl{Url: "https://example.com/a.mp4"}, parts[0].VideoUrl)
+		pool := model.SupplierPool{Models: []model.SupplierModelSpec{{Name: "k3"}}}
+		_, err := SupplierCandidateTokens(&request, &relaycommon.RelayInfo{OriginModelName: "k3"}, pool)
+		assert.ErrorContains(t, err, "text inputs only")
+	}
+}
+
 func TestSupplierRulePrecedenceAndCost(t *testing.T) {
 	cfg := model.SupplierRoutingConfig{Rules: []model.SupplierRoutingRule{
 		{ID: "default", Model: "test"}, {ID: "group", Model: "test", Group: "premium"}, {ID: "customer", Model: "test", UserID: 7},

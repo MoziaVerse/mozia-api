@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -285,6 +286,16 @@ func SelectSupplierChannel(c *gin.Context, info *relaycommon.RelayInfo, locked *
 	s := SupplierRoutingState(c)
 	if s == nil {
 		return locked, nil
+	}
+	if target := common.GetContextKeyInt(c, constant.ContextKeyRouteChannelID); target > 0 {
+		if locked != nil && locked.Id != target {
+			return nil, errors.New("channel conflicts with conditional routing target")
+		}
+		var err error
+		locked, _, err = CacheGetRandomSatisfiedChannel(&RetryParam{Ctx: c, ModelName: info.OriginModelName, TokenGroup: s.Group, RequestPath: c.Request.URL.Path})
+		if err != nil {
+			return nil, err
+		}
 	}
 	request, ok := info.Request.(*dto.GeneralOpenAIRequest)
 	if !ok {

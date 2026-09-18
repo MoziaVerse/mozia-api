@@ -480,6 +480,7 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 	userModelRedirectRoute.Use(middleware.RootOnlyAuth())
 	{
 		userModelRedirectRoute.GET("/", controller.GetMoziaUserModelRedirects)
+		userModelRedirectRoute.GET("/targets", controller.GetMoziaRoutingTargets)
 		userModelRedirectRoute.POST("/", controller.UpsertMoziaUserModelRedirect)
 		userModelRedirectRoute.DELETE("/:user_id", controller.DeleteMoziaUserModelRedirect)
 	}

@@ -17,11 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { type FormEvent, useId, useState } from 'react'
+import { useId, useState } from 'react'
+import { useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { z } from 'zod'
 
 import {
   AlertDialog,
@@ -36,7 +39,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
-import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -50,251 +52,538 @@ import { SettingsSection } from '@/features/system-settings/components/settings-
 
 import {
   deleteMoziaUserModelRedirect,
+  getMoziaRoutingTargets,
   getMoziaUserModelRedirects,
   saveMoziaUserModelRedirect,
 } from './api'
 import type {
   MoziaUserModelRedirect,
   MoziaUserModelRedirectPayload,
+  RouteCondition,
 } from './types'
 
 const queryKey = ['mozia', 'user-model-redirects'] as const
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback
+const conditionSchema = z
+  .object({
+    operator: z.enum(['equals', 'exists', 'has_video']),
+    path: z.string(),
+    valueText: z.string(),
+  })
+  .superRefine((condition, ctx) => {
+    if (
+      condition.operator !== 'has_video' &&
+      !/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/.test(condition.path)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['path'],
+        message: 'Enter a field path, such as thinking.type',
+      })
+    }
+    if (condition.operator === 'equals') {
+      try {
+        const value: unknown = JSON.parse(condition.valueText)
+        if (
+          typeof value === 'number' &&
+          (!Number.isFinite(value) ||
+            (Number.isInteger(value) && !Number.isSafeInteger(value)))
+        ) {
+          throw new Error()
+        }
+        if (
+          value !== null &&
+          !['string', 'number', 'boolean'].includes(typeof value)
+        ) {
+          throw new Error()
+        }
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['valueText'],
+          message: 'Enter a JSON string, number, boolean or null',
+        })
+      }
+    }
+  })
+const formSchema = z.object({
+  all_users: z.boolean(),
+  sso_sub: z.string(),
+  source_model: z.string().trim().min(1),
+  target_model: z.string().trim().min(1),
+  target_channel_id: z.number().int().min(0),
+  priority: z.number().int().min(0).max(10000),
+  endpoint: z.string(),
+  disabled: z.boolean(),
+  only_thinking_disabled: z.boolean(),
+  seamless: z.boolean(),
+  conditions: z.array(conditionSchema).max(8),
+})
+type FormValues = z.infer<typeof formSchema>
+const defaults: FormValues = {
+  all_users: false,
+  sso_sub: '',
+  source_model: '',
+  target_model: '',
+  target_channel_id: 0,
+  priority: 100,
+  endpoint: '',
+  disabled: false,
+  only_thinking_disabled: false,
+  seamless: false,
+  conditions: [],
 }
+const selectClass =
+  'border-input bg-background h-9 w-full rounded-md border px-3 text-sm'
 
 export function MoziaUserModelRedirectSection() {
   const { t } = useTranslation()
+  const formId = useId()
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState<MoziaUserModelRedirect | null>(null)
   const [deleteTarget, setDeleteTarget] =
     useState<MoziaUserModelRedirect | null>(null)
-  const [ssoSub, setSsoSub] = useState('')
-  const [sourceModel, setSourceModel] = useState('')
-  const [targetModel, setTargetModel] = useState('')
-  const [onlyThinkingDisabled, setOnlyThinkingDisabled] = useState(false)
-  const [seamless, setSeamless] = useState(false)
-  const onlyThinkingDisabledId = useId()
-  const seamlessId = useId()
-
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: defaults,
+  })
+  const conditions = useFieldArray({
+    control: form.control,
+    name: 'conditions',
+  })
+  const values = form.watch()
+  const rulesQuery = useQuery({ queryKey, queryFn: getMoziaUserModelRedirects })
+  const targetsQuery = useQuery({
+    queryKey: ['mozia', 'routing-targets'],
+    queryFn: getMoziaRoutingTargets,
+  })
+  const targets = targetsQuery.data ?? []
+  const target = targets.find(
+    (channel) => channel.id === values.target_channel_id
+  )
+  const models = target
+    ? target.models
+    : [...new Set(targets.flatMap((channel) => channel.models))]
   const resetForm = () => {
     setEditing(null)
-    setSsoSub('')
-    setSourceModel('')
-    setTargetModel('')
-    setOnlyThinkingDisabled(false)
-    setSeamless(false)
+    form.reset(defaults)
   }
-
-  const rulesQuery = useQuery({
-    queryKey,
-    queryFn: getMoziaUserModelRedirects,
-  })
+  const onError = (error: unknown) =>
+    toast.error(error instanceof Error ? error.message : t('Request failed'))
   const saveMutation = useMutation({
     mutationFn: saveMoziaUserModelRedirect,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey })
       resetForm()
-      toast.success(t('User model redirect saved'))
+      toast.success(t('Routing rule saved'))
     },
-    onError: (error: unknown) =>
-      toast.error(errorMessage(error, t('Failed to save user model redirect'))),
+    onError,
   })
   const deleteMutation = useMutation({
     mutationFn: deleteMoziaUserModelRedirect,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey })
-      toast.success(t('User model redirect deleted'))
       resetForm()
       setDeleteTarget(null)
+      toast.success(t('Routing rule deleted'))
     },
-    onError: (error: unknown) =>
-      toast.error(
-        errorMessage(error, t('Failed to delete user model redirect'))
-      ),
+    onError,
   })
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    const payload: MoziaUserModelRedirectPayload = {
-      user_id: editing?.user_id ?? 0,
-      source_model: sourceModel.trim(),
-      target_model: targetModel.trim(),
-      only_thinking_disabled: onlyThinkingDisabled,
-      seamless,
-    }
-    if (!editing) payload.sso_sub = ssoSub.trim()
-    if (
-      (!editing && !payload.sso_sub) ||
-      !payload.source_model ||
-      !payload.target_model
-    ) {
+  const submit = (data: FormValues) => {
+    if (!data.all_users && !editing?.user_id && !data.sso_sub.trim()) {
+      form.setError('sso_sub', { message: 'Select a user or all users' })
       return
+    }
+    const payload: MoziaUserModelRedirectPayload = {
+      ...data,
+      id: editing?.id || crypto.randomUUID(),
+      user_id: data.all_users ? 0 : (editing?.user_id ?? 0),
+      sso_sub: data.all_users ? '' : data.sso_sub.trim(),
+      conditions: data.conditions.map((condition): RouteCondition => {
+        if (condition.operator === 'has_video') return { operator: 'has_video' }
+        if (condition.operator === 'exists') {
+          return { operator: 'exists', path: condition.path }
+        }
+        return {
+          operator: 'equals',
+          path: condition.path,
+          value: JSON.parse(condition.valueText) as RouteCondition['value'],
+        }
+      }),
     }
     saveMutation.mutate(payload)
   }
-
   const rules = rulesQuery.data ?? []
-  const SubmitIcon = editing ? Pencil : Plus
-
   return (
-    <SettingsSection title={t('User Model Redirects')}>
+    <SettingsSection title={t('Conditional Routing')}>
       <SettingsCard
-        title={t('User model fallback')}
+        title={t('Conditional Routing')}
         description={t(
-          'Configured requests use the target model by default. The trigger condition and user-visible model can be controlled independently.'
+          'Match the original request once. Higher priorities run first; all conditions must match. A specified channel never falls back to another channel.'
         )}
       >
-        <form
-          className='mb-4 grid gap-2 lg:grid-cols-[minmax(12rem,1fr)_minmax(12rem,1fr)_minmax(12rem,1fr)_auto]'
-          onSubmit={submit}
-        >
-          <Input
-            aria-label={t('SSO subject')}
-            placeholder={t('SSO subject')}
-            value={
-              editing
-                ? `${editing.username || '-'} (#${editing.user_id})`
-                : ssoSub
-            }
-            onChange={(event) => setSsoSub(event.target.value)}
-            disabled={editing !== null || saveMutation.isPending}
-            required={!editing}
-          />
-          <Input
-            aria-label={t('Source model')}
-            placeholder={t('Source model')}
-            value={sourceModel}
-            onChange={(event) => setSourceModel(event.target.value)}
-            disabled={editing !== null || saveMutation.isPending}
-            required
-          />
-          <Input
-            aria-label={t('Target model')}
-            placeholder={t('Target model')}
-            value={targetModel}
-            onChange={(event) => setTargetModel(event.target.value)}
-            disabled={saveMutation.isPending}
-            required
-          />
-          <div className='flex gap-2'>
-            <Button type='submit' disabled={saveMutation.isPending}>
-              {saveMutation.isPending ? (
-                <Spinner data-icon='inline-start' />
-              ) : (
-                <SubmitIcon data-icon='inline-start' />
-              )}
-              {editing ? t('Save') : t('Add rule')}
-            </Button>
-            {editing ? (
-              <Button type='button' variant='outline' onClick={resetForm}>
-                {t('Cancel')}
+        <form onSubmit={form.handleSubmit(submit)} className='mb-6 space-y-4'>
+          <fieldset disabled={saveMutation.isPending} className='space-y-4'>
+            <div className='flex flex-wrap gap-4'>
+              <label className='flex items-center gap-2 text-sm'>
+                <input type='checkbox' {...form.register('all_users')} />
+                {t('All users')}
+              </label>
+              <label className='flex items-center gap-2 text-sm'>
+                <input type='checkbox' {...form.register('disabled')} />
+                {t('Disabled')}
+              </label>
+            </div>
+            {!values.all_users && (
+              <div>
+                <label htmlFor={`${formId}-user`} className='text-sm'>
+                  {t('SSO subject')}
+                </label>
+                {editing?.user_id ? (
+                  <p className='text-muted-foreground text-sm'>
+                    {editing.username || editing.user_id}
+                  </p>
+                ) : (
+                  <Input id={`${formId}-user`} {...form.register('sso_sub')} />
+                )}
+                {form.formState.errors.sso_sub && (
+                  <p role='alert' className='text-destructive text-sm'>
+                    {t('Select a user or all users')}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className='grid gap-4 md:grid-cols-2'>
+              <div>
+                <label htmlFor={`${formId}-source`} className='text-sm'>
+                  {t('Source model')}
+                </label>
+                <Input
+                  id={`${formId}-source`}
+                  required
+                  {...form.register('source_model')}
+                />
+              </div>
+              <div>
+                <label htmlFor={`${formId}-priority`} className='text-sm'>
+                  {t('Priority (higher first)')}
+                </label>
+                <Input
+                  id={`${formId}-priority`}
+                  type='number'
+                  min={0}
+                  max={10000}
+                  required
+                  {...form.register('priority', { valueAsNumber: true })}
+                />
+              </div>
+              <div>
+                <label htmlFor={`${formId}-endpoint`} className='text-sm'>
+                  {t('Request endpoint')}
+                </label>
+                <select
+                  id={`${formId}-endpoint`}
+                  className={selectClass}
+                  {...form.register('endpoint')}
+                >
+                  <option value=''>{t('All endpoints')}</option>
+                  {[
+                    '/v1/chat/completions',
+                    '/v1/messages',
+                    '/v1/responses',
+                    '/pg/chat/completions',
+                  ].map((endpoint) => (
+                    <option key={endpoint} value={endpoint}>
+                      {endpoint}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor={`${formId}-channel`} className='text-sm'>
+                  {t('Target channel')}
+                </label>
+                <select
+                  id={`${formId}-channel`}
+                  className={selectClass}
+                  {...form.register('target_channel_id', {
+                    valueAsNumber: true,
+                  })}
+                >
+                  <option value={0}>{t('Automatic channel selection')}</option>
+                  {values.target_channel_id > 0 && !target && (
+                    <option value={values.target_channel_id}>
+                      #{values.target_channel_id} ({t('Unavailable')})
+                    </option>
+                  )}
+                  {targets.map((channel) => (
+                    <option
+                      key={channel.id}
+                      value={channel.id}
+                      disabled={channel.status !== 1}
+                    >
+                      #{channel.id} {channel.name}
+                      {channel.status === 1 ? '' : ` (${t('Disabled')})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor={`${formId}-target`} className='text-sm'>
+                  {t('Target model')}
+                </label>
+                {values.target_channel_id > 0 ? (
+                  <select
+                    id={`${formId}-target`}
+                    className={selectClass}
+                    required
+                    {...form.register('target_model')}
+                  >
+                    <option value=''>{t('Select a model')}</option>
+                    {values.target_model &&
+                      !models.includes(values.target_model) && (
+                        <option value={values.target_model} disabled>
+                          {values.target_model} ({t('Unavailable')})
+                        </option>
+                      )}
+                    {models.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <>
+                    <Input
+                      id={`${formId}-target`}
+                      required
+                      list={`${formId}-models`}
+                      {...form.register('target_model')}
+                    />
+                    <datalist id={`${formId}-models`}>
+                      {models.map((model) => (
+                        <option key={model} value={model} />
+                      ))}
+                    </datalist>
+                  </>
+                )}
+              </div>
+            </div>
+            {targetsQuery.isError && (
+              <p role='alert' className='text-destructive text-sm'>
+                {t('Failed to load routing targets')}
+              </p>
+            )}
+            <div className='space-y-3'>
+              <p className='text-sm font-medium'>
+                {t('Conditions (all must match)')}
+              </p>
+              {conditions.fields.map((field, index) => (
+                <div
+                  key={field.id}
+                  className='grid items-start gap-2 md:grid-cols-[1fr_1fr_1fr_auto]'
+                >
+                  <select
+                    aria-label={t('Condition operator')}
+                    className={selectClass}
+                    {...form.register(`conditions.${index}.operator`)}
+                  >
+                    <option value='has_video'>
+                      {t('Contains video input')}
+                    </option>
+                    <option value='equals'>{t('Field equals')}</option>
+                    <option value='exists'>{t('Field exists')}</option>
+                  </select>
+                  {values.conditions[index]?.operator !== 'has_video' && (
+                    <div>
+                      <Input
+                        aria-label={t('Request field path')}
+                        placeholder='thinking.type'
+                        {...form.register(`conditions.${index}.path`)}
+                      />
+                      {form.formState.errors.conditions?.[index]?.path && (
+                        <p role='alert' className='text-destructive text-sm'>
+                          {t('Enter a field path, such as thinking.type')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {values.conditions[index]?.operator === 'equals' && (
+                    <div>
+                      <Input
+                        aria-label={t('JSON comparison value')}
+                        placeholder='"disabled"'
+                        {...form.register(`conditions.${index}.valueText`)}
+                      />
+                      {form.formState.errors.conditions?.[index]?.valueText && (
+                        <p role='alert' className='text-destructive text-sm'>
+                          {t('Enter a JSON string, number, boolean or null')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <Button
+                    type='button'
+                    variant='outline'
+                    onClick={() => conditions.remove(index)}
+                    aria-label={t('Remove condition')}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type='button'
+                variant='outline'
+                disabled={conditions.fields.length >= 8}
+                onClick={() =>
+                  conditions.append({
+                    operator: 'has_video',
+                    path: '',
+                    valueText: '',
+                  })
+                }
+              >
+                <Plus />
+                {t('Add condition')}
               </Button>
-            ) : null}
-          </div>
-          <div className='flex flex-wrap gap-x-6 gap-y-2 px-1 lg:col-span-4'>
-            <div className='flex min-h-9 items-center gap-2'>
-              <Switch
-                id={onlyThinkingDisabledId}
-                checked={onlyThinkingDisabled}
-                onCheckedChange={setOnlyThinkingDisabled}
-                disabled={saveMutation.isPending}
-              />
-              <label htmlFor={onlyThinkingDisabledId} className='text-sm'>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'No conditions means always match. Field paths use dots and array indices; values preserve JSON types. Video detection checks structured media in the full request history, not links in text.'
+                )}
+              </p>
+            </div>
+            <div className='flex flex-wrap gap-4'>
+              <label className='flex items-center gap-2 text-sm'>
+                <input
+                  type='checkbox'
+                  {...form.register('only_thinking_disabled')}
+                />
                 {t('Only when thinking is disabled')}
               </label>
-            </div>
-            <div className='flex min-h-9 items-center gap-2'>
-              <Switch
-                id={seamlessId}
-                checked={seamless}
-                onCheckedChange={setSeamless}
-                disabled={saveMutation.isPending}
-              />
-              <label
-                htmlFor={seamlessId}
-                className='text-sm'
-                title={t(
-                  'Show the source model in API responses and user-visible logs. Routing, billing, and administrator diagnostics still use the target model.'
-                )}
-              >
-                {t('Seamless fallback')}
+              <label className='flex items-center gap-2 text-sm'>
+                <input type='checkbox' {...form.register('seamless')} />
+                {t('Keep the requested model visible')}
               </label>
             </div>
-          </div>
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Switching models uses the target model for billing. Switching only channels keeps the same model pricing. Legacy thinking-disabled rules also remove the thinking parameter.'
+              )}
+            </p>
+            {Object.keys(form.formState.errors).length > 0 && (
+              <p role='alert' className='text-destructive text-sm'>
+                {t('Check the routing rule fields')}
+              </p>
+            )}
+            <div className='flex gap-2'>
+              <Button type='submit'>
+                {saveMutation.isPending ? <Spinner /> : <Plus />}
+                {editing ? t('Save') : t('Add rule')}
+              </Button>
+              {editing && (
+                <Button type='button' variant='outline' onClick={resetForm}>
+                  {t('Cancel')}
+                </Button>
+              )}
+            </div>
+          </fieldset>
         </form>
-
-        {rulesQuery.isLoading && (
-          <div className='text-muted-foreground flex min-h-32 items-center justify-center gap-2 text-sm'>
-            <Spinner /> {t('Loading user model redirects...')}
-          </div>
-        )}
-        {!rulesQuery.isLoading && rulesQuery.isError && (
-          <div className='text-destructive py-8 text-center text-sm'>
-            {errorMessage(rulesQuery.error, t('Request failed'))}
-          </div>
+        {rulesQuery.isLoading && <Spinner />}
+        {rulesQuery.isError && (
+          <p role='alert' className='text-destructive'>
+            {t('Request failed')}
+          </p>
         )}
         {!rulesQuery.isLoading && !rulesQuery.isError && rules.length === 0 && (
-          <div className='text-muted-foreground py-8 text-center text-sm'>
-            {t('No user model redirects')}
-          </div>
+          <p className='text-muted-foreground'>{t('No routing rules')}</p>
         )}
-        {!rulesQuery.isLoading && !rulesQuery.isError && rules.length > 0 && (
+        {rules.length > 0 && (
           <div className='overflow-x-auto'>
-            <Table className='min-w-[940px]'>
+            <Table className='min-w-[900px]'>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t('User')}</TableHead>
-                  <TableHead>{t('Source model')}</TableHead>
-                  <TableHead>{t('Target model')}</TableHead>
-                  <TableHead>{t('Trigger')}</TableHead>
-                  <TableHead>{t('Fallback mode')}</TableHead>
-                  <TableHead className='text-right'>{t('Actions')}</TableHead>
+                  {[
+                    t('User'),
+                    t('Source model'),
+                    t('Target model'),
+                    t('Priority'),
+                    t('Conditions'),
+                    t('Actions'),
+                  ].map((label) => (
+                    <TableHead key={label}>{label}</TableHead>
+                  ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rules.map((rule) => (
-                  <TableRow key={`${rule.user_id}:${rule.source_model}`}>
+                  <TableRow key={rule.id}>
                     <TableCell>
-                      <div className='font-medium'>{rule.username || '-'}</div>
-                      <div className='text-muted-foreground text-xs'>
-                        #{rule.user_id}
-                      </div>
+                      {rule.all_users
+                        ? t('All users')
+                        : `${rule.username || ''} #${rule.user_id}`}
+                      {rule.disabled && (
+                        <p className='text-muted-foreground'>{t('Disabled')}</p>
+                      )}
                     </TableCell>
-                    <TableCell className='font-mono text-xs'>
+                    <TableCell>
                       {rule.source_model}
+                      <p className='text-muted-foreground text-xs'>
+                        {rule.endpoint || t('All endpoints')}
+                      </p>
                     </TableCell>
-                    <TableCell className='font-mono text-xs'>
+                    <TableCell>
                       {rule.target_model}
+                      <p className='text-muted-foreground text-xs'>
+                        {rule.target_channel_id
+                          ? `#${rule.target_channel_id} ${targets.find((channel) => channel.id === rule.target_channel_id)?.name || ''}`
+                          : t('Automatic channel selection')}
+                      </p>
+                    </TableCell>
+                    <TableCell>{rule.priority}</TableCell>
+                    <TableCell>
+                      {rule.only_thinking_disabled && (
+                        <p>{t('Thinking disabled')}</p>
+                      )}
+                      <p className='whitespace-pre-line'>
+                        {rule.conditions
+                          ?.map((condition) => {
+                            if (condition.operator === 'exists') {
+                              return `${condition.path}: ${t('Field exists')}`
+                            }
+                            if (condition.operator === 'equals') {
+                              return `${condition.path} = ${JSON.stringify(condition.value)}`
+                            }
+                            return t('Contains video input')
+                          })
+                          .join('\n')}
+                      </p>
+                      {!rule.only_thinking_disabled &&
+                        !rule.conditions?.length &&
+                        t('Always')}
                     </TableCell>
                     <TableCell>
-                      {t(
-                        rule.only_thinking_disabled
-                          ? 'Thinking disabled'
-                          : 'Always'
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {t(
-                        rule.seamless
-                          ? 'Seamless fallback'
-                          : 'Standard fallback'
-                      )}
-                    </TableCell>
-                    <TableCell className='text-right'>
-                      <div className='flex justify-end gap-1'>
+                      <div className='flex gap-1'>
                         <Button
                           size='icon'
                           variant='ghost'
-                          title={t('Edit')}
+                          aria-label={t('Edit')}
                           onClick={() => {
                             setEditing(rule)
-                            setSsoSub('')
-                            setSourceModel(rule.source_model)
-                            setTargetModel(rule.target_model)
-                            setOnlyThinkingDisabled(rule.only_thinking_disabled)
-                            setSeamless(rule.seamless)
+                            form.reset({
+                              ...defaults,
+                              ...rule,
+                              sso_sub: '',
+                              conditions: (rule.conditions ?? []).map(
+                                (condition) => ({
+                                  operator: condition.operator,
+                                  path: condition.path ?? '',
+                                  valueText:
+                                    condition.operator === 'equals'
+                                      ? JSON.stringify(condition.value)
+                                      : '',
+                                })
+                              ),
+                            })
                           }}
                         >
                           <Pencil />
@@ -302,7 +591,7 @@ export function MoziaUserModelRedirectSection() {
                         <Button
                           size='icon'
                           variant='ghost'
-                          title={t('Delete')}
+                          aria-label={t('Delete')}
                           onClick={() => setDeleteTarget(rule)}
                         >
                           <Trash2 />
@@ -316,16 +605,17 @@ export function MoziaUserModelRedirectSection() {
           </div>
         )}
       </SettingsCard>
-
       <AlertDialog
         open={deleteTarget !== null}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('Delete redirect rule?')}</AlertDialogTitle>
+            <AlertDialogTitle>{t('Delete routing rule?')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t('This user will stop using the configured model fallback.')}
+              {t(
+                'Matching requests will use the remaining rules or normal channel selection.'
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -339,9 +629,6 @@ export function MoziaUserModelRedirectSection() {
                 deleteTarget && deleteMutation.mutate(deleteTarget)
               }
             >
-              {deleteMutation.isPending ? (
-                <Spinner data-icon='inline-start' />
-              ) : null}
               {t('Delete')}
             </AlertDialogAction>
           </AlertDialogFooter>

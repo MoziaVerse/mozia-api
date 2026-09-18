@@ -40,7 +40,27 @@ export type MoziaUserModelRatio = MoziaUserRatioBase &
 
 export type MoziaUserModelRatioPayload = MoziaUserModelRatio
 
+export type RouteCondition = {
+  operator: 'equals' | 'exists' | 'has_video'
+  path?: string
+  value?: string | number | boolean | null
+}
+
+export type RoutingTarget = {
+  id: number
+  name: string
+  models: string[]
+  status: number
+}
+
 export type MoziaUserModelRedirect = {
+  id: string
+  all_users: boolean
+  disabled: boolean
+  priority: number
+  endpoint?: string
+  conditions?: RouteCondition[]
+  target_channel_id: number
   user_id: number
   username?: string
   source_model: string

@@ -24,6 +24,7 @@ import { api } from '@/lib/api'
 
 import type {
   ApiEnvelope,
+  RoutingTarget,
   ManagedAdminPage,
   MoziaUserModelRedirect,
   MoziaUserModelRedirectPayload,
@@ -85,6 +86,13 @@ export async function deleteMoziaUserModelRatio(rule: MoziaUserModelRatio) {
   return unwrapResponse(response.data)
 }
 
+export async function getMoziaRoutingTargets() {
+  const response = await api.get<ApiEnvelope<RoutingTarget[]>>(
+    `${USER_MODEL_REDIRECT_ENDPOINT}/targets`
+  )
+  return unwrapResponse(response.data)
+}
+
 export async function getMoziaUserModelRedirects() {
   const response = await api.get<ApiEnvelope<MoziaUserModelRedirect[]>>(
     `${USER_MODEL_REDIRECT_ENDPOINT}/`,
@@ -110,7 +118,7 @@ export async function deleteMoziaUserModelRedirect(
   const response = await api.delete<ApiEnvelope<null>>(
     `${USER_MODEL_REDIRECT_ENDPOINT}/${rule.user_id}`,
     {
-      params: { source_model: rule.source_model },
+      params: { source_model: rule.source_model, rule_id: rule.id },
       skipBusinessError: true,
       skipErrorHandler: true,
     }
