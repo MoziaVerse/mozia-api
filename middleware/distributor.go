@@ -209,9 +209,11 @@ func Distribute() func(c *gin.Context) {
 			// Reuse the existing strict-channel contract for retries and supplier admission.
 			common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, strconv.Itoa(channel.Id))
 		}
-		if apiErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); apiErr != nil {
-			abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
-			return
+		if shouldSelectChannel || channel != nil {
+			if apiErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); apiErr != nil {
+				abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
+				return
+			}
 		}
 		c.Next()
 		if routing := service.SupplierRoutingState(c); routing != nil && routing.Current != nil && routing.Current.Status != "success" {
