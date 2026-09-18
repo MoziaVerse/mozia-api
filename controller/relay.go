@@ -649,6 +649,7 @@ func RelayTask(c *gin.Context) {
 		}
 
 		task := model.InitTask(result.Platform, relayInfo)
+		task.Properties.PublicModelName = common.GetUserVisibleModel(c, relayInfo.OriginModelName)
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.WalletReservationRequestId = relayInfo.WalletReservationRequestId
@@ -684,7 +685,8 @@ func RelayTask(c *gin.Context) {
 			}
 		}
 		if result.Platform == constant.TaskPlatformVolcengineVideo {
-			c.Data(http.StatusOK, "application/json", result.TaskData)
+			c.Header("Content-Type", "application/json")
+			service.IOCopyBytesGracefully(c, nil, result.TaskData)
 		}
 	}
 

@@ -337,7 +337,7 @@ func applyUserModelRedirect(c *gin.Context, request *ModelRequest) error {
 	if rule.OnlyThinkingDisabled {
 		common.SetContextKey(c, constant.ContextKeyStripRedirectThinking, true)
 	}
-	if rule.Seamless {
+	if rule.Seamless && common.GetUserVisibleModel(c, "") == "" {
 		common.SetContextKey(c, constant.ContextKeyUserVisibleModel, request.Model)
 	}
 	request.Model = rule.TargetModel
@@ -521,6 +521,8 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 
+	// Snapshot the public name before billing suffixes, redirects and channel mappings.
+	common.SetContextKey(c, constant.ContextKeyUserVisibleModel, modelRequest.Model)
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/responses/compact") && modelRequest.Model != "" {
 		modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
 	}

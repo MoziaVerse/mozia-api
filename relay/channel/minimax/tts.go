@@ -183,16 +183,6 @@ func handleChatCompletionResponse(c *gin.Context, resp *http.Response, info *rel
 	}
 	defer resp.Body.Close()
 
-	// Set response headers
-	for key, values := range resp.Header {
-		if !service.ShouldCopyUpstreamHeader(c, key, values) {
-			continue
-		}
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
-
-	c.Data(resp.StatusCode, "application/json", body)
+	service.IOCopyBytesGracefully(c, resp, body)
 	return nil, nil
 }

@@ -129,7 +129,9 @@ func TestVolcengineVideoQueryListAndDelete(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `"last_frame_url"`)
 	var stored model.Task
 	require.NoError(t, db.Where("task_id = ?", "cgt-own").First(&stored).Error)
-	assert.Equal(t, rec.Body.Bytes(), []byte(stored.Data))
+	assert.Contains(t, rec.Body.String(), `"model":"public-model"`)
+	assert.Contains(t, string(stored.Data), `"model":"upstream-model"`)
+	assert.JSONEq(t, strings.ReplaceAll(string(stored.Data), `"model":"upstream-model"`, `"model":"public-model"`), rec.Body.String())
 	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), stored.Status)
 
 	rec = httptest.NewRecorder()
@@ -143,6 +145,8 @@ func TestVolcengineVideoQueryListAndDelete(t *testing.T) {
 	assert.Equal(t, 2, list.Total)
 	require.Len(t, list.Items, 1)
 	assert.NotContains(t, rec.Body.String(), "cgt-foreign")
+	assert.Contains(t, rec.Body.String(), `"model":"public-model"`)
+	assert.NotContains(t, rec.Body.String(), "upstream-model")
 
 	for _, id := range []string{"cgt-own", "cgt-done"} {
 		rec = httptest.NewRecorder()
