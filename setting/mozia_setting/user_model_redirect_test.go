@@ -25,21 +25,21 @@ func TestUserModelRedirectExactMatchAndMutation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, UpdateUserModelRedirectsByJSONString(value))
 
-	got, ok := GetUserModelRedirect(6218, "vendor/source")
+	got, ok := MatchUserModelRedirect(6218, "vendor/source", "/v1/chat/completions", "", nil)
 	require.True(t, ok)
 	assert.Equal(t, "vendor/target", got.TargetModel)
 	assert.True(t, got.Seamless)
 	assert.False(t, got.OnlyThinkingDisabled)
-	_, ok = GetUserModelRedirect(6218, "Vendor/source")
+	_, ok = MatchUserModelRedirect(6218, "Vendor/source", "/v1/chat/completions", "", nil)
 	assert.False(t, ok)
 	assert.Equal(t, []UserModelRedirect{{
-		UserId: 6218, SourceModel: "vendor/source", TargetModel: "vendor/target", Seamless: true,
+		ID: "6218:vendor/source", UserId: 6218, SourceModel: "vendor/source", TargetModel: "vendor/target", Seamless: true,
 	}}, GetUserModelRedirects())
 
 	value, err = BuildUserModelRedirectDeleteJSON(6218, "vendor/source")
 	require.NoError(t, err)
 	require.NoError(t, UpdateUserModelRedirectsByJSONString(value))
-	_, ok = GetUserModelRedirect(6218, "vendor/source")
+	_, ok = MatchUserModelRedirect(6218, "vendor/source", "/v1/chat/completions", "", nil)
 	assert.False(t, ok)
 }
 
@@ -62,7 +62,7 @@ func TestUserModelRedirectMigratesExistingFormats(t *testing.T) {
 	})
 
 	require.NoError(t, UpdateUserModelRedirectsByJSONString(`{"7073":true}`))
-	rule, ok := GetUserModelRedirect(7073, "moonshotai/kimi-k3")
+	rule, ok := MatchUserModelRedirect(7073, "moonshotai/kimi-k3", "/v1/chat/completions", "disabled", nil)
 	require.True(t, ok)
 	assert.Equal(t, "moonshotai/kimi-k2.6", rule.TargetModel)
 	assert.True(t, rule.OnlyThinkingDisabled)
@@ -74,7 +74,7 @@ func TestUserModelRedirectMigratesExistingFormats(t *testing.T) {
 			"target_model": "vendor/target"
 		}
 	}`))
-	rule, ok = GetUserModelRedirect(7073, "vendor/source")
+	rule, ok = MatchUserModelRedirect(7073, "vendor/source", "/v1/chat/completions", "disabled", nil)
 	require.True(t, ok)
 	assert.True(t, rule.OnlyThinkingDisabled)
 }

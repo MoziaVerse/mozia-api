@@ -61,6 +61,7 @@ type ApiResponse<T> = {
   success: boolean
   message: string
   data: T
+  application?: string
 }
 
 export async function getChannelCosts(): Promise<ChannelCostData> {
@@ -73,18 +74,21 @@ export async function getChannelCosts(): Promise<ChannelCostData> {
 
 export async function saveChannelCost(
   cost: Omit<ChannelCostRecord, 'id'>
-): Promise<ChannelCostRecord> {
+): Promise<ApiResponse<ChannelCostRecord>> {
   const response = await api.put<ApiResponse<ChannelCostRecord>>(
     '/api/mozia/model-pricing/channel-costs',
     cost
   )
   if (!response.data.success) throw new Error(response.data.message)
-  return response.data.data
+  return response.data
 }
 
-export async function deleteChannelCost(id: number): Promise<void> {
+export async function deleteChannelCost(
+  id: number
+): Promise<ApiResponse<unknown>> {
   const response = await api.delete<ApiResponse<unknown>>(
     `/api/mozia/model-pricing/channel-costs/${id}`
   )
   if (!response.data.success) throw new Error(response.data.message)
+  return response.data
 }

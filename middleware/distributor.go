@@ -29,6 +29,7 @@ type ModelRequest struct {
 	Model        string `json:"model"`
 	Group        string `json:"group,omitempty"`
 	ThinkingType string `json:"-"`
+	Body         []byte `json:"-"`
 }
 
 func Distribute() func(c *gin.Context) {
@@ -49,13 +50,58 @@ func Distribute() func(c *gin.Context) {
 				return
 			}
 		}
+		// Select a channel for the user
+		// check token model mapping
+		modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
+		if modelLimitEnable {
+			s, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
+			if !ok {
+				// token model limit is empty, all models are not allowed
+				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenNoModelAccess))
+				return
+			}
+			tokenModelLimit, _ := s.(map[string]bool)
+			matchName := ratio_setting.FormatMatchingModelName(modelRequest.Model) // match gpts & thinking-*
+			if _, ok := tokenModelLimit[matchName]; !ok {
+				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenModelForbidden, map[string]any{"Model": modelRequest.Model}))
+				return
+			}
+		}
+		if shouldSelectChannel {
+			if err := applyUserModelRedirect(c, modelRequest); err != nil {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, err.Error())
+				return
+			}
+			if common.GetContextKeyString(c, constant.ContextKeyRequestedModel) != "" {
+				if common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled) {
+					allowed, _ := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
+					models, _ := allowed.(map[string]bool)
+					if !models[ratio_setting.FormatMatchingModelName(modelRequest.Model)] {
+						abortWithOpenAiMessage(c, http.StatusForbidden, "token has no access to routing target model")
+						return
+					}
+				}
+				if apiErr := service.EnforceResellerModelAccess(c.GetInt("id"), modelRequest.Model); apiErr != nil {
+					abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
+					return
+				}
+			}
+		}
 		if ok {
 			id, err := strconv.Atoi(channelId.(string))
 			if err != nil {
 				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidChannelId))
 				return
 			}
-			channel, err = model.GetChannelById(id, true)
+			if target := common.GetContextKeyInt(c, constant.ContextKeyRouteChannelID); target > 0 {
+				if id != target {
+					abortWithOpenAiMessage(c, http.StatusForbidden, "specified channel conflicts with routing rule")
+					return
+				}
+				channel, _, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{Ctx: c, ModelName: modelRequest.Model, TokenGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup), RequestPath: c.Request.URL.Path})
+			} else {
+				channel, err = model.GetChannelById(id, true)
+			}
 			if err != nil {
 				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidChannelId))
 				return
@@ -65,36 +111,8 @@ func Distribute() func(c *gin.Context) {
 				return
 			}
 		} else {
-			// Select a channel for the user
-			// check token model mapping
-			modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
-			if modelLimitEnable {
-				s, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
-				if !ok {
-					// token model limit is empty, all models are not allowed
-					abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenNoModelAccess))
-					return
-				}
-				var tokenModelLimit map[string]bool
-				tokenModelLimit, ok = s.(map[string]bool)
-				if !ok {
-					tokenModelLimit = map[string]bool{}
-				}
-				matchName := ratio_setting.FormatMatchingModelName(modelRequest.Model) // match gpts & thinking-*
-				if _, ok := tokenModelLimit[matchName]; !ok {
-					abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenModelForbidden, map[string]any{"Model": modelRequest.Model}))
-					return
-				}
-			}
 
 			if shouldSelectChannel {
-				applyUserModelRedirect(c, modelRequest)
-				if common.GetContextKeyString(c, constant.ContextKeyRequestedModel) != "" {
-					if apiErr := service.EnforceResellerModelAccess(c.GetInt("id"), modelRequest.Model); apiErr != nil {
-						abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
-						return
-					}
-				}
 				if modelRequest.Model == "" {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
 					return
@@ -119,7 +137,12 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 
-				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
+				var preferredChannelID int
+				var found bool
+				if common.GetContextKeyInt(c, constant.ContextKeyRouteChannelID) == 0 {
+					preferredChannelID, found = service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup)
+				}
+				if found {
 					affinityUsable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
@@ -182,10 +205,24 @@ func Distribute() func(c *gin.Context) {
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-		SetupContextForSelectedChannel(c, channel, modelRequest.Model)
+		if common.GetContextKeyInt(c, constant.ContextKeyRouteChannelID) > 0 {
+			// Reuse the existing strict-channel contract for retries and supplier admission.
+			common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, strconv.Itoa(channel.Id))
+		}
+		if apiErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); apiErr != nil {
+			abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
+			return
+		}
 		c.Next()
+		if routing := service.SupplierRoutingState(c); routing != nil && routing.Current != nil && routing.Current.Status != "success" {
+			return
+		}
 		if channel != nil && c.Writer != nil && c.Writer.Status() < http.StatusBadRequest {
-			service.RecordChannelAffinity(c, channel.Id)
+			successfulID := c.GetInt("supplier_success_channel_id")
+			if successfulID == 0 {
+				successfulID = channel.Id
+			}
+			service.RecordChannelAffinity(c, successfulID)
 		}
 	}
 }
@@ -264,17 +301,38 @@ func getModelFromJSONBody(c *gin.Context) (*ModelRequest, error) {
 		Model:        model,
 		Group:        group,
 		ThinkingType: thinkingType,
+		Body:         requestBody,
 	}, nil
 }
 
-func applyUserModelRedirect(c *gin.Context, request *ModelRequest) {
+func applyUserModelRedirect(c *gin.Context, request *ModelRequest) error {
 	if request == nil {
-		return
+		return nil
 	}
-	rule, ok := mozia_setting.GetUserModelRedirect(c.GetInt("id"), request.Model)
-	if !ok || (rule.OnlyThinkingDisabled && request.ThinkingType != "disabled") {
-		return
+	body := request.Body
+	if body == nil && strings.HasPrefix(c.GetHeader("Content-Type"), "application/json") {
+		storage, err := common.GetBodyStorage(c)
+		if err != nil {
+			return err
+		}
+		body, err = storage.Bytes()
+		if err != nil {
+			return err
+		}
+		if !gjson.ValidBytes(body) {
+			return errors.New("invalid JSON request body")
+		}
+		if _, err := storage.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		c.Request.Body = io.NopCloser(storage)
 	}
+	rule, ok := mozia_setting.MatchUserModelRedirect(c.GetInt("id"), request.Model, c.Request.URL.Path, request.ThinkingType, body)
+	if !ok {
+		return nil
+	}
+	common.SetContextKey(c, constant.ContextKeyConditionalRouteID, rule.ID)
+	common.SetContextKey(c, constant.ContextKeyRouteChannelID, rule.TargetChannelId)
 	common.SetContextKey(c, constant.ContextKeyRequestedModel, request.Model)
 	if rule.OnlyThinkingDisabled {
 		common.SetContextKey(c, constant.ContextKeyStripRedirectThinking, true)
@@ -283,6 +341,7 @@ func applyUserModelRedirect(c *gin.Context, request *ModelRequest) {
 		common.SetContextKey(c, constant.ContextKeyUserVisibleModel, request.Model)
 	}
 	request.Model = rule.TargetModel
+	return nil
 }
 
 func getJSONStringValue(result gjson.Result, field string) (string, error) {
@@ -458,8 +517,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		if err != nil {
 			return nil, false, err
 		}
-		modelRequest.Model = req.Model
-		modelRequest.Group = req.Group
+		modelRequest = *req
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 

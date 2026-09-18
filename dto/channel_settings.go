@@ -34,7 +34,17 @@ const (
 	AwsKeyTypeApiKey AwsKeyType = "api_key"
 )
 
+type SupplierModelDeclaration struct {
+	ID              string `json:"id"`
+	Version         string `json:"version"`
+	ContextLength   int64  `json:"context_length"`
+	MaxOutputTokens int64  `json:"max_output_tokens"`
+}
+
 type ChannelOtherSettings struct {
+	SupplierDeclarations []SupplierModelDeclaration `json:"supplier_model_declarations,omitempty"`
+	SupplierPools        map[string]int64           `json:"supplier_pools,omitempty"`
+
 	AzureResponsesVersion                 string                `json:"azure_responses_version,omitempty"`
 	VertexKeyType                         VertexKeyType         `json:"vertex_key_type,omitempty"` // "json" or "api_key"
 	OpenRouterEnterprise                  *bool                 `json:"openrouter_enterprise,omitempty"`

@@ -205,14 +205,17 @@ func InitDB() (err error) {
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
 		if !common.IsMasterNode {
-			return nil
+			return RegisterSupplierChannelGuards(DB)
 		}
 		if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
 			//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
 		}
 		common.SysLog("database migration started")
 		err = migrateDB()
-		return err
+		if err != nil {
+			return err
+		}
+		return RegisterSupplierChannelGuards(DB)
 	} else {
 		common.FatalLog(err)
 	}
@@ -311,6 +314,7 @@ func migrateDB() error {
 		&ResellerPriceRule{},
 		&ResellerRequestSettlement{},
 		&ChannelCostPricing{},
+		&Supplier{}, &SupplierPool{}, &SupplierBinding{}, &SupplierRoutingRule{}, &RoutingRevision{}, &SupplierAttempt{},
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
@@ -329,7 +333,7 @@ func migrateDB() error {
 			return err
 		}
 	}
-	return nil
+	return MigrateSupplierResources()
 }
 
 func migrateDBFast() error {
@@ -382,6 +386,7 @@ func migrateDBFast() error {
 		{&ResellerPriceRule{}, "ResellerPriceRule"},
 		{&ResellerRequestSettlement{}, "ResellerRequestSettlement"},
 		{&ChannelCostPricing{}, "ChannelCostPricing"},
+		{&Supplier{}, "Supplier"}, {&SupplierPool{}, "SupplierPool"}, {&SupplierBinding{}, "SupplierBinding"}, {&SupplierRoutingRule{}, "SupplierRoutingRule"}, {&RoutingRevision{}, "RoutingRevision"}, {&SupplierAttempt{}, "SupplierAttempt"},
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
@@ -419,7 +424,7 @@ func migrateDBFast() error {
 		}
 	}
 	common.SysLog("database migrated")
-	return nil
+	return MigrateSupplierResources()
 }
 
 func migrateLOGDB() error {

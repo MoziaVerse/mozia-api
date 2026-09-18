@@ -58,7 +58,7 @@ const MOZIA_SETTINGS_SECTIONS = [
   },
   {
     id: 'user-model-redirects',
-    titleKey: 'User Model Redirects',
+    titleKey: 'Conditional Routing',
     build: () => createElement(MoziaUserModelRedirectSection),
   },
 ] as const

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"io"
 	"math"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -84,6 +86,18 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 }
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
+	if c, ok := ctx.(*gin.Context); ok && resp != nil && resp.StatusCode == http.StatusTooManyRequests {
+		if s := SupplierRoutingState(c); s != nil {
+			value := resp.Header.Get("Retry-After")
+			seconds, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				if at, err := http.ParseTime(value); err == nil {
+					seconds = int64(time.Until(at).Seconds())
+				}
+			}
+			s.RetryAfterSeconds = max(0, min(86400, seconds))
+		}
+	}
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 
 	responseBody, err := io.ReadAll(resp.Body)

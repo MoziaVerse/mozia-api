@@ -51,3 +51,9 @@ backups/
 service/relayconvert/chat_responses_live_local_test.go
 service/openaicompat/chat_responses_live_local_test.go
 .omx/
+
+# Local reports, probes, exports, and review artifacts.
+/output/
+
+# Local development documentation.
+/docs-dev/

@@ -81,7 +81,7 @@ func TestApplyUserModelRedirect(t *testing.T) {
 			c.Set("id", tt.userID)
 			request := &ModelRequest{Model: tt.model, ThinkingType: tt.thinkingType}
 
-			applyUserModelRedirect(c, request)
+			require.NoError(t, applyUserModelRedirect(c, request))
 
 			assert.Equal(t, tt.wantModel, request.Model)
 			assert.Equal(t, tt.wantStripThinking, common.GetContextKeyBool(c, constant.ContextKeyStripRedirectThinking))

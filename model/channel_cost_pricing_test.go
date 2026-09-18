@@ -32,12 +32,12 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, UpsertChannelCostPricing(&cost))
+	require.NoError(t, UpsertChannelCostPricing(db, &cost))
 	assert.Equal(t, "CNY", cost.Currency)
 
 	basePrice = 0.16
 	cost.Config.BasePrice = &basePrice
-	require.NoError(t, UpsertChannelCostPricing(&cost))
+	require.NoError(t, UpsertChannelCostPricing(db, &cost))
 	costs, err := ListChannelCostPricing()
 	require.NoError(t, err)
 	require.Len(t, costs, 1)
@@ -45,10 +45,10 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 	assert.Equal(t, 0.16, *costs[0].Config.BasePrice)
 
 	cost.ModelName = "unrelated-ocr"
-	assert.ErrorContains(t, UpsertChannelCostPricing(&cost), "model does not belong")
+	assert.ErrorContains(t, UpsertChannelCostPricing(db, &cost), "model does not belong")
 	cost.ModelName = "video-model"
 	require.NoError(t, db.Model(&channel).Update("deployment_type", ChannelDeploymentSelfHosted).Error)
-	assert.ErrorContains(t, UpsertChannelCostPricing(&cost), "self-hosted")
+	assert.ErrorContains(t, UpsertChannelCostPricing(db, &cost), "self-hosted")
 	costs, err = ListChannelCostPricing()
 	require.NoError(t, err)
 	require.Len(t, costs, 1)
@@ -56,7 +56,7 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 	require.NoError(t, db.Model(&channel).Update("deployment_type", ChannelDeploymentThirdParty).Error)
 
 	cost.Mode = ChannelCostModeParametric
-	err = UpsertChannelCostPricing(&cost)
+	err = UpsertChannelCostPricing(db, &cost)
 	assert.ErrorContains(t, err, "task billing mode must be parametric")
 
 	cost.Mode = ChannelCostModeTokenParametric
@@ -71,7 +71,7 @@ func TestChannelCostPricingUpsertAndValidation(t *testing.T) {
 			},
 		},
 	}
-	require.NoError(t, UpsertChannelCostPricing(&cost))
+	require.NoError(t, UpsertChannelCostPricing(db, &cost))
 	costs, err = ListChannelCostPricing()
 	require.NoError(t, err)
 	require.Len(t, costs, 1)

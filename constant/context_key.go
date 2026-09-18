@@ -9,6 +9,8 @@ const (
 
 	ContextKeyOriginalModel         ContextKey = "original_model"
 	ContextKeyRequestedModel        ContextKey = "requested_model"
+	ContextKeyConditionalRouteID    ContextKey = "conditional_route_id"
+	ContextKeyRouteChannelID        ContextKey = "conditional_route_channel_id"
 	ContextKeyStripRedirectThinking ContextKey = "strip_redirect_thinking"
 	ContextKeyUserVisibleModel      ContextKey = "user_visible_model"
 	ContextKeyRequestStartTime      ContextKey = "request_start_time"

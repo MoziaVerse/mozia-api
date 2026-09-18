@@ -19,12 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMutation } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
   hasPermission,
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
+
 import { createChannel, updateChannel } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
@@ -119,6 +121,9 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
         )
         if (!response.success) {
           throw new Error(response.message || t(ERROR_MESSAGES.UPDATE_FAILED))
+        }
+        if (response.procurement?.application === 'pending') {
+          return 'Channel saved; routing application pending'
         }
         return SUCCESS_MESSAGES.UPDATED
       }

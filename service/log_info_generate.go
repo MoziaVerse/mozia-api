@@ -67,6 +67,10 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 		other["is_system_prompt_overwritten"] = true
 	}
 
+	if ruleID := common.GetContextKeyString(ctx, constant.ContextKeyConditionalRouteID); ruleID != "" {
+		adminInfo["routing_rule_id"] = ruleID
+		adminInfo["routing_target_channel_id"] = common.GetContextKeyInt(ctx, constant.ContextKeyRouteChannelID)
+	}
 	adminInfo["use_channel"] = ctx.GetStringSlice("use_channel")
 	isMultiKey := common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey)
 	if isMultiKey {

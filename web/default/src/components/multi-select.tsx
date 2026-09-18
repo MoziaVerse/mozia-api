@@ -16,13 +16,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import * as React from 'react'
+
 import { Add01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
+import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { copyToClipboard } from '@/lib/copy-to-clipboard'
-import { cn } from '@/lib/utils'
+
 import {
   Combobox,
   ComboboxChip,
@@ -36,10 +36,14 @@ import {
   ComboboxValue,
   useComboboxAnchor,
 } from '@/components/ui/combobox'
+import { copyToClipboard } from '@/lib/copy-to-clipboard'
+import { cn } from '@/lib/utils'
 
 export type Option = {
   label: string
   value: string
+  disabled?: boolean
+  description?: string
 }
 
 interface MultiSelectProps {
@@ -130,10 +134,10 @@ export function MultiSelect(props: MultiSelectProps) {
 
   // Lookup of value -> display label so chips and items can show friendly names
   // even when the underlying option list changes (e.g. custom-added values).
-  const labelMap = React.useMemo(() => {
-    const map = new Map<string, string>()
+  const optionMap = React.useMemo(() => {
+    const map = new Map<string, Option>()
     for (const option of props.options) {
-      map.set(option.value, option.label)
+      map.set(option.value, option)
     }
     return map
   }, [props.options])
@@ -164,7 +168,7 @@ export function MultiSelect(props: MultiSelectProps) {
     if (canCreate) {
       set.add(trimmedInput)
     }
-    return Array.from(set)
+    return [...set]
   }, [props.options, props.selected, canCreate, trimmedInput])
 
   const addValues = React.useCallback(
@@ -249,6 +253,7 @@ export function MultiSelect(props: MultiSelectProps) {
     <Combobox
       multiple
       items={items}
+      itemToStringLabel={(value) => optionMap.get(value)?.label ?? value}
       value={props.selected}
       onValueChange={handleValueChange}
       inputValue={inputValue}
@@ -281,7 +286,7 @@ export function MultiSelect(props: MultiSelectProps) {
             return (
               <>
                 {visibleValues.map((value) => {
-                  const label = labelMap.get(value) ?? value
+                  const label = optionMap.get(value)?.label ?? value
                   return (
                     <ComboboxChip key={value}>
                       {props.copyChipOnClick ? (
@@ -355,11 +360,13 @@ export function MultiSelect(props: MultiSelectProps) {
           <ComboboxCollection>
             {(item: string) => {
               const isCreate = canCreate && item === trimmedInput
-              const label = labelMap.get(item) ?? item
+              const option = optionMap.get(item)
+              const label = option?.label ?? item
               return (
                 <ComboboxItem
                   key={item}
                   value={item}
+                  disabled={option?.disabled}
                   className={isCreate ? 'text-foreground' : undefined}
                 >
                   {isCreate ? (
@@ -377,7 +384,14 @@ export function MultiSelect(props: MultiSelectProps) {
                       </span>
                     </>
                   ) : (
-                    <span className='truncate'>{label}</span>
+                    <span className='min-w-0'>
+                      <span className='block truncate'>{label}</span>
+                      {option?.description && (
+                        <span className='text-muted-foreground block text-xs'>
+                          {option.description}
+                        </span>
+                      )}
+                    </span>
                   )}
                 </ComboboxItem>
               )

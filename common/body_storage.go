@@ -14,6 +14,9 @@ import (
 type BodyStorage interface {
 	io.ReadSeeker
 	io.Closer
+	// NewReader opens an independent reader at the start of the stored body.
+	// Closing it does not close or remove the storage owned by the caller.
+	NewReader() (io.ReadCloser, error)
 	// Bytes 获取全部内容
 	Bytes() ([]byte, error)
 	// Size 获取数据大小
@@ -60,6 +63,15 @@ func (m *memoryStorage) Seek(offset int64, whence int) (int64, error) {
 		return 0, ErrStorageClosed
 	}
 	return m.reader.Seek(offset, whence)
+}
+
+func (m *memoryStorage) NewReader() (io.ReadCloser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if atomic.LoadInt32(&m.closed) == 1 {
+		return nil, ErrStorageClosed
+	}
+	return io.NopCloser(bytes.NewReader(m.data)), nil
 }
 
 func (m *memoryStorage) Close() error {
@@ -184,6 +196,15 @@ func (d *diskStorage) Seek(offset int64, whence int) (int64, error) {
 	return d.file.Seek(offset, whence)
 }
 
+func (d *diskStorage) NewReader() (io.ReadCloser, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if atomic.LoadInt32(&d.closed) == 1 {
+		return nil, ErrStorageClosed
+	}
+	return os.Open(d.filePath)
+}
+
 func (d *diskStorage) Close() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -304,8 +325,22 @@ func CreateBodyStorageFromReader(reader io.Reader, contentLength int64, maxBytes
 
 // ReaderOnly wraps an io.Reader to hide io.Closer, preventing http.NewRequest
 // from type-asserting io.ReadCloser and closing the underlying BodyStorage.
+// For stored bodies, GetBody preserves HTTP transport replay without sharing
+// a read offset with an earlier attempt that may still be finishing its write.
 func ReaderOnly(r io.Reader) io.Reader {
+	if storage, ok := r.(BodyStorage); ok {
+		return bodyStorageReader{Reader: r, storage: storage}
+	}
 	return struct{ io.Reader }{r}
+}
+
+type bodyStorageReader struct {
+	io.Reader
+	storage BodyStorage
+}
+
+func (r bodyStorageReader) GetBody() (io.ReadCloser, error) {
+	return r.storage.NewReader()
 }
 
 // CleanupOldCacheFiles 清理旧的缓存文件（用于启动时清理残留）

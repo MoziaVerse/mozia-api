@@ -18,12 +18,8 @@ type moziaUserModelRedirectResponse struct {
 }
 
 type upsertMoziaUserModelRedirectRequest struct {
-	UserId               int    `json:"user_id"`
-	SSOSub               string `json:"sso_sub"`
-	SourceModel          string `json:"source_model"`
-	TargetModel          string `json:"target_model"`
-	OnlyThinkingDisabled bool   `json:"only_thinking_disabled"`
-	Seamless             bool   `json:"seamless"`
+	mozia_setting.UserModelRedirect
+	SSOSub string `json:"sso_sub"`
 }
 
 func GetMoziaUserModelRedirects(c *gin.Context) {
@@ -31,7 +27,7 @@ func GetMoziaUserModelRedirects(c *gin.Context) {
 	userIds := make([]int, 0, len(rules))
 	seen := make(map[int]struct{}, len(rules))
 	for _, rule := range rules {
-		if _, ok := seen[rule.UserId]; ok {
+		if _, ok := seen[rule.UserId]; ok || rule.AllUsers {
 			continue
 		}
 		seen[rule.UserId] = struct{}{}
@@ -73,26 +69,27 @@ func UpsertMoziaUserModelRedirect(c *gin.Context) {
 		request.UserId = userSSO.UserId
 	}
 
-	rule := mozia_setting.NormalizeUserModelRedirect(mozia_setting.UserModelRedirect{
-		UserId:               request.UserId,
-		SourceModel:          request.SourceModel,
-		TargetModel:          request.TargetModel,
-		OnlyThinkingDisabled: request.OnlyThinkingDisabled,
-		Seamless:             request.Seamless,
-	})
+	rule := mozia_setting.NormalizeUserModelRedirect(request.UserModelRedirect)
 	if err := mozia_setting.ValidateUserModelRedirect(rule); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
-	if _, err := model.GetUserById(rule.UserId, false); err != nil {
-		common.ApiErrorMsg(c, "用户不存在")
-		return
+	if !rule.AllUsers {
+		if _, err := model.GetUserById(rule.UserId, false); err != nil {
+			common.ApiErrorMsg(c, "用户不存在")
+			return
+		}
 	}
 	if err := service.UpsertMoziaUserModelRedirect(rule); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	recordManageAuditFor(c, rule.UserId, "mozia.user_model_redirect_upsert", map[string]interface{}{
+		"rule_id":                rule.ID,
+		"target_channel_id":      rule.TargetChannelId,
+		"all_users":              rule.AllUsers,
+		"priority":               rule.Priority,
+		"disabled":               rule.Disabled,
 		"source_model":           rule.SourceModel,
 		"target_model":           rule.TargetModel,
 		"only_thinking_disabled": rule.OnlyThinkingDisabled,
@@ -103,7 +100,7 @@ func UpsertMoziaUserModelRedirect(c *gin.Context) {
 
 func DeleteMoziaUserModelRedirect(c *gin.Context) {
 	userId, err := strconv.Atoi(c.Param("user_id"))
-	if err != nil || userId <= 0 {
+	if err != nil || userId < 0 {
 		common.ApiErrorMsg(c, "无效的用户 ID")
 		return
 	}
@@ -112,12 +109,33 @@ func DeleteMoziaUserModelRedirect(c *gin.Context) {
 		common.ApiErrorMsg(c, "source_model must not be empty")
 		return
 	}
-	if err := service.DeleteMoziaUserModelRedirect(userId, sourceModel); err != nil {
+	if err := service.DeleteMoziaUserModelRedirect(userId, sourceModel, c.Query("rule_id")); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
 	recordManageAuditFor(c, userId, "mozia.user_model_redirect_delete", map[string]interface{}{
+		"rule_id":      c.Query("rule_id"),
 		"source_model": sourceModel,
 	})
 	common.ApiSuccess(c, nil)
+}
+
+// Return only routing metadata; never expose channel credentials or overrides.
+func GetMoziaRoutingTargets(c *gin.Context) {
+	channels, err := model.GetAllChannels(0, -1, false, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	type target struct {
+		ID     int      `json:"id"`
+		Name   string   `json:"name"`
+		Models []string `json:"models"`
+		Status int      `json:"status"`
+	}
+	result := make([]target, 0, len(channels))
+	for _, channel := range channels {
+		result = append(result, target{channel.Id, channel.Name, channel.GetModels(), channel.Status})
+	}
+	common.ApiSuccess(c, result)
 }

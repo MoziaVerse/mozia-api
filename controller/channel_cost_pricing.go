@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,7 +52,8 @@ func UpsertChannelCostPricing(c *gin.Context) {
 		return
 	}
 	cost.Id = 0
-	if err := model.UpsertChannelCostPricing(&cost); err != nil {
+	result, err := service.MutateSupplierCost(c.Request.Context(), &cost, 0, c.GetInt("id"))
+	if err != nil {
 		common.ApiErrorMsg(c, "渠道成本配置失败: "+err.Error())
 		return
 	}
@@ -60,7 +62,7 @@ func UpsertChannelCostPricing(c *gin.Context) {
 		"model_name": cost.ModelName,
 		"mode":       cost.Mode,
 	})
-	common.ApiSuccess(c, cost)
+	c.JSON(service.SupplierMutationHTTPStatus(result, "patch"), gin.H{"success": true, "data": cost, "application": result.Application, "revision": result.Revision})
 }
 
 func DeleteChannelCostPricing(c *gin.Context) {
@@ -69,14 +71,14 @@ func DeleteChannelCostPricing(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "无效的渠道成本 ID"})
 		return
 	}
-	deleted, err := model.DeleteChannelCostPricing(id)
+	result, err := service.MutateSupplierCost(c.Request.Context(), nil, id, c.GetInt("id"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	recordManageAudit(c, "model_pricing.channel_cost.delete", map[string]interface{}{
 		"id":      id,
-		"deleted": deleted,
+		"deleted": result.Resource,
 	})
-	common.ApiSuccess(c, gin.H{"id": id, "deleted": deleted})
+	c.JSON(service.SupplierMutationHTTPStatus(result, "delete"), gin.H{"success": true, "data": gin.H{"id": id, "deleted": result.Resource}, "application": result.Application, "revision": result.Revision})
 }

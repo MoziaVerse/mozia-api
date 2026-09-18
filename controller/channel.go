@@ -957,6 +957,28 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 
+	if originChannel.SupplierID != 0 {
+		if _, changed := requestData["model_mapping"]; changed && channel.GetModelMapping() != originChannel.GetModelMapping() {
+			common.ApiErrorMsg(c, "Unbind supplier routing before changing the accepted model mapping")
+			return
+		}
+		if channel.Type != 0 && channel.Type != constant.ChannelTypeOpenAI {
+			common.ApiErrorMsg(c, "Unbind supplier routing before changing the channel protocol")
+			return
+		}
+		channel.SupplierID = originChannel.SupplierID
+		if _, changed := requestData["settings"]; changed {
+			settings := channel.GetOtherSettings()
+			settings.SupplierPools = originChannel.GetOtherSettings().SupplierPools
+			settings.SupplierDeclarations = originChannel.GetOtherSettings().SupplierDeclarations
+			data, marshalErr := common.Marshal(settings)
+			if marshalErr != nil {
+				common.ApiError(c, marshalErr)
+				return
+			}
+			channel.OtherSettings = string(data)
+		}
+	}
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
 
@@ -1051,7 +1073,16 @@ func UpdateChannel(c *gin.Context) {
 			// 覆盖模式：直接使用新密钥（默认行为，不需要特殊处理）
 		}
 	}
-	err = channel.Update()
+	var procurement gin.H
+	if channel.DeploymentType != "" && channel.DeploymentType != originChannel.DeploymentType {
+		var result *service.SupplierResourceResult
+		result, err = service.UpdateSupplierChannel(c.Request.Context(), &channel.Channel, c.GetInt("id"))
+		if result != nil {
+			procurement = gin.H{"application": result.Application, "revision": result.Revision}
+		}
+	} else {
+		err = channel.Update()
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1086,9 +1117,10 @@ func UpdateChannel(c *gin.Context) {
 	channel.Key = ""
 	clearChannelInfo(&channel.Channel)
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    channel,
+		"success":     true,
+		"message":     "",
+		"data":        channel,
+		"procurement": procurement,
 	})
 	return
 }

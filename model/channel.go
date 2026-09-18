@@ -27,6 +27,7 @@ const (
 )
 
 type Channel struct {
+	SupplierID         int64   `json:"supplier_id" gorm:"index"`
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
 	Key                string  `json:"key" gorm:"not null"`
@@ -531,6 +532,11 @@ func (channel *Channel) Insert() error {
 }
 
 func (channel *Channel) Update() error {
+	return DB.Transaction(channel.UpdateWithDB)
+}
+
+func (channel *Channel) UpdateWithDB(db *gorm.DB) error {
+	db = db.Session(&gorm.Session{})
 	// If this is a multi-key channel, recalculate MultiKeySize based on the current key list to avoid inconsistency after editing keys
 	if channel.ChannelInfo.IsMultiKey {
 		var keyStr string
@@ -538,7 +544,8 @@ func (channel *Channel) Update() error {
 			keyStr = channel.Key
 		} else {
 			// If key is not provided, read the existing key from the database
-			if existing, err := GetChannelById(channel.Id, true); err == nil {
+			var existing Channel
+			if err := db.Select("key").First(&existing, channel.Id).Error; err == nil {
 				keyStr = existing.Key
 			}
 		}
@@ -570,12 +577,14 @@ func (channel *Channel) Update() error {
 		}
 	}
 	var err error
-	err = DB.Model(channel).Updates(channel).Error
+	err = db.Model(channel).Updates(channel).Error
 	if err != nil {
 		return err
 	}
-	DB.Model(channel).First(channel, "id = ?", channel.Id)
-	err = channel.UpdateAbilities(nil)
+	if err := db.Model(channel).First(channel, "id = ?", channel.Id).Error; err != nil {
+		return err
+	}
+	err = channel.UpdateAbilities(db)
 	return err
 }
 

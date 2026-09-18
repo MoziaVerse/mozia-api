@@ -41,7 +41,7 @@ type ChannelCostPricing struct {
 	Config     ChannelCostConfig `json:"config" gorm:"-"`
 }
 
-func ValidateChannelCostPricing(cost *ChannelCostPricing) error {
+func validateChannelCostPricing(db *gorm.DB, cost *ChannelCostPricing) error {
 	cost.ModelName = strings.TrimSpace(cost.ModelName)
 	cost.Currency = strings.ToUpper(strings.TrimSpace(cost.Currency))
 	cost.Mode = strings.TrimSpace(cost.Mode)
@@ -58,8 +58,8 @@ func ValidateChannelCostPricing(cost *ChannelCostPricing) error {
 	if len(cost.Note) > 20000 {
 		return fmt.Errorf("note is too long")
 	}
-	channel, err := GetChannelById(cost.ChannelId, false)
-	if err != nil {
+	var channel Channel
+	if err := db.Select("id", "models", "deployment_type").First(&channel, cost.ChannelId).Error; err != nil {
 		return fmt.Errorf("channel does not exist: %w", err)
 	}
 	if !slices.Contains(channel.GetModels(), cost.ModelName) {
@@ -141,8 +141,8 @@ func ListChannelCostPricing() ([]ChannelCostPricing, error) {
 	return costs, nil
 }
 
-func UpsertChannelCostPricing(cost *ChannelCostPricing) error {
-	if err := ValidateChannelCostPricing(cost); err != nil {
+func UpsertChannelCostPricing(db *gorm.DB, cost *ChannelCostPricing) error {
+	if err := validateChannelCostPricing(db, cost); err != nil {
 		return err
 	}
 	config, err := common.Marshal(cost.Config)
@@ -150,7 +150,7 @@ func UpsertChannelCostPricing(cost *ChannelCostPricing) error {
 		return err
 	}
 	cost.ConfigJson = string(config)
-	return DB.Where("channel_id = ? AND model_name = ?", cost.ChannelId, cost.ModelName).
+	return db.Where("channel_id = ? AND model_name = ?", cost.ChannelId, cost.ModelName).
 		Assign(map[string]any{
 			"currency":    cost.Currency,
 			"mode":        cost.Mode,

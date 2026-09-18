@@ -228,3 +228,21 @@ func TestModelPriceHelperPerCallUsesReferenceVideoPrice(t *testing.T) {
 	assert.Equal(t, 0.2, priceData.ModelPrice)
 	assert.Equal(t, int(0.2*common.QuotaPerUnit), priceData.Quota)
 }
+
+func TestSupplierRetryPreservesCustomerPrice(t *testing.T) {
+	original := mozia_setting.UserModelRatios2JSONString()
+	t.Cleanup(func() { require.NoError(t, mozia_setting.UpdateUserModelRatiosByJSONString(original)) })
+	require.NoError(t, mozia_setting.UpdateUserModelRatiosByJSONString(`{"channel:396:36":{"user_id":396,"scope":"channel","channel_id":36,"ratio":0.25}}`))
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		UserId: 396, OriginModelName: "retry-model", UserGroup: "default", UsingGroup: "default",
+		SupplierPriceFrozen:   true,
+		ChannelMeta:           &relaycommon.ChannelMeta{ChannelId: 36},
+		PriceData:             types.PriceData{GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.75, BaseGroupRatio: 1}},
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{EstimatedQuotaBeforeGroup: 100, EstimatedQuotaAfterGroup: 75, GroupRatio: 0.75},
+	}
+	RefreshUserModelRatio(ctx, info)
+	assert.Equal(t, 0.75, info.PriceData.GroupRatioInfo.GroupRatio)
+	assert.Equal(t, 0.75, info.TieredBillingSnapshot.GroupRatio)
+	assert.Equal(t, billingexpr.QuotaRound(75), info.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
+}
