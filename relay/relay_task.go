@@ -96,15 +96,13 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 	if info.OriginModelName == "" {
 		if originTask.Properties.OriginModelName != "" {
 			info.OriginModelName = originTask.Properties.OriginModelName
-		} else if originTask.Properties.UpstreamModelName != "" {
-			info.OriginModelName = originTask.Properties.UpstreamModelName
 		} else {
-			var taskData map[string]interface{}
-			_ = common.Unmarshal(originTask.Data, &taskData)
-			if m, ok := taskData["model"].(string); ok && m != "" {
-				info.OriginModelName = m
-			}
+			info.OriginModelName = originTask.PublicModelName()
 		}
+		if info.OriginModelName == "" {
+			return service.TaskErrorWrapperLocal(errors.New("original task has no public model name"), "model_not_found", http.StatusBadRequest)
+		}
+		common.SetContextKey(c, constant.ContextKeyUserVisibleModel, originTask.PublicModelName())
 	}
 
 	// 锁定到原始任务的渠道（重试时复用同一渠道，轮换 key）
@@ -574,6 +572,17 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
+	// Polling has no request model: restore the public name saved at submission.
+	defer func() {
+		if taskResp != nil || len(respBody) == 0 {
+			return
+		}
+		respBody, err = common.ReplaceResponseModel(respBody, originTask.PublicModelName())
+		if err != nil {
+			taskResp = service.TaskErrorWrapper(err, "invalid_response", http.StatusBadGateway)
+		}
+	}()
+
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
@@ -729,19 +738,6 @@ func publicVideoTaskProgress(status string, progress string) int {
 	return value
 }
 
-func publicVideoTaskModel(task *model.Task) string {
-	if task.Properties.OriginModelName != "" {
-		return task.Properties.OriginModelName
-	}
-	if task.PrivateData.BillingContext != nil && task.PrivateData.BillingContext.OriginModelName != "" {
-		return task.PrivateData.BillingContext.OriginModelName
-	}
-	if task.Properties.UpstreamModelName != "" {
-		return task.Properties.UpstreamModelName
-	}
-	return ""
-}
-
 func publicVideoTaskMetadata(data []byte, resp *dto.PublicVideoTaskResponse) {
 	if len(data) == 0 {
 		return
@@ -817,7 +813,7 @@ func publicVideoTaskResponse(task *model.Task, metadataData []byte) *dto.PublicV
 		ID:        task.TaskID,
 		TaskID:    task.TaskID,
 		Object:    "video",
-		Model:     publicVideoTaskModel(task),
+		Model:     task.PublicModelName(),
 		Status:    status,
 		Progress:  publicVideoTaskProgress(status, task.Progress),
 		CreatedAt: task.CreatedAt,

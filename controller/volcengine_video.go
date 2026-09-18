@@ -58,6 +58,11 @@ func RelayVolcengineVideoTaskFetch(c *gin.Context) {
 			return
 		}
 	}
+	body, err = common.ReplaceResponseModel(body, task.PublicModelName())
+	if err != nil {
+		respondTaskError(c, service.TaskErrorWrapperLocal(errors.New("invalid upstream task response"), "upstream_error", http.StatusBadGateway))
+		return
+	}
 	c.Data(http.StatusOK, "application/json", body)
 }
 
@@ -153,6 +158,11 @@ func RelayVolcengineVideoTaskList(c *gin.Context) {
 				delete(owned, metadata.ID)
 				if err := service.ApplyVideoTaskResponse(c, adaptor, task, raw); err != nil {
 					respondTaskError(c, service.TaskErrorWrapperLocal(errors.New("failed to update task"), "internal_error", http.StatusInternalServerError))
+					return
+				}
+				raw, err = common.ReplaceResponseModel(raw, task.PublicModelName())
+				if err != nil {
+					respondTaskError(c, service.TaskErrorWrapperLocal(errors.New("invalid upstream task list item"), "upstream_error", http.StatusBadGateway))
 					return
 				}
 				items = append(items, item{raw, metadata.ID, metadata.CreatedAt})

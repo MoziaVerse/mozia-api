@@ -45,6 +45,30 @@ func TestVideoTaskIDsForArtsAndSeedance(t *testing.T) {
 	}
 	require.NoError(t, legacyTask.Insert())
 	tasks := []*model.Task{legacyTask}
+	require.NoError(t, db.Create(&model.Channel{Id: constant.ChannelTypeSora, Type: constant.ChannelTypeSora, Status: common.ChannelStatusEnabled, Key: "test-key"}).Error)
+	for _, publicName := range []string{"public/sora", ""} {
+		task := &model.Task{
+			TaskID: "task_sora_" + strconv.Itoa(len(tasks)), UserId: 42, ChannelId: constant.ChannelTypeSora,
+			Platform: constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSora)), Status: model.TaskStatusQueued,
+			Properties: model.Properties{PublicModelName: publicName, UpstreamModelName: "private-sora"},
+			Data:       []byte(`{"model":"private-sora","status":"queued"}`),
+		}
+		require.NoError(t, task.Insert())
+		tasks = append(tasks, task)
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/videos/"+task.TaskID+"/remix", strings.NewReader(`{"prompt":"remix"}`))
+		ctx.Request.Header.Set("Content-Type", "application/json")
+		ctx.Params = gin.Params{{Key: "video_id", Value: task.TaskID}}
+		info := &relaycommon.RelayInfo{UserId: 42, TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{}}
+		taskErr := ResolveOriginTask(ctx, info)
+		if publicName == "" {
+			require.NotNil(t, taskErr)
+			assert.Equal(t, "model_not_found", taskErr.Code)
+		} else {
+			require.Nil(t, taskErr)
+			assert.Equal(t, publicName, common.GetUserVisibleModel(ctx, ""))
+		}
+	}
 
 	for _, tc := range []struct {
 		channelType int
@@ -66,6 +90,7 @@ func TestVideoTaskIDsForArtsAndSeedance(t *testing.T) {
 		adaptor.Init(info)
 		writer := httptest.NewRecorder()
 		ctx, _ := gin.CreateTestContext(writer)
+		common.SetContextKey(ctx, constant.ContextKeyUserVisibleModel, "requested-video")
 		responseBody := `{"id":"cgt-` + suffix + `","status":"pending"}`
 		upstreamID, taskData, taskErr := adaptor.DoResponse(ctx, &http.Response{
 			StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(responseBody)),
@@ -77,8 +102,10 @@ func TestVideoTaskIDsForArtsAndSeedance(t *testing.T) {
 		require.NoError(t, common.Unmarshal(writer.Body.Bytes(), &submitted))
 		assert.Equal(t, tc.wantID, submitted.ID)
 		assert.Equal(t, tc.wantID, submitted.TaskID)
+		assert.Equal(t, "requested-video", submitted.Model)
 
 		task := model.InitTask(platform, info)
+		task.Properties.PublicModelName = "requested-video"
 		task.PrivateData.UpstreamTaskID = upstreamID
 		task.Data = taskData
 		require.NoError(t, task.Insert())
@@ -91,7 +118,7 @@ func TestVideoTaskIDsForArtsAndSeedance(t *testing.T) {
 		stored, exists, err := model.GetByTaskId(42, task.TaskID)
 		require.NoError(t, err)
 		require.True(t, exists)
-		assert.Equal(t, task.PrivateData.UpstreamTaskID, stored.GetUpstreamTaskID())
+		assert.Equal(t, task.GetUpstreamTaskID(), stored.GetUpstreamTaskID())
 		for _, route := range []string{"/v1/video/generations/", "/v1/videos/"} {
 			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 			ctx.Request = httptest.NewRequest(http.MethodGet, route+task.TaskID, nil)
@@ -103,6 +130,8 @@ func TestVideoTaskIDsForArtsAndSeedance(t *testing.T) {
 			require.NoError(t, common.Unmarshal(body, &fetched))
 			assert.Equal(t, task.TaskID, fetched.ID)
 			assert.Equal(t, task.TaskID, fetched.TaskID)
+			assert.Equal(t, task.PublicModelName(), fetched.Model)
+			assert.NotContains(t, string(body), "private-sora")
 
 			ctx.Set("id", 99)
 			_, taskErr = videoFetchByIDRespBodyBuilder(ctx)

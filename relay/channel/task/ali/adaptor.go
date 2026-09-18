@@ -405,9 +405,9 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	openAIResp := dto.NewOpenAIVideo()
 	openAIResp.ID = info.PublicTaskID
 	openAIResp.TaskID = info.PublicTaskID
-	openAIResp.Model = c.GetString("model")
+	openAIResp.Model = common.GetUserVisibleModel(c, c.GetString("model"))
 	if openAIResp.Model == "" && info != nil {
-		openAIResp.Model = info.OriginModelName
+		openAIResp.Model = common.GetUserVisibleModel(c, info.OriginModelName)
 	}
 	openAIResp.Status = convertAliStatus(aliResp.Output.TaskStatus)
 	openAIResp.CreatedAt = common.GetTimestamp()

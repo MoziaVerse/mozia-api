@@ -66,6 +66,20 @@ type Task struct {
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
 }
 
+// PublicModelName never falls back to an upstream alias for historical tasks.
+func (t *Task) PublicModelName() string {
+	if t.Properties.PublicModelName != "" {
+		return t.Properties.PublicModelName
+	}
+	if t.Properties.OriginModelName != "" {
+		return t.Properties.OriginModelName
+	}
+	if t.PrivateData.BillingContext != nil {
+		return t.PrivateData.BillingContext.OriginModelName
+	}
+	return ""
+}
+
 func (t *Task) SetData(data any) {
 	b, _ := common.Marshal(data)
 	t.Data = json.RawMessage(b)
@@ -77,6 +91,7 @@ func (t *Task) GetData(v any) error {
 
 type Properties struct {
 	Input             string `json:"input"`
+	PublicModelName   string `json:"public_model_name,omitempty"`
 	UpstreamModelName string `json:"upstream_model_name,omitempty"`
 	OriginModelName   string `json:"origin_model_name,omitempty"`
 }

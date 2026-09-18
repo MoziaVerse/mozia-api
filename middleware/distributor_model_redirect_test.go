@@ -92,3 +92,13 @@ func TestApplyUserModelRedirect(t *testing.T) {
 		})
 	}
 }
+
+func TestCompactResponsePreservesRequestedModel(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest("POST", "/v1/responses/compact", strings.NewReader(`{"model":"public/model"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	request, _, err := getModelRequest(c)
+	require.NoError(t, err)
+	assert.NotEqual(t, "public/model", request.Model, "compact billing keeps its own model key")
+	assert.Equal(t, "public/model", common.GetUserVisibleModel(c, ""))
+}

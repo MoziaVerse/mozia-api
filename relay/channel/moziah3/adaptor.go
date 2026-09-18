@@ -164,7 +164,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	video.ID = info.PublicTaskID
 	video.TaskID = info.PublicTaskID
 	video.CreatedAt = time.Now().Unix()
-	video.Model = info.OriginModelName
+	video.Model = common.GetUserVisibleModel(c, info.OriginModelName)
 	c.JSON(http.StatusOK, video)
 	return submitted.ID, responseBody, nil
 }

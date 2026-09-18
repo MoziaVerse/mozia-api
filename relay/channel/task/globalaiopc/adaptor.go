@@ -234,7 +234,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	video := dto.NewOpenAIVideo()
 	video.ID = info.PublicTaskID
 	video.TaskID = info.PublicTaskID
-	video.Model = info.OriginModelName
+	video.Model = common.GetUserVisibleModel(c, info.OriginModelName)
 	video.CreatedAt = time.Now().Unix()
 	c.JSON(http.StatusOK, video)
 	return taskID, body, nil

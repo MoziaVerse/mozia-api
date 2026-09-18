@@ -198,12 +198,32 @@ func GetContextKeyType[T any](c *gin.Context, key constant.ContextKey) (T, bool)
 	return t, false
 }
 
+func GetUserVisibleModel(c *gin.Context, fallback string) string {
+	return GetStringIfEmpty(GetContextKeyString(c, constant.ContextKeyUserVisibleModel), fallback)
+}
+
 func ApplyUserVisibleModel(c *gin.Context, data []byte) ([]byte, error) {
-	model := GetContextKeyString(c, constant.ContextKeyUserVisibleModel)
-	if model == "" || !gjson.GetBytes(data, "model").Exists() {
+	model := GetUserVisibleModel(c, "")
+	if model == "" {
 		return data, nil
 	}
-	return sjson.SetBytes(data, "model", model)
+	return ReplaceResponseModel(data, model)
+}
+
+// ReplaceResponseModel changes protocol metadata only, never generated content,
+// tool arguments or arbitrary nested fields named "model".
+func ReplaceResponseModel(data []byte, model string) ([]byte, error) {
+	for _, path := range []string{"model", "modelVersion", "message.model", "response.model", "session.model"} {
+		if !gjson.GetBytes(data, path).Exists() {
+			continue
+		}
+		var err error
+		data, err = sjson.SetBytes(data, path, model)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return data, nil
 }
 
 func ApiError(c *gin.Context, err error) {

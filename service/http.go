@@ -47,6 +47,8 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	}
 	if rewritten, err := common.ApplyUserVisibleModel(c, data); err != nil {
 		logger.LogError(c, fmt.Sprintf("failed to override response model: %s", err.Error()))
+		c.AbortWithStatus(http.StatusBadGateway)
+		return
 	} else {
 		data = rewritten
 	}
