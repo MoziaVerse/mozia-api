@@ -82,6 +82,9 @@ func SetRelayRouter(router *gin.Engine) {
 	}
 	{
 		//http router
+		// 队列可见：只需鉴权，不走 Distribute（不选渠道、不计费）
+		relayV1Router.GET("/video/queue", controller.GetVideoQueueStatus)
+
 		httpRouter := relayV1Router.Group("")
 		httpRouter.Use(middleware.Distribute())
 

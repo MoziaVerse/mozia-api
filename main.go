@@ -120,6 +120,8 @@ func main() {
 
 	// Subscription quota reset task (daily/weekly/monthly/custom)
 	service.StartSubscriptionQuotaResetTask()
+	// H3 worker 队列采集：回填 start_time、假活告警、供派发与并发检查读取
+	service.StartH3WorkerProbeTask()
 
 	// Report this process as a system instance so the System Info page can show
 	// all currently alive nodes in multi-instance deployments.

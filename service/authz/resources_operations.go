@@ -6,6 +6,7 @@ const (
 	ResourceUserQuota    = "user_quota"
 	ResourceUserRatio    = "user_ratio"
 	ResourceQuotaPolicy  = "quota_policy"
+	ResourceTaskLimit    = "task_limit"
 	ResourceGeneralAdmin = "general_admin"
 	ActionGroupWrite     = "group_write"
 	ActionAccess         = "access"
@@ -27,6 +28,9 @@ var (
 
 	QuotaPolicyRead  = Permission{Resource: ResourceQuotaPolicy, Action: ActionRead}
 	QuotaPolicyWrite = Permission{Resource: ResourceQuotaPolicy, Action: ActionWrite}
+
+	TaskLimitRead  = Permission{Resource: ResourceTaskLimit, Action: ActionRead}
+	TaskLimitWrite = Permission{Resource: ResourceTaskLimit, Action: ActionWrite}
 
 	GeneralAdminAccess = Permission{Resource: ResourceGeneralAdmin, Action: ActionAccess}
 )
@@ -63,6 +67,14 @@ func init() {
 		Actions: []ActionDefinition{
 			{Action: ActionRead, LabelKey: "Read user billing ratios", DescriptionKey: "View user-specific model and channel billing ratios."},
 			{Action: ActionWrite, LabelKey: "Edit user billing ratios", DescriptionKey: "Create, update, or remove user-specific billing ratios."},
+		},
+	})
+	RegisterResource(ResourceDefinition{
+		Resource: ResourceTaskLimit,
+		LabelKey: "Task Limit Management",
+		Actions: []ActionDefinition{
+			{Action: ActionRead, LabelKey: "Read task limits", DescriptionKey: "View worker queue snapshots and per-user task limit overrides."},
+			{Action: ActionWrite, LabelKey: "Edit task limits", DescriptionKey: "Create, update, or remove per-user task limit overrides."},
 		},
 	})
 	RegisterResource(ResourceDefinition{
