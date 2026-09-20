@@ -148,7 +148,7 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
 	common.OptionMap["GroupTaskLimits"] = setting.GroupTaskLimits2JSONString()
 	common.OptionMap["TaskLimitScope"] = setting.TaskLimitScope2JSONString()
-	common.OptionMap["TaskLimitEnforce"] = strconv.FormatBool(setting.TaskLimitEnforce)
+	common.OptionMap["TaskLimitEnforceEnabled"] = strconv.FormatBool(setting.TaskLimitEnforce)
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
@@ -485,7 +485,7 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.CheckSensitiveOnPromptEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
 			setting.ModelRequestRateLimitEnabled = boolValue
-		case "TaskLimitEnforce":
+		case "TaskLimitEnforceEnabled":
 			setting.TaskLimitEnforce = boolValue
 		case "StopOnSensitiveEnabled":
 			setting.StopOnSensitiveEnabled = boolValue
