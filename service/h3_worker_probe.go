@@ -97,7 +97,9 @@ var (
 )
 
 // H3WorkerChannelTypes 是需要采集的 channel 类型。
-var H3WorkerChannelTypes = []int{constant.ChannelTypeMoziaH3, constant.ChannelTypeMoziaH3VDN}
+// VDN（208）worker 是另一套 multipart 服务，没有 /v1/videos/audit 也没有列表接口
+// （生产实测均 404），采集只覆盖 SGLang worker（207）。
+var H3WorkerChannelTypes = []int{constant.ChannelTypeMoziaH3}
 
 func h3ProbeInterval() time.Duration {
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("H3_WORKER_PROBE_SECONDS"))); err == nil && v > 0 {
@@ -165,10 +167,16 @@ func probeH3Channel(ctx context.Context, ch *model.Channel) {
 		if prev == nil {
 			prev = &WorkerQueueSnapshot{ChannelId: ch.Id, ChannelType: ch.Type, Active: map[string]WorkerAuditEntry{}}
 		}
+		// 每 10 秒一轮，失败只在「从正常变为失败」时记一次，恢复时再记一次，避免刷屏
+		if prev.LastError == "" {
+			logger.LogWarn(ctx, fmt.Sprintf("h3 worker probe: channel #%d (%s) fetch failed: %v", ch.Id, ch.Name, err))
+		}
 		prev.LastError = err.Error()
 		storeWorkerSnapshot(prev)
-		logger.LogWarn(ctx, fmt.Sprintf("h3 worker probe: channel #%d (%s) fetch failed: %v", ch.Id, ch.Name, err))
 		return
+	}
+	if prev := GetWorkerQueueSnapshot(ch.Id); prev != nil && prev.LastError != "" {
+		logger.LogInfo(ctx, fmt.Sprintf("h3 worker probe: channel #%d (%s) recovered", ch.Id, ch.Name))
 	}
 	evaluateWorkerSuspect(snap, now, h3ProbeStaleAfter())
 	storeWorkerSnapshot(snap)
