@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -135,4 +136,81 @@ func GetMoziaTaskLimitUserUsage(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, service.BuildTaskQueueView(userId, u.Group, "", c.Query("model")))
+}
+
+// GetMoziaTaskLimitSyncClusters 返回「同一分钟内有 ≥ min_users 个不同用户提交任务」的分钟桶，
+// 附每个用户的 sso_sub，供 matrix 侧按邀请人聚类识别多号同步提交的团伙。
+// 只看提交时间，不区分模型；多号团伙的特征是节奏而不是模型。
+func GetMoziaTaskLimitSyncClusters(c *gin.Context) {
+	sinceMinutes, _ := strconv.Atoi(c.DefaultQuery("since_minutes", "60"))
+	if sinceMinutes <= 0 || sinceMinutes > 24*60 {
+		sinceMinutes = 60
+	}
+	minUsers, _ := strconv.Atoi(c.DefaultQuery("min_users", "4"))
+	if minUsers < 2 {
+		minUsers = 2
+	}
+	since := time.Now().Add(-time.Duration(sinceMinutes) * time.Minute).Unix()
+	var rows []struct {
+		Minute int64 `gorm:"column:minute"`
+		UserId int   `gorm:"column:user_id"`
+	}
+	err := model.DB.Model(&model.Task{}).
+		Select("(submit_time / 60) AS minute, user_id").
+		Where("submit_time >= ?", since).
+		Group("minute, user_id").
+		Order("minute").
+		Scan(&rows).Error
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	byMinute := map[int64][]int{}
+	for _, r := range rows {
+		byMinute[r.Minute] = append(byMinute[r.Minute], r.UserId)
+	}
+	userSet := map[int]struct{}{}
+	minutes := make([]int64, 0, len(byMinute))
+	for m, users := range byMinute {
+		if len(users) < minUsers {
+			continue
+		}
+		minutes = append(minutes, m)
+		for _, u := range users {
+			userSet[u] = struct{}{}
+		}
+	}
+	sort.Slice(minutes, func(i, j int) bool { return minutes[i] < minutes[j] })
+	ssoByUser := map[int]string{}
+	if len(userSet) > 0 {
+		ids := make([]int, 0, len(userSet))
+		for u := range userSet {
+			ids = append(ids, u)
+		}
+		var ssos []model.UserSSO
+		if err := model.DB.Where("user_id IN ?", ids).Find(&ssos).Error; err == nil {
+			for _, s := range ssos {
+				ssoByUser[s.UserId] = s.SSOSub
+			}
+		}
+	}
+	type clusterUser struct {
+		UserId int    `json:"user_id"`
+		SSOSub string `json:"sso_sub"`
+	}
+	type cluster struct {
+		MinuteStart int64         `json:"minute_start"`
+		Users       []clusterUser `json:"users"`
+	}
+	out := make([]cluster, 0, len(minutes))
+	for _, m := range minutes {
+		users := byMinute[m]
+		sort.Ints(users)
+		cu := make([]clusterUser, 0, len(users))
+		for _, u := range users {
+			cu = append(cu, clusterUser{UserId: u, SSOSub: ssoByUser[u]})
+		}
+		out = append(out, cluster{MinuteStart: m * 60, Users: cu})
+	}
+	common.ApiSuccess(c, gin.H{"since": since, "min_users": minUsers, "clusters": out})
 }
