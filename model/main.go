@@ -310,6 +310,7 @@ func migrateDB() error {
 		&ResellerCustomer{},
 		&ResellerInvitation{},
 		&ResellerIdentityRoute{},
+		&Material{},
 		&ResellerAssignmentConflict{},
 		&ResellerPriceRule{},
 		&ResellerRequestSettlement{},
