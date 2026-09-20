@@ -292,6 +292,7 @@ func migrateDB() error {
 		&MoziaWalletTransaction{},
 		&MoziaWalletReservation{},
 		&MoziaModelQuotaPolicy{},
+		&MoziaUserTaskLimitOverride{},
 		&PrefillGroup{},
 		&Setup{},
 		&TwoFA{},
