@@ -130,6 +130,11 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 	if err != nil {
 		return nil, err
 	}
+	// 自托管 H3 只能走素材存储的集群内门：把平台素材 URL 换成内网预签名，其它 URL 原样透传。
+	// 放在 BuildRequestBody 而不是 normalizedRequest，签名只在真正提交时生成一次。
+	for i := range request.Conditions {
+		request.Conditions[i].URI = service.RewriteMaterialURLForCluster(request.Conditions[i].URI)
+	}
 	data, err := common.Marshal(request)
 	if err != nil {
 		return nil, err

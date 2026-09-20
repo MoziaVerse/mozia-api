@@ -35,6 +35,16 @@ func UploadMaterial(c *gin.Context) {
 		return
 	}
 
+	if oss := service.GetMaterialObjectStorage(); oss != nil {
+		storage, err := common.GetBodyStorage(c)
+		if err != nil {
+			materialBodyError(c, err)
+			return
+		}
+		defer common.CleanupBodyStorage(c)
+		uploadMaterialToStorage(c, storage, params["boundary"], oss)
+		return
+	}
 	proxyMaterialRequest(c, "/v1/cool/upload")
 }
 
@@ -70,6 +80,10 @@ func ImportMaterial(c *gin.Context) {
 		return
 	}
 
+	if oss := service.GetMaterialObjectStorage(); oss != nil {
+		importMaterialToStorage(c, request.URL, strings.TrimSpace(request.Filename), oss)
+		return
+	}
 	proxyMaterialStorage(c, storage, "/v1/cool/upload_url")
 }
 
