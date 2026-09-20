@@ -705,7 +705,7 @@ func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 		}
 		return
 	}
-	if taskErr.StatusCode == http.StatusTooManyRequests {
+	if taskErr.StatusCode == http.StatusTooManyRequests && taskErr.Code != service.TaskLimitErrorCode {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}
 	if taskErr.Type == "" {

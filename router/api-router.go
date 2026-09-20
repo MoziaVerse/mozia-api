@@ -470,6 +470,16 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 		quotaPolicyRoute.DELETE("/:id", middleware.RequirePermission(authz.QuotaPolicyWrite), controller.DeleteMoziaQuotaPolicy)
 	}
 
+	taskLimitRoute := moziaRouter.Group("/task-limit")
+	taskLimitRoute.Use(middleware.AdminAuth())
+	{
+		taskLimitRoute.GET("/workers", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitWorkers)
+		taskLimitRoute.GET("/overrides", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitOverrides)
+		taskLimitRoute.POST("/overrides", middleware.RequirePermission(authz.TaskLimitWrite), controller.UpsertMoziaTaskLimitOverride)
+		taskLimitRoute.DELETE("/overrides/:user_id", middleware.RequirePermission(authz.TaskLimitWrite), controller.DeleteMoziaTaskLimitOverride)
+		taskLimitRoute.GET("/users/:user_id", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitUserUsage)
+	}
+
 	userModelRatioRoute := moziaRouter.Group("/user-model-ratio")
 	userModelRatioRoute.Use(middleware.AdminAuth())
 	{

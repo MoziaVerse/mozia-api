@@ -179,7 +179,8 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 
 		// 获取分组
 		group := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
-		if group == "" {
+		// matrix 签发的 key 分组恒为 auto，真正的分组在用户上；不回落则分组限流永远匹配不到
+		if group == "" || group == "auto" {
 			group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 		}
 

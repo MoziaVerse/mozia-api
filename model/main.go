@@ -365,6 +365,7 @@ func migrateDBFast() error {
 		{&MoziaWalletTransaction{}, "MoziaWalletTransaction"},
 		{&MoziaWalletReservation{}, "MoziaWalletReservation"},
 		{&MoziaModelQuotaPolicy{}, "MoziaModelQuotaPolicy"},
+		{&MoziaUserTaskLimitOverride{}, "MoziaUserTaskLimitOverride"},
 		{&PrefillGroup{}, "PrefillGroup"},
 		{&Setup{}, "Setup"},
 		{&TwoFA{}, "TwoFA"},
