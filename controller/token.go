@@ -243,9 +243,31 @@ func AddToken(c *gin.Context) {
 	})
 }
 
+// selfFundedDeleteGuard：自带资金的 key 是用户买到的商品，用户侧只能停用不能删除
+// （删了余额就没了）；管理端经 SSO 桥（sso_sub 上下文）仍可删。
+func selfFundedDeleteGuard(c *gin.Context, ids []int, userId int) error {
+	if c.GetString("sso_sub") != "" {
+		return nil
+	}
+	for _, id := range ids {
+		tk, err := model.GetTokenByIds(id, userId)
+		if err != nil {
+			continue
+		}
+		if tk.SelfFunded {
+			return fmt.Errorf("「%s」是权益包专用令牌，余额随令牌保存，不能删除；如不再使用请停用", tk.Name)
+		}
+	}
+	return nil
+}
+
 func DeleteToken(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")
+	if err := selfFundedDeleteGuard(c, []int{id}, userId); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	err := model.DeleteTokenById(id, userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -337,6 +359,10 @@ func DeleteTokenBatch(c *gin.Context) {
 		return
 	}
 	userId := c.GetInt("id")
+	if err := selfFundedDeleteGuard(c, tokenBatch.Ids, userId); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	count, err := model.BatchDeleteTokens(tokenBatch.Ids, userId)
 	if err != nil {
 		common.ApiError(c, err)
