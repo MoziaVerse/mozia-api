@@ -201,6 +201,15 @@ func AddToken(c *gin.Context) {
 		})
 		return
 	}
+	// self_funded 等于发钱：只允许管理端经 SSO 桥（sso_sub 上下文）签发，用户自建一律忽略该字段
+	if token.SelfFunded {
+		if c.GetString("sso_sub") == "" {
+			token.SelfFunded = false
+		} else if token.UnlimitedQuota || token.RemainQuota <= 0 {
+			common.ApiErrorMsg(c, "self_funded 令牌必须设置有限且大于 0 的额度")
+			return
+		}
+	}
 	key, err := common.GenerateKey()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgTokenGenerateFailed)
@@ -221,6 +230,7 @@ func AddToken(c *gin.Context) {
 		AllowIps:           token.AllowIps,
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
+		SelfFunded:         token.SelfFunded,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -291,11 +301,15 @@ func UpdateToken(c *gin.Context) {
 	} else {
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
-		cleanToken.ExpiredTime = token.ExpiredTime
-		cleanToken.RemainQuota = token.RemainQuota
-		cleanToken.UnlimitedQuota = token.UnlimitedQuota
-		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
-		cleanToken.ModelLimits = token.ModelLimits
+		if cleanToken.SelfFunded && c.GetString("sso_sub") == "" {
+			// 自带资金的 key 余额 / 模型 / 有效期是商品内容，用户只能改名和启停
+		} else {
+			cleanToken.ExpiredTime = token.ExpiredTime
+			cleanToken.RemainQuota = token.RemainQuota
+			cleanToken.UnlimitedQuota = token.UnlimitedQuota
+			cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
+			cleanToken.ModelLimits = token.ModelLimits
+		}
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry

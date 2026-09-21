@@ -12,6 +12,8 @@ import (
 const (
 	BillingSourceWallet       = "wallet"
 	BillingSourceSubscription = "subscription"
+	// 资金在 key 本身（self_funded key）：预扣/结算/退款全部由令牌额度那一步完成
+	BillingSourceToken = "token"
 )
 
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。

@@ -408,6 +408,20 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
 
+	// key 自带资金：无视计费偏好，只减 key 余量；余量不足由 PreConsumeTokenQuota 拒绝，不回落钱包/订阅
+	if relayInfo.TokenSelfFunded {
+		if relayInfo.TokenUnlimited {
+			return nil, types.NewErrorWithStatusCode(
+				fmt.Errorf("self_funded token must have a quota limit"),
+				types.ErrorCodeInvalidRequest, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		}
+		session := &BillingSession{relayInfo: relayInfo, funding: &TokenFunding{}}
+		if apiErr := session.preConsume(c, preConsumedQuota); apiErr != nil {
+			return nil, apiErr
+		}
+		return session, nil
+	}
+
 	// 钱包路径需要先检查用户额度
 	tryWallet := func() (*BillingSession, *types.NewAPIError) {
 		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
