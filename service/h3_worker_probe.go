@@ -96,10 +96,30 @@ var (
 	h3ProbeAlertFunc  = sendH3WorkerAlert
 )
 
-// H3WorkerChannelTypes 是需要采集的 channel 类型。
-// VDN（208）worker 是另一套 multipart 服务，没有 /v1/videos/audit 也没有列表接口
-// （生产实测均 404），采集只覆盖 SGLang worker（207）。
-var H3WorkerChannelTypes = []int{constant.ChannelTypeMoziaH3}
+// WorkerSnapshotFetcher 是「按 channel 类型」的队列采集实现。新增上游只需注册一个实现，
+// 采集循环、快照存储、假活判定、回填、队列接口全部复用。
+type WorkerSnapshotFetcher func(ctx context.Context, ch *model.Channel, now time.Time) (*WorkerQueueSnapshot, error)
+
+var workerProbeRegistry = map[int]WorkerSnapshotFetcher{
+	// SGLang Diffusion worker：audit 时间线，旧构建回退列表
+	constant.ChannelTypeMoziaH3: fetchWorkerSnapshot,
+	// VDN（208）是另一套 multipart 服务，没有 audit / 列表接口（生产实测 404），未注册即不采集
+}
+
+// RegisterWorkerProbe 注册某 channel 类型的采集实现（允许覆盖）。
+func RegisterWorkerProbe(channelType int, f WorkerSnapshotFetcher) {
+	workerProbeRegistry[channelType] = f
+}
+
+// H3WorkerChannelTypes 返回已注册采集的 channel 类型（升序，便于日志稳定）。
+func H3WorkerChannelTypes() []int {
+	out := make([]int, 0, len(workerProbeRegistry))
+	for t := range workerProbeRegistry {
+		out = append(out, t)
+	}
+	sort.Ints(out)
+	return out
+}
 
 func h3ProbeInterval() time.Duration {
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("H3_WORKER_PROBE_SECONDS"))); err == nil && v > 0 {
@@ -144,7 +164,7 @@ func RunH3WorkerProbeOnce(ctx context.Context) {
 	}
 	defer h3ProbeRunning.Store(false)
 
-	for _, channelType := range H3WorkerChannelTypes {
+	for _, channelType := range H3WorkerChannelTypes() {
 		channels, err := model.GetEnabledChannelsByTypeAndGroup(channelType, "")
 		if err != nil {
 			logger.LogWarn(ctx, fmt.Sprintf("h3 worker probe: list channels type=%d failed: %v", channelType, err))
@@ -161,7 +181,11 @@ func RunH3WorkerProbeOnce(ctx context.Context) {
 
 func probeH3Channel(ctx context.Context, ch *model.Channel) {
 	now := h3ProbeNow()
-	snap, err := fetchWorkerSnapshot(ctx, ch, now)
+	fetch := workerProbeRegistry[ch.Type]
+	if fetch == nil {
+		return
+	}
+	snap, err := fetch(ctx, ch, now)
 	if err != nil {
 		prev := GetWorkerQueueSnapshot(ch.Id)
 		if prev == nil {
