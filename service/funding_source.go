@@ -173,3 +173,18 @@ func refundWithRetry(fn func() error) error {
 	}
 	return lastErr
 }
+
+// ---------------------------------------------------------------------------
+// TokenFunding — key 自带资金
+// ---------------------------------------------------------------------------
+//
+// self_funded key 的 remain_quota 就是钱。BillingSession 的第一步（令牌额度预扣 /
+// 结算 / 退款）已经完整地增减了它，所以资金来源这一步是空操作，只负责标明来源。
+// 不能与钱包、订阅回落：余量不足直接 403，符合"用完即止"的商品语义。
+
+type TokenFunding struct{}
+
+func (t *TokenFunding) Source() string         { return BillingSourceToken }
+func (t *TokenFunding) PreConsume(_ int) error { return nil }
+func (t *TokenFunding) Settle(_ int) error     { return nil }
+func (t *TokenFunding) Refund() error          { return nil }

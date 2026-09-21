@@ -460,6 +460,7 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	c.Set("token_key", token.Key)
 	c.Set("token_name", token.Name)
 	c.Set("token_unlimited_quota", token.UnlimitedQuota)
+	c.Set(string(constant.ContextKeyTokenSelfFunded), token.SelfFunded)
 	if !token.UnlimitedQuota {
 		c.Set("token_quota", token.RemainQuota)
 	}
