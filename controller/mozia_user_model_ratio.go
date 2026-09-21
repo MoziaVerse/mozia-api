@@ -73,9 +73,11 @@ func UpsertMoziaUserModelRatio(c *gin.Context) {
 		target = strconv.Itoa(rule.ChannelId)
 	}
 	recordManageAuditFor(c, rule.UserId, "mozia.user_ratio_upsert", map[string]interface{}{
-		"scope":  rule.Scope,
-		"target": target,
-		"ratio":  rule.Ratio,
+		"scope":      rule.Scope,
+		"target":     target,
+		"ratio":      rule.Ratio,
+		"source":     rule.Source,
+		"expires_at": rule.ExpiresAt,
 	})
 	common.ApiSuccess(c, rule)
 }
@@ -92,11 +94,13 @@ func DeleteMoziaUserModelRatio(c *gin.Context) {
 		scope = mozia_setting.UserRatioScopeModel
 	}
 	channelId, _ := strconv.Atoi(c.Query("channel_id"))
+	// source 为空 = 删无来源的旧规则；带来源的规则必须显式传 source 才能删。
 	rule := mozia_setting.NormalizeUserModelRatio(mozia_setting.UserModelRatio{
 		UserId:    userId,
 		Scope:     scope,
 		Model:     modelName,
 		ChannelId: channelId,
+		Source:    c.Query("source"),
 		Ratio:     1,
 	})
 	if err := mozia_setting.ValidateUserModelRatio(rule); err != nil {
@@ -114,6 +118,7 @@ func DeleteMoziaUserModelRatio(c *gin.Context) {
 	recordManageAuditFor(c, rule.UserId, "mozia.user_ratio_delete", map[string]interface{}{
 		"scope":  rule.Scope,
 		"target": target,
+		"source": rule.Source,
 	})
 	common.ApiSuccess(c, nil)
 }
