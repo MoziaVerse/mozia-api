@@ -99,6 +99,59 @@ func GetGroupTaskLimit(group string) (TaskLimitConfig, bool) {
 	return c, ok
 }
 
+// GetGroupTaskLimitForModel 取「分组 × 模型」的生效配置。
+// 键 `<group>@<模型前缀>` 是该分组在某类模型上的独立名额（例如 `sub_basic@minimax/minimax-h3`），
+// 命中最长前缀者优先；没有模型级键时回退到分组键，此时名额由范围内所有模型共用。
+// 返回的 prefix 非空表示名额按该前缀单独计数。
+func GetGroupTaskLimitForModel(group, modelName string) (conf TaskLimitConfig, prefix string, found bool) {
+	taskLimitMu.RLock()
+	defer taskLimitMu.RUnlock()
+	m := strings.ToLower(strings.TrimSpace(modelName))
+	best := ""
+	for key, c := range GroupTaskLimits {
+		g, p, ok := strings.Cut(key, "@")
+		if !ok || g != group {
+			continue
+		}
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" && strings.HasPrefix(m, p) && len(p) > len(best) {
+			best, conf = p, c
+		}
+	}
+	if best != "" {
+		return conf, best, true
+	}
+	c, ok := GroupTaskLimits[group]
+	return c, "", ok
+}
+
+// GroupTaskLimitOverridePrefixes 返回某分组下所有模型级键的前缀。
+// 分组通用名额计数时要排除这些前缀的任务，它们各自有独立名额。
+func GroupTaskLimitOverridePrefixes(group string) []string {
+	taskLimitMu.RLock()
+	defer taskLimitMu.RUnlock()
+	var out []string
+	for key := range GroupTaskLimits {
+		if g, p, ok := strings.Cut(key, "@"); ok && g == group {
+			if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// GroupTaskLimitsCopy 返回全部配置的副本（目录接口用）。
+func GroupTaskLimitsCopy() map[string]TaskLimitConfig {
+	taskLimitMu.RLock()
+	defer taskLimitMu.RUnlock()
+	out := make(map[string]TaskLimitConfig, len(GroupTaskLimits))
+	for k, v := range GroupTaskLimits {
+		out[k] = v
+	}
+	return out
+}
+
 // TaskLimitScopeMatches 判断模型是否在限制范围内。范围为空时对所有模型生效。
 func TaskLimitScopeMatches(modelName string) bool {
 	taskLimitMu.RLock()

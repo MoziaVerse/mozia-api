@@ -90,7 +90,7 @@ func TestTaskLimit_ObserveModeOnlyLogs(t *testing.T) {
 	insert(model.TaskStatusQueued, 10, 0)
 	setting.TaskLimitEnforce = false
 	assert.Nil(t, CheckTaskSubmitLimit(context.Background(), 7003, "default", "auto", tlModel), "观察模式不拦截")
-	usage := CollectTaskLimitUsage(7003, "default", setting.TaskLimitScopeMatches)
+	usage := CollectTaskLimitUsage(7003, "default", setting.TaskLimitScopeMatches, tlModel)
 	assert.NotNil(t, evaluateTaskLimit(usage, "default", taskLimitNow()), "但决策本身成立")
 }
 
@@ -207,4 +207,26 @@ func TestTaskLimit_QueueView(t *testing.T) {
 	require.NotNil(t, queued.EtaSeconds)
 	assert.Equal(t, 600, *queued.EtaSeconds, "1×p50 + 当前 running 剩余半个 p50")
 	assert.Nil(t, view.Blocked, "1 运行 1 排队未达上限")
+}
+
+func TestTaskLimit_PerModelOverrideKey(t *testing.T) {
+	_, insert := tlSetup(t, 7009)
+	require.NoError(t, setting.UpdateTaskLimitScopeByJSONString(`["minimax/minimax-h3","wan-ai/"]`))
+	require.NoError(t, setting.UpdateGroupTaskLimitsByJSONString(`{"default":{"running":1,"queued":2},"default@wan-ai/":{"running":1,"queued":1}}`))
+	// H3 已有 1 运行 2 排队（共用名额已满）
+	insert(model.TaskStatusInProgress, 10, 0)
+	insert(model.TaskStatusQueued, 10, 0)
+	insert(model.TaskStatusQueued, 10, 0)
+	// wan 有独立名额：H3 的任务不计入
+	assert.Nil(t, CheckTaskSubmitLimit(context.Background(), 7009, "default", "auto", "wan-ai/wan3.0-video"))
+	insert(model.TaskStatusQueued, 5, 0, func(tk *model.Task) { tk.Properties.OriginModelName = "wan-ai/wan3.0-video" })
+	err := CheckTaskSubmitLimit(context.Background(), 7009, "default", "auto", "wan-ai/wan3.0-video")
+	require.NotNil(t, err, "wan 独立名额 queued=1 已满")
+	assert.Equal(t, 1, err.Data.(*TaskLimitDecision).Limit)
+	// H3 走分组键，且 wan 的任务不占 H3 名额（仍是 1/2 → 拒绝是因为 H3 自己满了）
+	err = CheckTaskSubmitLimit(context.Background(), 7009, "default", "auto", tlModel)
+	require.NotNil(t, err)
+	assert.Equal(t, 2, err.Data.(*TaskLimitDecision).Queued)
+	view := BuildTaskQueueView(7009, "default", "auto", "wan-ai/")
+	assert.Equal(t, "wan-ai/", view.ScopePrefix)
 }

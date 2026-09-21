@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -214,3 +215,72 @@ func GetMoziaTaskLimitSyncClusters(c *gin.Context) {
 	}
 	common.ApiSuccess(c, gin.H{"since": since, "min_users": minUsers, "clusters": out})
 }
+
+// GetMoziaEntitlementCatalog 是「实际生效的权益」只读目录，给 matrix / Mega 读：
+// 订阅计划（价格、额度、周期、升级分组）+ 各分组任务限额 + 各分组是否能用专属池。
+// matrix 据此派生付费页展示与下单价格，不再在代码里各存一份。
+func GetMoziaEntitlementCatalog(c *gin.Context) {
+	var plans []model.SubscriptionPlan
+	if err := model.DB.Order("sort_order desc, id asc").Find(&plans).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	type planView struct {
+		Id               int     `json:"id"`
+		Title            string  `json:"title"`
+		PriceAmount      float64 `json:"price_amount"`
+		Currency         string  `json:"currency"`
+		DurationUnit     string  `json:"duration_unit"`
+		DurationValue    int     `json:"duration_value"`
+		TotalAmount      int64   `json:"total_amount"`
+		QuotaResetPeriod string  `json:"quota_reset_period"`
+		UpgradeGroup     string  `json:"upgrade_group"`
+		Enabled          bool    `json:"enabled"`
+	}
+	pv := make([]planView, 0, len(plans))
+	groups := map[string]struct{}{}
+	for _, p := range plans {
+		pv = append(pv, planView{
+			Id: p.Id, Title: p.Title, PriceAmount: p.PriceAmount, Currency: p.Currency,
+			DurationUnit: p.DurationUnit, DurationValue: p.DurationValue, TotalAmount: p.TotalAmount,
+			QuotaResetPeriod: p.QuotaResetPeriod, UpgradeGroup: strings.TrimSpace(p.UpgradeGroup), Enabled: p.Enabled,
+		})
+		if g := strings.TrimSpace(p.UpgradeGroup); g != "" {
+			groups[g] = struct{}{}
+		}
+	}
+	limits := setting.GroupTaskLimitsCopy()
+	for k := range limits {
+		g, _, _ := strings.Cut(k, "@")
+		groups[g] = struct{}{}
+	}
+	groups["default"] = struct{}{}
+	type poolView struct {
+		UsableGroups []string `json:"usable_groups"`
+		Dedicated    bool     `json:"dedicated"`
+	}
+	pools := map[string]poolView{}
+	for g := range groups {
+		usable := service.GetUserUsableGroups(g)
+		names := make([]string, 0, len(usable))
+		for name := range usable {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		_, dedicated := usable[DedicatedPoolGroup]
+		pools[g] = poolView{UsableGroups: names, Dedicated: dedicated}
+	}
+	common.ApiSuccess(c, gin.H{
+		"plans":                pv,
+		"group_task_limits":    limits,
+		"task_limit_scope":     setting.TaskLimitScopeCopy(),
+		"task_limit_enforce":   setting.TaskLimitEnforce,
+		"dedicated_pool_group": DedicatedPoolGroup,
+		"group_pools":          pools,
+		"quota_per_unit":       common.QuotaPerUnit,
+	})
+}
+
+// DedicatedPoolGroup 是「订阅专属池」的通道分组名。哪些用户分组能用它由
+// group_ratio_setting.group_special_usable_group 的 `+:sub` 决定。
+const DedicatedPoolGroup = "sub"

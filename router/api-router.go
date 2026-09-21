@@ -479,6 +479,7 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 		taskLimitRoute.DELETE("/overrides/:user_id", middleware.RequirePermission(authz.TaskLimitWrite), controller.DeleteMoziaTaskLimitOverride)
 		taskLimitRoute.GET("/users/:user_id", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitUserUsage)
 		taskLimitRoute.GET("/sync-clusters", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitSyncClusters)
+		taskLimitRoute.GET("/catalog", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaEntitlementCatalog)
 	}
 
 	userModelRatioRoute := moziaRouter.Group("/user-model-ratio")

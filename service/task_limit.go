@@ -49,13 +49,15 @@ type TaskLimitDecision struct {
 
 // TaskLimitUsage 是用户在限制范围内的当前用量，队列接口也复用它。
 type TaskLimitUsage struct {
-	Running       int
-	Queued        int
-	LastMinute    int
-	DailyQuota    int64
-	FailStreak    int
-	LastFailAt    int64
-	ActiveTasks   []*model.Task // 未终结且在租约内的任务，按 id 倒序
+	Running     int
+	Queued      int
+	LastMinute  int
+	DailyQuota  int64
+	FailStreak  int
+	LastFailAt  int64
+	ActiveTasks []*model.Task // 未终结且在租约内的任务，按 id 倒序
+	// 非空表示命中了模型级配置，名额只在该前缀内计数
+	ScopePrefix   string
 	EffectiveConf setting.TaskLimitConfig
 	ConfFound     bool
 	Override      *model.MoziaUserTaskLimitOverride
@@ -73,12 +75,29 @@ func ResolveUserGroup(userGroup, tokenGroup string) string {
 }
 
 // CollectTaskLimitUsage 汇总用户在限制范围内的用量与生效配置。
-func CollectTaskLimitUsage(userId int, group string, scopeMatch func(string) bool) *TaskLimitUsage {
+// modelName 非空时按「分组 × 模型」取配置：命中模型级键则名额只在该前缀内计数。
+func CollectTaskLimitUsage(userId int, group string, scopeMatch func(string) bool, modelName string) *TaskLimitUsage {
 	now := taskLimitNow()
 	usage := &TaskLimitUsage{}
-	if conf, ok := setting.GetGroupTaskLimit(group); ok {
+	if conf, prefix, ok := setting.GetGroupTaskLimitForModel(group, modelName); ok {
 		usage.EffectiveConf = conf
 		usage.ConfFound = true
+		if prefix != "" {
+			usage.ScopePrefix = prefix
+			scopeMatch = func(m string) bool { return strings.HasPrefix(strings.ToLower(m), prefix) }
+		} else if excl := setting.GroupTaskLimitOverridePrefixes(group); len(excl) > 0 {
+			// 走分组通用名额：有独立名额的模型不计入
+			base := scopeMatch
+			scopeMatch = func(m string) bool {
+				lm := strings.ToLower(m)
+				for _, p := range excl {
+					if strings.HasPrefix(lm, p) {
+						return false
+					}
+				}
+				return base == nil || base(m)
+			}
+		}
 	}
 	if o, err := model.GetActiveTaskLimitOverride(userId, now); err == nil && o != nil {
 		// 覆盖只改写给了值（>0）的字段，其余沿用分组配置；running 与 queued 同为 0 表示暂停 / 冷却。
@@ -148,7 +167,7 @@ func CheckTaskSubmitLimit(ctx context.Context, userId int, userGroup, tokenGroup
 		return nil
 	}
 	group := ResolveUserGroup(userGroup, tokenGroup)
-	usage := CollectTaskLimitUsage(userId, group, setting.TaskLimitScopeMatches)
+	usage := CollectTaskLimitUsage(userId, group, setting.TaskLimitScopeMatches, modelName)
 	decision := evaluateTaskLimit(usage, group, taskLimitNow())
 	if decision == nil {
 		return nil
@@ -270,16 +289,18 @@ type TaskQueueItem struct {
 }
 
 type TaskQueueView struct {
-	Group     string                   `json:"group"`
-	Enforce   bool                     `json:"enforce"`
-	Limits    *setting.TaskLimitConfig `json:"limits"`
-	Override  bool                     `json:"override"`
-	Running   int                      `json:"running"`
-	Queued    int                      `json:"queued"`
-	Tasks     []TaskQueueItem          `json:"tasks"`
-	Pool      TaskQueuePool            `json:"pool"`
-	Blocked   *TaskLimitDecision       `json:"blocked"`
-	SampledAt int64                    `json:"sampled_at"`
+	Group    string                   `json:"group"`
+	Enforce  bool                     `json:"enforce"`
+	Limits   *setting.TaskLimitConfig `json:"limits"`
+	Override bool                     `json:"override"`
+	// 名额计数范围：命中模型级配置时为该前缀，否则为空（范围内模型共用）
+	ScopePrefix string             `json:"scope_prefix,omitempty"`
+	Running     int                `json:"running"`
+	Queued      int                `json:"queued"`
+	Tasks       []TaskQueueItem    `json:"tasks"`
+	Pool        TaskQueuePool      `json:"pool"`
+	Blocked     *TaskLimitDecision `json:"blocked"`
+	SampledAt   int64              `json:"sampled_at"`
 }
 
 type TaskQueuePool struct {
@@ -297,14 +318,15 @@ func BuildTaskQueueView(userId int, userGroup, tokenGroup, modelPrefix string) *
 	if p := strings.ToLower(strings.TrimSpace(modelPrefix)); p != "" {
 		match = func(m string) bool { return strings.HasPrefix(strings.ToLower(m), p) }
 	}
-	usage := CollectTaskLimitUsage(userId, group, match)
+	usage := CollectTaskLimitUsage(userId, group, match, modelPrefix)
 	view := &TaskQueueView{
-		Group:    group,
-		Enforce:  setting.TaskLimitEnforce,
-		Override: usage.Override != nil,
-		Running:  usage.Running,
-		Queued:   usage.Queued,
-		Tasks:    []TaskQueueItem{},
+		Group:       group,
+		Enforce:     setting.TaskLimitEnforce,
+		Override:    usage.Override != nil,
+		ScopePrefix: usage.ScopePrefix,
+		Running:     usage.Running,
+		Queued:      usage.Queued,
+		Tasks:       []TaskQueueItem{},
 	}
 	if usage.ConfFound {
 		conf := usage.EffectiveConf
