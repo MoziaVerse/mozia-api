@@ -1,6 +1,8 @@
 package service
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -82,4 +84,53 @@ func TestSelfFundedToken_TaskFundingIsNoop(t *testing.T) {
 	require.NoError(t, taskAdjustFunding(task, -400))
 	require.NoError(t, taskAdjustFunding(task, 50))
 	assert.Equal(t, 0, getUserQuota(t, 904))
+}
+
+// 复现验收 P1：余额 500，两笔各 300 的预扣。旧实现先读后写，两笔都通过检查，余额变 -100。
+// 原子条件扣减下只能成功一笔，余额剩 200，失败的一笔不产生扣款。
+func TestSelfFundedToken_ConcurrentPreConsumeCannotOverdraw(t *testing.T) {
+	truncate(t)
+	seedUser(t, 905, 0)
+	seedSelfFundedToken(t, 9005, 905, "sk-sf-5", 500)
+
+	// 模拟两笔请求都已通过"余额足够"的读取判断后再落扣减
+	first := model.DecreaseSelfFundedTokenQuota(9005, "sk-sf-5", 300)
+	second := model.DecreaseSelfFundedTokenQuota(9005, "sk-sf-5", 300)
+	require.NoError(t, first)
+	require.ErrorIs(t, second, model.ErrTokenQuotaInsufficient)
+	assert.Equal(t, 200, getTokenRemainQuota(t, 9005))
+	assert.Equal(t, 300, getTokenUsedQuota(t, 9005))
+
+	// 真并发：N 个 goroutine 同时抢 200 余额，每笔 100，最多两笔成功
+	var wg sync.WaitGroup
+	var okCount int32
+	start := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := model.DecreaseSelfFundedTokenQuota(9005, "sk-sf-5", 100); err == nil {
+				atomic.AddInt32(&okCount, 1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	assert.Equal(t, int32(2), okCount)
+	assert.Equal(t, 0, getTokenRemainQuota(t, 9005), "余额永不为负")
+}
+
+// 走完整预扣入口：第二笔被拒且返回额度不足
+func TestSelfFundedToken_PreConsumeUsesAtomicPath(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+	seedUser(t, 906, 0)
+	seedSelfFundedToken(t, 9006, 906, "sk-sf-6", 500)
+	info := selfFundedRelay(906, 9006, "sk-sf-6", "wallet_first")
+	require.NoError(t, PreConsumeTokenQuota(info, 300))
+	err := PreConsumeTokenQuota(info, 300)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token quota is not enough")
+	assert.Equal(t, 200, getTokenRemainQuota(t, 9006))
 }

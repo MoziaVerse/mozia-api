@@ -395,6 +395,14 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	//if relayInfo.TokenUnlimited {
 	//	return nil
 	//}
+	if relayInfo.TokenSelfFunded {
+		// 自带资金的令牌余量就是钱：必须数据库原子条件扣减，先读后写会被并发请求同时通过检查
+		err := model.DecreaseSelfFundedTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+		if errors.Is(err, model.ErrTokenQuotaInsufficient) {
+			return fmt.Errorf("token quota is not enough, need quota: %s", logger.FormatQuota(quota))
+		}
+		return err
+	}
 	token, err := model.GetTokenByIds(relayInfo.TokenId, relayInfo.UserId)
 	if err != nil {
 		return err

@@ -456,6 +456,39 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	return decreaseTokenQuota(id, quota)
 }
 
+// ErrTokenQuotaInsufficient 表示条件扣减未命中：余额不足（或令牌不是自带资金）。
+var ErrTokenQuotaInsufficient = errors.New("token quota is not enough")
+
+// DecreaseSelfFundedTokenQuota 对自带资金的令牌做原子条件扣减：
+// UPDATE ... WHERE remain_quota >= quota，两笔并发请求只能有一笔成功，余额不会被扣成负数。
+// 不走批量延迟更新（那会让"余额足够"的判断与真正扣减分离，正是并发超扣的根源）。
+func DecreaseSelfFundedTokenQuota(id int, key string, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	res := DB.Model(&Token{}).
+		Where("id = ? AND self_funded = ? AND remain_quota >= ?", id, true, quota).
+		Updates(map[string]interface{}{
+			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+			"used_quota":    gorm.Expr("used_quota + ?", quota),
+			"accessed_time": common.GetTimestamp(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrTokenQuotaInsufficient
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheDecrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to decrease token quota: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
 func decreaseTokenQuota(id int, quota int) (err error) {
 	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
