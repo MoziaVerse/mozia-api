@@ -201,15 +201,9 @@ func AddToken(c *gin.Context) {
 		})
 		return
 	}
-	// self_funded 等于发钱：只允许管理端经 SSO 桥（sso_sub 上下文）签发，用户自建一律忽略该字段
-	if token.SelfFunded {
-		if c.GetString("sso_sub") == "" {
-			token.SelfFunded = false
-		} else if token.UnlimitedQuota || token.RemainQuota <= 0 {
-			common.ApiErrorMsg(c, "self_funded 令牌必须设置有限且大于 0 的额度")
-			return
-		}
-	}
+	// self_funded 等于发钱。普通建 key 接口（含 SSO 桥上的用户操作）一律忽略该字段：
+	// SSO 上下文只证明调用链身份，证明不了这是运营发放；发放走 IssueSelfFundedToken。
+	token.SelfFunded = false
 	key, err := common.GenerateKey()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgTokenGenerateFailed)
@@ -243,12 +237,9 @@ func AddToken(c *gin.Context) {
 	})
 }
 
-// selfFundedDeleteGuard：自带资金的 key 是用户买到的商品，用户侧只能停用不能删除
-// （删了余额就没了）；管理端经 SSO 桥（sso_sub 上下文）仍可删。
-func selfFundedDeleteGuard(c *gin.Context, ids []int, userId int) error {
-	if c.GetString("sso_sub") != "" {
-		return nil
-	}
+// selfFundedDeleteGuard：自带资金的 key 是用户买到的商品，普通删除接口一律拒绝
+// （删了余额就没了），不论是否经 SSO 桥；撤销走 RevokeSelfFundedToken。
+func selfFundedDeleteGuard(ids []int, userId int) error {
 	for _, id := range ids {
 		tk, err := model.GetTokenByIds(id, userId)
 		if err != nil {
@@ -264,7 +255,7 @@ func selfFundedDeleteGuard(c *gin.Context, ids []int, userId int) error {
 func DeleteToken(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")
-	if err := selfFundedDeleteGuard(c, []int{id}, userId); err != nil {
+	if err := selfFundedDeleteGuard([]int{id}, userId); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
@@ -323,8 +314,9 @@ func UpdateToken(c *gin.Context) {
 	} else {
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
-		if cleanToken.SelfFunded && c.GetString("sso_sub") == "" {
-			// 自带资金的 key 余额 / 模型 / 有效期是商品内容，用户只能改名和启停
+		if cleanToken.SelfFunded {
+			// 自带资金的 key 余额 / 模型 / 有效期是商品内容，普通更新接口只能改名和启停，
+			// 不论是否经 SSO 桥；调整权益走 AdjustSelfFundedToken。
 		} else {
 			cleanToken.ExpiredTime = token.ExpiredTime
 			cleanToken.RemainQuota = token.RemainQuota
@@ -359,7 +351,7 @@ func DeleteTokenBatch(c *gin.Context) {
 		return
 	}
 	userId := c.GetInt("id")
-	if err := selfFundedDeleteGuard(c, tokenBatch.Ids, userId); err != nil {
+	if err := selfFundedDeleteGuard(tokenBatch.Ids, userId); err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}

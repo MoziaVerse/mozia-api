@@ -420,6 +420,14 @@ func SetSSOApiRouter(router *gin.Engine) {
 			ssoLogRoute.GET("/self/stat", controller.GetLogsSelfStat)
 		}
 
+		// 自带资金令牌（权益包）的发放 / 调整 / 撤销：SSO 身份之外再过独立密钥
+		fundedTokenRoute := ssoRouter.Group("/funded-token", middleware.SSOFundingAuth())
+		{
+			fundedTokenRoute.POST("/", controller.IssueSelfFundedToken)
+			fundedTokenRoute.PUT("/:id", controller.AdjustSelfFundedToken)
+			fundedTokenRoute.DELETE("/:id", controller.RevokeSelfFundedToken)
+		}
+
 		ssoDataRoute := ssoRouter.Group("/data")
 		{
 			ssoDataRoute.GET("/self", controller.GetUserQuotaDates)
