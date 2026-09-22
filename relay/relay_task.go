@@ -268,7 +268,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 	info.PriceData = priceData
-	if apiErr := service.EnforceMoziaQuotaPolicy(info.UserId, info.OriginModelName); apiErr != nil {
+	if apiErr := service.EnforceMoziaQuotaPolicy(c, info.UserId, info.OriginModelName); apiErr != nil {
 		return nil, service.TaskErrorFromAPIError(apiErr)
 	}
 

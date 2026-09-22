@@ -7,9 +7,10 @@ import (
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 )
 
-func EnforceMoziaQuotaPolicy(userId int, modelName string) *types.NewAPIError {
+func EnforceMoziaQuotaPolicy(c *gin.Context, userId int, modelName string) *types.NewAPIError {
 	if userId == 0 || modelName == "" {
 		return nil
 	}
@@ -23,11 +24,12 @@ func EnforceMoziaQuotaPolicy(userId int, modelName string) *types.NewAPIError {
 		statusCode = http.StatusForbidden
 		errorCode = types.ErrorCodeInsufficientUserQuota
 	}
-	return types.NewErrorWithStatusCode(
+	apiErr := types.NewErrorWithStatusCode(
 		fmt.Errorf("当前额度类型不支持调用模型 %s: %w", modelName, err),
 		errorCode,
 		statusCode,
 		types.ErrOptionWithSkipRetry(),
-		types.ErrOptionWithNoRecordErrorLog(),
 	)
+	RecordQuotaErrorLog(c, userId, modelName, apiErr)
+	return apiErr
 }

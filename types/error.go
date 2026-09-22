@@ -370,6 +370,12 @@ func IsChannelError(err *NewAPIError) bool {
 	return strings.HasPrefix(string(err.errorCode), "channel:")
 }
 
+// IsLocalQuotaError distinguishes gateway quota rejections from upstream errors.
+func IsLocalQuotaError(err *NewAPIError) bool {
+	return err != nil && err.GetErrorType() == ErrorTypeNewAPIError &&
+		(err.GetErrorCode() == ErrorCodeInsufficientUserQuota || err.GetErrorCode() == ErrorCodePreConsumeTokenQuotaFailed)
+}
+
 func IsSkipRetryError(err *NewAPIError) bool {
 	if err == nil {
 		return false

@@ -2,8 +2,12 @@ package service
 
 import (
 	"fmt"
+	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -24,10 +28,35 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	session, apiErr := NewBillingSession(c, relayInfo, customerPreConsumedQuota)
 	if apiErr != nil {
 		failNewResellerBillingSettlement(relayInfo, settlementCreated)
+		RecordQuotaErrorLog(c, relayInfo.UserId, relayInfo.OriginModelName, apiErr)
 		return apiErr
 	}
 	relayInfo.Billing = session
 	return nil
+}
+
+// RecordQuotaErrorLog records a final local rejection, after billing fallbacks.
+// Channel 0 keeps account quota failures separate from upstream channel failures.
+func RecordQuotaErrorLog(c *gin.Context, userId int, modelName string, apiErr *types.NewAPIError) {
+	if !constant.ErrorLogEnabled || !types.IsLocalQuotaError(apiErr) || !types.IsRecordErrorLog(apiErr) {
+		return
+	}
+	other := map[string]interface{}{
+		"error_stage": "billing",
+		"error_type":  apiErr.GetErrorType(),
+		"error_code":  apiErr.GetErrorCode(),
+		"status_code": apiErr.StatusCode,
+	}
+	if c.Request != nil && c.Request.URL != nil {
+		other["request_path"] = c.Request.URL.Path
+	}
+	useTime := 0
+	if start := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime); !start.IsZero() {
+		useTime = int(time.Since(start).Seconds())
+	}
+	model.CaptureRequestBodyLog(c)
+	model.RecordErrorLog(c, userId, 0, modelName, c.GetString("token_name"), apiErr.MaskSensitiveErrorWithStatusCode(),
+		c.GetInt("token_id"), useTime, common.GetContextKeyBool(c, constant.ContextKeyIsStream), c.GetString("group"), other)
 }
 
 // ---------------------------------------------------------------------------
