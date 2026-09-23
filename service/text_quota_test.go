@@ -5,13 +5,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -438,4 +441,50 @@ func TestComposeTieredTextQuotaErrorFallbackUsesPreConsumedQuota(t *testing.T) {
 
 	require.Equal(t, int64(12500), summary.ToolCallSurchargeQuota.Round(0).IntPart())
 	require.Equal(t, 14500, quota)
+}
+
+func TestPostTextConsumeQuotaLogsMeasuredStreamDuration(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stream      bool
+		firstOffset time.Duration
+		generation  time.Duration
+		endReason   relaycommon.StreamEndReason
+		output      int
+		missingEnd  bool
+		wantMs      int64
+	}{
+		{name: "normal measured stream", stream: true, firstOffset: time.Second, generation: 2 * time.Second, endReason: relaycommon.StreamEndReasonDone, output: 80, wantMs: 2000},
+		{name: "failed stream", stream: true, firstOffset: time.Second, generation: 2 * time.Second, endReason: relaycommon.StreamEndReasonTimeout, output: 80},
+		{name: "missing first response", stream: true, firstOffset: -time.Second, generation: 2 * time.Second, endReason: relaycommon.StreamEndReasonDone, output: 80},
+		{name: "missing scanner end", stream: true, firstOffset: time.Second, missingEnd: true, endReason: relaycommon.StreamEndReasonDone, output: 80},
+		{name: "sub millisecond duration", stream: true, firstOffset: time.Second, generation: time.Microsecond, endReason: relaycommon.StreamEndReasonDone, output: 80},
+		{name: "non streaming", firstOffset: time.Second, generation: 2 * time.Second, endReason: relaycommon.StreamEndReasonDone, output: 80},
+		{name: "no output", stream: true, firstOffset: time.Second, generation: 2 * time.Second, endReason: relaycommon.StreamEndReasonDone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+			seedUser(t, 71, 1000)
+			seedChannel(t, 72)
+			ctx := testGinContext()
+			ctx.Set("username", "test_user")
+			ctx.Set(common.RequestIdKey, "measured-generation")
+			start := time.Unix(1800000000, 0)
+			info := &relaycommon.RelayInfo{UserId: 71, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 72}, OriginModelName: "timing-test", StartTime: start, FirstResponseTime: start.Add(tc.firstOffset), IsStream: tc.stream, StreamStatus: relaycommon.NewStreamStatus(), PriceData: types.PriceData{FreeModel: true}}
+			if !tc.missingEnd {
+				info.StreamEndTime = info.FirstResponseTime.Add(tc.generation)
+			}
+			info.StreamStatus.SetEndReason(tc.endReason, nil)
+			PostTextConsumeQuota(ctx, info, &dto.Usage{PromptTokens: 10, CompletionTokens: tc.output}, nil)
+			var entry model.Log
+			require.NoError(t, model.LOG_DB.Where("request_id = ?", "measured-generation").First(&entry).Error)
+			var other map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(entry.Other, &other))
+			if tc.wantMs > 0 {
+				assert.Equal(t, float64(tc.wantMs), other["generation_ms"])
+			} else {
+				assert.NotContains(t, other, "generation_ms")
+			}
+		})
+	}
 }

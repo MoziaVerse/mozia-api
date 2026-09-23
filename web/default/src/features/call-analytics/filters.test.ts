@@ -34,10 +34,10 @@ const input = {
   outcome: '' as const,
 }
 
-test('analytics filters preserve exact model and selected IDs without adding implicit constraints', () => {
+test('analytics filters preserve exact model, username or ID without adding implicit constraints', () => {
   const all = analyticsQueryFilters(analyticsFilterSchema.parse(input))
   assert.equal(all.end_timestamp - all.start_timestamp, 86400)
-  assert.equal(all.user_id, undefined)
+  assert.equal(all.user, undefined)
   assert.equal(all.channel, undefined)
   assert.equal(all.model_name, undefined)
   assert.equal(all.outcome, undefined)
@@ -50,10 +50,23 @@ test('analytics filters preserve exact model and selected IDs without adding imp
       outcome: 'unknown',
     })
   )
-  assert.equal(selected.user_id, 7073)
+  assert.equal(selected.user, '7073')
   assert.equal(selected.channel, 422)
   assert.equal(selected.model_name, 'moonshotai/kimi-k3')
   assert.equal(selected.outcome, 'unknown')
+  for (const [user, expected] of [
+    [' customer_7 ', 'customer_7'],
+    ['   ', undefined],
+    ['9007199254740993', '9007199254740993'],
+    ['customer_7%', 'customer_7%'],
+    [` ${'a'.repeat(128)} `, 'a'.repeat(128)],
+  ]) {
+    assert.equal(
+      analyticsQueryFilters(analyticsFilterSchema.parse({ ...input, user }))
+        .user,
+      expected
+    )
+  }
 })
 
 test('analytics rejects invalid and overlong ranges and malformed IDs before querying', () => {
@@ -61,9 +74,8 @@ test('analytics rejects invalid and overlong ranges and malformed IDs before que
     { start: 'invalid' },
     { end: input.start },
     { end: '2026-10-24T12:00' },
-    { user: '7073x' },
     { channel: '-1' },
-    { user: '9007199254740993' },
+    { user: 'a'.repeat(129) },
   ]) {
     assert.equal(
       analyticsFilterSchema.safeParse({ ...input, ...invalid }).success,
