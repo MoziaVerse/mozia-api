@@ -70,7 +70,10 @@ func TestCallAnalyticsRoutesEnforceGeneralAdminWithoutUserManagement(t *testing.
 		engine.ServeHTTP(response, req)
 		return response
 	}
-	paths := []string{"/api/log/analytics?page_size=101", "/api/log/analytics/users?keyword=7073"}
+	paths := []string{
+		"/api/log/analytics?page_size=101", "/api/log/analytics/users?keyword=7073",
+		"/api/log/call-report?page_size=101", "/api/log/call-report/users?keyword=7073",
+	}
 	for _, path := range paths {
 		anonymous := request(path, 0)
 		assert.Equal(t, http.StatusUnauthorized, anonymous.Code)
@@ -81,12 +84,14 @@ func TestCallAnalyticsRoutesEnforceGeneralAdminWithoutUserManagement(t *testing.
 	}
 	assert.False(t, authz.Can(42, common.RoleAdminUser, authz.UserManageRead))
 	assert.True(t, authz.Can(42, common.RoleAdminUser, authz.GeneralAdminAccess))
-	analytics := request(paths[0], common.RoleAdminUser)
-	assert.Equal(t, http.StatusBadRequest, analytics.Code)
-	assert.Contains(t, analytics.Body.String(), "invalid pagination")
-	users := request(paths[1], common.RoleAdminUser)
-	assert.Equal(t, http.StatusOK, users.Code)
-	assert.JSONEq(t, `{"success":true,"message":"","data":[{"id":7073,"username":"analytics_customer"}]}`, users.Body.String())
+	for _, prefix := range []string{"/api/log/analytics", "/api/log/call-report"} {
+		analytics := request(prefix+"?page_size=101", common.RoleAdminUser)
+		assert.Equal(t, http.StatusBadRequest, analytics.Code)
+		assert.Contains(t, analytics.Body.String(), "invalid pagination")
+		users := request(prefix+"/users?keyword=7073", common.RoleAdminUser)
+		assert.Equal(t, http.StatusOK, users.Code)
+		assert.JSONEq(t, `{"success":true,"message":"","data":[{"id":7073,"username":"analytics_customer"}]}`, users.Body.String())
+	}
 
 	require.NoError(t, authz.SetUserPermissions(42, authz.PermissionsMap{authz.ResourceGeneralAdmin: {authz.ActionAccess: false}}))
 	for _, path := range paths {

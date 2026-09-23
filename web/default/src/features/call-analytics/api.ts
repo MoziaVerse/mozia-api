@@ -129,7 +129,7 @@ export async function getCallAnalytics(
     success: boolean
     message?: string
     data: CallAnalytics
-  }>('/api/log/analytics', {
+  }>('/api/log/call-report', {
     params: { ...filters, p: page, page_size: 20 },
     signal,
   })
@@ -146,7 +146,7 @@ export async function searchAnalyticsUsers(
     success: boolean
     message?: string
     data: { id: number; username: string }[]
-  }>('/api/log/analytics/users', { params: { keyword } })
+  }>('/api/log/call-report/users', { params: { keyword } })
   if (!response.data.success) {
     throw new Error(response.data.message || 'Failed to load users')
   }

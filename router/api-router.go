@@ -279,6 +279,9 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/stat", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetLogsStat)
 		logRoute.GET("/analytics", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetCallAnalytics)
 		logRoute.GET("/analytics/users", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetCallAnalyticsUsers)
+		// Use business report paths so tracking filters do not block the dashboard.
+		logRoute.GET("/call-report", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetCallAnalytics)
+		logRoute.GET("/call-report/users", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetCallAnalyticsUsers)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetChannelAffinityUsageCacheStats)
 		logRoute.GET("/search", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.SearchAllLogs)
