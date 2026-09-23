@@ -158,3 +158,48 @@ func TestH3Probe_AlertOnce(t *testing.T) {
 	notifyWorkerSuspect(context.Background(), ch, bad)
 	assert.Equal(t, 2, calls, "恢复后再次假活重新告警")
 }
+
+// 停用 / 删除的 channel 本轮没枚举到，其快照与告警状态必须清掉，否则池子统计里永远有幽灵 worker
+func TestH3Probe_PruneStaleSnapshots(t *testing.T) {
+	h3SnapshotMu.Lock()
+	h3SnapshotStore = map[int]*WorkerQueueSnapshot{905: {ChannelId: 905}, 906: {ChannelId: 906}}
+	h3SuspectAlerted = map[int]bool{906: true}
+	h3SnapshotMu.Unlock()
+	t.Cleanup(func() { pruneWorkerSnapshots(map[int]bool{}) })
+	pruneWorkerSnapshots(map[int]bool{905: true})
+	assert.NotNil(t, GetWorkerQueueSnapshot(905))
+	assert.Nil(t, GetWorkerQueueSnapshot(906))
+	h3SnapshotMu.RLock()
+	_, alerted := h3SuspectAlerted[906]
+	h3SnapshotMu.RUnlock()
+	assert.False(t, alerted)
+}
+
+// worker 完全连不上：超过假活阈值后走同一条告警管道，只报一次
+func TestH3Probe_AlertOnSustainedFetchFailure(t *testing.T) {
+	calls := 0
+	h3ProbeAlertFunc = func(ctx context.Context, ch *model.Channel, snap *WorkerQueueSnapshot, msg string) { calls++ }
+	defer func() { h3ProbeAlertFunc = sendH3WorkerAlert }()
+	base := time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC)
+	h3ProbeNow = func() time.Time { return base }
+	defer func() { h3ProbeNow = time.Now }()
+	t.Setenv("H3_WORKER_STALE_MINUTES", "5")
+	h3SnapshotMu.Lock()
+	delete(h3SnapshotStore, 907)
+	delete(h3SuspectAlerted, 907)
+	h3SnapshotMu.Unlock()
+	t.Cleanup(func() { pruneWorkerSnapshots(map[int]bool{}) })
+
+	ch := &model.Channel{Id: 907, Name: "dead", Type: constant.ChannelTypeMoziaH3, BaseURL: strPtr("http://127.0.0.1:1")}
+	probeH3Channel(context.Background(), ch)
+	assert.Equal(t, 0, calls, "刚失败不告警")
+	h3ProbeNow = func() time.Time { return base.Add(6 * time.Minute) }
+	probeH3Channel(context.Background(), ch)
+	probeH3Channel(context.Background(), ch)
+	assert.Equal(t, 1, calls, "持续不可达超过阈值告警一次")
+	snap := GetWorkerQueueSnapshot(907)
+	assert.True(t, snap.Suspect)
+	assert.Equal(t, base.Unix(), snap.FailingSince)
+}
+
+func strPtr(s string) *string { return &s }

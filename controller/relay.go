@@ -742,6 +742,10 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
 	}
+	if taskErr.Code == service.TaskLimitErrorCode {
+		// 用户维度的并发 / 排队限制，换渠道重试结果相同，直接终止
+		return false
+	}
 	if c.GetInt("channel_type") == constant.ChannelTypeMoziaH3VDN {
 		// VDN has no idempotency key. A timeout or broken response may follow
 		// successful acceptance; only an explicit overload rejection is safe to retry.

@@ -134,3 +134,15 @@ func TestSelfFundedToken_PreConsumeUsesAtomicPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "token quota is not enough")
 	assert.Equal(t, 200, getTokenRemainQuota(t, 9006))
 }
+
+// 不经 BillingSession 的旧结算入口（违规罚金等）也只动 key，不碰钱包
+func TestSelfFundedToken_PostConsumeQuotaSkipsWallet(t *testing.T) {
+	truncate(t)
+	seedUser(t, 907, 0)
+	seedSelfFundedToken(t, 9007, 907, "sk-sf-7", 1_000)
+	info := selfFundedRelay(907, 9007, "sk-sf-7", "wallet_first")
+	info.BillingSource = BillingSourceToken
+	require.NoError(t, PostConsumeQuota(info, 400, 0, false))
+	assert.Equal(t, 600, getTokenRemainQuota(t, 9007))
+	assert.Equal(t, 0, getUserQuota(t, 907), "钱包不动")
+}

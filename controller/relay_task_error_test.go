@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -92,5 +93,15 @@ func TestRespondTaskErrorAddsType(t *testing.T) {
 				"data": null
 			}`, recorder.Body.String())
 		})
+	}
+}
+
+// 用户维度的任务限流 429 换渠道结果相同，不进入重试循环（否则白跑 RetryTimes 次配额查询）
+func TestTaskLimit429NeverRetries(t *testing.T) {
+	for _, channelType := range []int{constant.ChannelTypeMoziaH3, constant.ChannelTypeMoziaH3VDN, 1} {
+		ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ctx.Set("channel_type", channelType)
+		taskErr := &dto.TaskError{Code: service.TaskLimitErrorCode, StatusCode: 429, LocalError: true}
+		assert.False(t, shouldRetryTaskRelay(ctx, 1, taskErr, 3), "channel_type=%d", channelType)
 	}
 }

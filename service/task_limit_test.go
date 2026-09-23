@@ -230,3 +230,12 @@ func TestTaskLimit_PerModelOverrideKey(t *testing.T) {
 	view := BuildTaskQueueView(7009, "default", "auto", "wan-ai/")
 	assert.Equal(t, "wan-ai/", view.ScopePrefix)
 }
+
+// 范围为空 = 限制不生效（安全默认），队列展示则显示全部
+func TestTaskLimit_EmptyScopeMeansNoLimit(t *testing.T) {
+	require.NoError(t, setting.UpdateTaskLimitScopeByJSONString("[]"))
+	defer func() { _ = setting.UpdateTaskLimitScopeByJSONString(`["minimax/minimax-h3"]`) }()
+	assert.False(t, setting.TaskLimitScopeMatches("minimax/minimax-h3-t2va"))
+	assert.True(t, setting.TaskLimitScopeMatchesOrAll("minimax/minimax-h3-t2va"))
+	assert.Nil(t, CheckTaskSubmitLimit(context.Background(), 1, "default", "auto", "minimax/minimax-h3-t2va"))
+}
