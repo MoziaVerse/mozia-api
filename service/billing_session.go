@@ -264,6 +264,9 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 
 func (s *BillingSession) reserveFunding(delta int) error {
 	switch funding := s.funding.(type) {
+	case *TokenFunding:
+		// The following reserveToken step atomically reserves the key's own funds.
+		return nil
 	case *WalletFunding:
 		target := funding.consumed + delta
 		if target < 0 {
