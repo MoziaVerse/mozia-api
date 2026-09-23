@@ -393,6 +393,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 	{
 		ssoRouter.GET("/user/self", controller.GetSelf)
 		ssoRouter.GET("/user/wallet", controller.GetSSOMoziaWallet)
+		ssoRouter.GET("/user/wallet/history", controller.GetSSOMoziaWalletHistory)
 		ssoRouter.GET("/user/consumption", controller.GetSSOMoziaConsumption)
 		ssoRouter.POST("/user/topup", controller.SSOTopUp)
 		ssoRouter.POST("/user/redeem", middleware.SSOCriticalRateLimit(), controller.SSORedeem)

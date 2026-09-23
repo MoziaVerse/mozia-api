@@ -175,3 +175,84 @@ func TestAdjustMoziaUserWalletRecordsVisibleManageAudit(t *testing.T) {
 	require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeManage).Count(&logCount).Error)
 	assert.EqualValues(t, 3, logCount)
 }
+
+func TestSSOMoziaWalletHistory(t *testing.T) {
+	db := setupMoziaWalletAuditControllerTest(t)
+	require.NoError(t, db.Create(&model.User{Id: 2, Username: "history-user"}).Error)
+	for _, body := range []string{
+		`{"source":"paid","delta":100,"reason":"private support ticket","public_note":"线下付款补登"}`,
+		`{"source":"paid","delta":-20,"reason":"private correction"}`,
+		`{"source":"paid","target_balance":90,"public_note":"余额更正"}`,
+		`{"source":"paid","delta":0}`,
+	} {
+		response := adjustMoziaWalletForTest(t, body, 2)
+		require.True(t, response.Success, response.Message)
+	}
+	failed := adjustMoziaWalletForTest(t, `{"source":"paid","delta":-1000}`, 2)
+	require.False(t, failed.Success)
+	tooLong := adjustMoziaWalletForTest(t, `{"source":"paid","delta":1,"public_note":"`+strings.Repeat("字", 501)+`"}`, 2)
+	require.False(t, tooLong.Success)
+	// These rows must not appear in this customer's receipt history.
+	for _, row := range []model.MoziaWalletTransaction{
+		{UserId: 3, Source: "paid", Delta: 999, EventType: "adjust", Metadata: `{"public_note":"other customer"}`},
+		{UserId: 2, Source: "paid", Delta: -10, EventType: "consume"},
+		{UserId: 2, Source: "paid", Delta: 10, EventType: "refund", ReferenceType: "reservation"},
+		{UserId: 2, Source: "legacy", Delta: 100, EventType: "legacy_sync"},
+	} {
+		require.NoError(t, db.Create(&row).Error)
+	}
+	read := func(userId int, query string) (bool, model.MoziaWalletHistory, string) {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/sso/user/wallet/history"+query, nil)
+		ctx.Set("id", userId)
+		GetSSOMoziaWalletHistory(ctx)
+		var response struct {
+			Success bool                     `json:"success"`
+			Data    model.MoziaWalletHistory `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+		return response.Success, response.Data, recorder.Body.String()
+	}
+	ok, page, body := read(2, "?limit=2&user_id=3")
+	require.True(t, ok)
+	require.Len(t, page.Items, 2)
+	assert.Equal(t, 10, page.Items[0].Delta)
+	assert.Equal(t, 90, page.Items[0].BalanceAfter)
+	assert.Equal(t, "余额更正", page.Items[0].PublicNote)
+	assert.Equal(t, -20, page.Items[1].Delta)
+	assert.Equal(t, 80, page.Items[1].BalanceAfter)
+	assert.Empty(t, page.Items[1].PublicNote)
+	assert.Equal(t, page.Items[1].Id, page.NextCursor)
+	for _, secret := range []string{"private", "other customer", "metadata", "reference_id", "user_id", "admin"} {
+		assert.NotContains(t, body, secret)
+	}
+	// A concurrent new credit cannot shift the next page or repeat an entry.
+	newCredit := adjustMoziaWalletForTest(t, `{"source":"gift","delta":5}`, 2)
+	require.True(t, newCredit.Success)
+	ok, older, _ := read(2, fmt.Sprintf("?limit=2&before=%d", page.NextCursor))
+	require.True(t, ok)
+	require.Len(t, older.Items, 1)
+	assert.Equal(t, 100, older.Items[0].Delta)
+	assert.Equal(t, "线下付款补登", older.Items[0].PublicNote)
+	assert.Zero(t, older.NextCursor)
+
+	for _, event := range []string{"topup", "redeem", "register_gift", "invite_gift", "refund"} {
+		row := model.MoziaWalletTransaction{UserId: 2, Source: "gift", Delta: 1, EventType: event, Metadata: "legacy invalid JSON"}
+		require.NoError(t, db.Create(&row).Error)
+	}
+	ok, all, _ := read(2, "")
+	require.True(t, ok)
+	assert.Len(t, all.Items, 9)
+	assert.Empty(t, all.Items[0].PublicNote)
+	ok, empty, _ := read(4, "")
+	assert.True(t, ok)
+	assert.Empty(t, empty.Items)
+	assert.Zero(t, empty.NextCursor)
+	ok, _, _ = read(0, "")
+	assert.False(t, ok)
+	for _, query := range []string{"?limit=0", "?limit=51", "?limit=-1", "?limit=1.5", "?before=-1", "?before=secret"} {
+		ok, _, _ := read(2, query)
+		assert.False(t, ok, query)
+	}
+}

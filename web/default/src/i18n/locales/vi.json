@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Internal audit reason": "Lý do kiểm toán nội bộ",
+    "Customer-visible note": "Ghi chú hiển thị cho khách hàng",
+    "Optional. Shown in wallet history; internal audit reasons stay private.": "Không bắt buộc. Hiển thị trong lịch sử ví; lý do kiểm toán nội bộ được giữ riêng tư.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

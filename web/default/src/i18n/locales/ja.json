@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Internal audit reason": "内部監査用の理由",
+    "Customer-visible note": "ユーザーに表示する説明",
+    "Optional. Shown in wallet history; internal audit reasons stay private.": "任意。ウォレット履歴に表示されます。内部監査用の理由は公開されません。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

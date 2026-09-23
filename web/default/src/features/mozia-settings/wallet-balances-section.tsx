@@ -116,8 +116,18 @@ async function fetchWallet(userIdentifier: string) {
 async function adjustWallet(
   userId: number,
   payload:
-    | { source: QuotaSource; delta: number; reason?: string }
-    | { source: QuotaSource; target_balance: number; reason?: string }
+    | {
+        source: QuotaSource
+        delta: number
+        reason?: string
+        public_note?: string
+      }
+    | {
+        source: QuotaSource
+        target_balance: number
+        reason?: string
+        public_note?: string
+      }
 ) {
   const res = await api.post<ApiEnvelope<MoziaWalletView>>(
     `/api/mozia/wallet/users/${userId}/adjust`,
@@ -136,6 +146,7 @@ export function MoziaWalletBalancesSection() {
   const [mode, setMode] = useState<AdjustMode>('add')
   const [amount, setAmount] = useState('')
   const [reason, setReason] = useState('')
+  const [publicNote, setPublicNote] = useState('')
 
   const { meta: currencyMeta } = getCurrencyDisplay()
   const currencyLabel = getCurrencyLabel()
@@ -211,17 +222,20 @@ export function MoziaWalletBalancesSection() {
               source,
               target_balance: parsedQuota,
               reason: trimmedReason,
+              public_note: publicNote.trim(),
             }
           : {
               source,
               delta: mode === 'subtract' ? -parsedQuota : parsedQuota,
               reason: trimmedReason,
+              public_note: publicNote.trim(),
             }
       const res = await adjustWallet(wallet.user_id, payload)
       if (res.success) {
         setWallet(res.data)
         setAmount('')
         setReason('')
+        setPublicNote('')
         toast.success(t('Balance adjusted successfully'))
       } else {
         toast.error(res.message || t('Failed to adjust wallet balance'))
@@ -287,6 +301,7 @@ export function MoziaWalletBalancesSection() {
               onChange={(event) => {
                 setUserIdentifierInput(event.target.value)
                 setWallet(null)
+                setPublicNote('')
               }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') void loadWallet()
@@ -451,7 +466,7 @@ export function MoziaWalletBalancesSection() {
 
             <Field>
               <FieldLabel htmlFor='mozia-wallet-reason'>
-                {t('Reason')}
+                {t('Internal audit reason')}
               </FieldLabel>
               <Textarea
                 id='mozia-wallet-reason'
@@ -463,6 +478,24 @@ export function MoziaWalletBalancesSection() {
               <FieldDescription>
                 {t(
                   'This keeps the built-in balance equal to gift + paid + legacy.'
+                )}
+              </FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor='mozia-wallet-public-note'>
+                {t('Customer-visible note')}
+              </FieldLabel>
+              <Textarea
+                id='mozia-wallet-public-note'
+                value={publicNote}
+                maxLength={500}
+                disabled={!wallet || saving}
+                onChange={(event) => setPublicNote(event.target.value)}
+              />
+              <FieldDescription>
+                {t(
+                  'Optional. Shown in wallet history; internal audit reasons stay private.'
                 )}
               </FieldDescription>
             </Field>
