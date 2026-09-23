@@ -28,7 +28,8 @@ var (
 	taskLimitMu sync.RWMutex
 	// GroupTaskLimits 按用户分组配置；未配置的分组不受限。
 	GroupTaskLimits = map[string]TaskLimitConfig{}
-	// TaskLimitScope 生效的模型前缀（空 = 对所有异步任务生效）。第一阶段只放 H3。
+	// TaskLimitScope 限制生效的模型前缀。空 = 不对任何模型生效（安全默认：只配了
+	// GroupTaskLimits 忘了配范围，不会把限制误套到 Suno / MJ 等全部异步任务上）。
 	TaskLimitScope = []string{}
 	// TaskLimitEnforce 为 false 时只记录本应拦截的请求（观察模式），不真正拒绝。
 	TaskLimitEnforce = false
@@ -152,12 +153,21 @@ func GroupTaskLimitsCopy() map[string]TaskLimitConfig {
 	return out
 }
 
-// TaskLimitScopeMatches 判断模型是否在限制范围内。范围为空时对所有模型生效。
+// TaskLimitScopeMatches 判断模型是否在限制范围内。范围为空时不匹配任何模型（限制不生效）。
 func TaskLimitScopeMatches(modelName string) bool {
+	return scopeMatches(modelName, false)
+}
+
+// TaskLimitScopeMatchesOrAll 供队列展示接口使用：范围为空时展示全部异步任务。
+func TaskLimitScopeMatchesOrAll(modelName string) bool {
+	return scopeMatches(modelName, true)
+}
+
+func scopeMatches(modelName string, emptyMeansAll bool) bool {
 	taskLimitMu.RLock()
 	defer taskLimitMu.RUnlock()
 	if len(TaskLimitScope) == 0 {
-		return true
+		return emptyMeansAll
 	}
 	m := strings.ToLower(strings.TrimSpace(modelName))
 	for _, p := range TaskLimitScope {

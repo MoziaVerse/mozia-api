@@ -77,6 +77,14 @@ func ResolveUserGroup(userGroup, tokenGroup string) string {
 // CollectTaskLimitUsage 汇总用户在限制范围内的用量与生效配置。
 // modelName 非空时按「分组 × 模型」取配置：命中模型级键则名额只在该前缀内计数。
 func CollectTaskLimitUsage(userId int, group string, scopeMatch func(string) bool, modelName string) *TaskLimitUsage {
+	usage, match := collectTaskLimitConf(userId, group, scopeMatch, modelName)
+	fillTaskLimitUsage(usage, userId, match)
+	return usage
+}
+
+// collectTaskLimitConf 只解析生效配置（分组配置 + 用户覆盖），不查任务表。
+// 返回的 match 是名额计数用的模型过滤器（模型级键会收窄它）。
+func collectTaskLimitConf(userId int, group string, scopeMatch func(string) bool, modelName string) (*TaskLimitUsage, func(string) bool) {
 	now := taskLimitNow()
 	usage := &TaskLimitUsage{}
 	if conf, prefix, ok := setting.GetGroupTaskLimitForModel(group, modelName); ok {
@@ -119,8 +127,12 @@ func CollectTaskLimitUsage(userId int, group string, scopeMatch func(string) boo
 			usage.EffectiveConf.FailStreak = o.FailStreak
 		}
 	}
+	return usage, scopeMatch
+}
 
-	nowUnix := now.Unix()
+// fillTaskLimitUsage 读最近任务，按 match 过滤后统计运行 / 排队 / 频率 / 日消费 / 连续失败。
+func fillTaskLimitUsage(usage *TaskLimitUsage, userId int, scopeMatch func(string) bool) {
+	nowUnix := taskLimitNow().Unix()
 	tasks := model.GetUserRecentTasks(userId, nowUnix-86400, taskLimitRecentLimit)
 	streakOpen := true
 	for _, t := range tasks {
@@ -157,7 +169,6 @@ func CollectTaskLimitUsage(userId int, group string, scopeMatch func(string) boo
 			}
 		}
 	}
-	return usage
 }
 
 // CheckTaskSubmitLimit 在提交前判定。返回 nil 表示放行；返回 TaskError 时调用方直接响应。
@@ -167,7 +178,13 @@ func CheckTaskSubmitLimit(ctx context.Context, userId int, userGroup, tokenGroup
 		return nil
 	}
 	group := ResolveUserGroup(userGroup, tokenGroup)
-	usage := CollectTaskLimitUsage(userId, group, setting.TaskLimitScopeMatches, modelName)
+	// 先只解析配置：该分组没有配置且用户没有覆盖时直接放行，不查任务表。
+	// 这保证未配置 GroupTaskLimits 的部署对每次任务提交零额外开销。
+	usage, match := collectTaskLimitConf(userId, group, setting.TaskLimitScopeMatches, modelName)
+	if !usage.ConfFound {
+		return nil
+	}
+	fillTaskLimitUsage(usage, userId, match)
 	decision := evaluateTaskLimit(usage, group, taskLimitNow())
 	if decision == nil {
 		return nil
@@ -311,10 +328,10 @@ type TaskQueuePool struct {
 	HasTimeline   bool    `json:"has_timeline"`
 }
 
-// BuildTaskQueueView 组装队列接口响应；modelPrefix 为空时按 TaskLimitScope 过滤。
+// BuildTaskQueueView 组装队列接口响应；modelPrefix 为空时按 TaskLimitScope 过滤（范围未配置则全部展示）。
 func BuildTaskQueueView(userId int, userGroup, tokenGroup, modelPrefix string) *TaskQueueView {
 	group := ResolveUserGroup(userGroup, tokenGroup)
-	match := setting.TaskLimitScopeMatches
+	match := setting.TaskLimitScopeMatchesOrAll
 	if p := strings.ToLower(strings.TrimSpace(modelPrefix)); p != "" {
 		match = func(m string) bool { return strings.HasPrefix(strings.ToLower(m), p) }
 	}

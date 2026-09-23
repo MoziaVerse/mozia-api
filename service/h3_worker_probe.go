@@ -66,6 +66,8 @@ type WorkerQueueSnapshot struct {
 	SuspectReason string `json:"suspect_reason,omitempty"`
 	// 采集失败时保留上一次画像，只标记错误。
 	LastError string `json:"last_error,omitempty"`
+	// 连续采集失败的起点（unix 秒），恢复后清零；持续超过假活阈值则按假活告警
+	FailingSince int64 `json:"failing_since,omitempty"`
 	// 仍在 worker 上未终结的任务，key 为上游 video id。
 	Active map[string]WorkerAuditEntry `json:"active"`
 }
@@ -104,11 +106,6 @@ var workerProbeRegistry = map[int]WorkerSnapshotFetcher{
 	// SGLang Diffusion worker：audit 时间线，旧构建回退列表
 	constant.ChannelTypeMoziaH3: fetchWorkerSnapshot,
 	// VDN（208）是另一套 multipart 服务，没有 audit / 列表接口（生产实测 404），未注册即不采集
-}
-
-// RegisterWorkerProbe 注册某 channel 类型的采集实现（允许覆盖）。
-func RegisterWorkerProbe(channelType int, f WorkerSnapshotFetcher) {
-	workerProbeRegistry[channelType] = f
 }
 
 // H3WorkerChannelTypes 返回已注册采集的 channel 类型（升序，便于日志稳定）。
@@ -164,17 +161,34 @@ func RunH3WorkerProbeOnce(ctx context.Context) {
 	}
 	defer h3ProbeRunning.Store(false)
 
+	seen := map[int]bool{}
 	for _, channelType := range H3WorkerChannelTypes() {
 		channels, err := model.GetEnabledChannelsByTypeAndGroup(channelType, "")
 		if err != nil {
 			logger.LogWarn(ctx, fmt.Sprintf("h3 worker probe: list channels type=%d failed: %v", channelType, err))
-			continue
+			// 列表都拿不到时不清理，避免把有效快照误删
+			return
 		}
 		for _, ch := range channels {
 			if ctx.Err() != nil {
 				return
 			}
+			seen[ch.Id] = true
 			probeH3Channel(ctx, ch)
+		}
+	}
+	pruneWorkerSnapshots(seen)
+}
+
+// pruneWorkerSnapshots 丢掉本轮没有枚举到的 channel（已停用 / 已删除）的快照与告警状态，
+// 否则它们会永远留在池子统计里变成幽灵 worker。
+func pruneWorkerSnapshots(seen map[int]bool) {
+	h3SnapshotMu.Lock()
+	defer h3SnapshotMu.Unlock()
+	for id := range h3SnapshotStore {
+		if !seen[id] {
+			delete(h3SnapshotStore, id)
+			delete(h3SuspectAlerted, id)
 		}
 	}
 }
@@ -194,9 +208,16 @@ func probeH3Channel(ctx context.Context, ch *model.Channel) {
 		// 每 10 秒一轮，失败只在「从正常变为失败」时记一次，恢复时再记一次，避免刷屏
 		if prev.LastError == "" {
 			logger.LogWarn(ctx, fmt.Sprintf("h3 worker probe: channel #%d (%s) fetch failed: %v", ch.Id, ch.Name, err))
+			prev.FailingSince = now.Unix()
 		}
 		prev.LastError = err.Error()
+		// 持续连不上（超过假活阈值）与假活同等对待：走同一条告警管道，只报一次，恢复后重置
+		if prev.FailingSince > 0 && now.Sub(time.Unix(prev.FailingSince, 0)) >= h3ProbeStaleAfter() {
+			prev.Suspect = true
+			prev.SuspectReason = fmt.Sprintf("worker 连续 %s 不可达：%v", now.Sub(time.Unix(prev.FailingSince, 0)).Round(time.Minute), err)
+		}
 		storeWorkerSnapshot(prev)
+		notifyWorkerSuspect(ctx, ch, prev)
 		return
 	}
 	if prev := GetWorkerQueueSnapshot(ch.Id); prev != nil && prev.LastError != "" {
