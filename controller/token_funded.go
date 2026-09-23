@@ -112,20 +112,29 @@ func AdjustSelfFundedToken(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if tokenUpdateTestHook != nil {
+		tokenUpdateTestHook()
+	}
+	// 只写明确提交的字段；没提交 remain_quota 就绝不碰余额，否则会覆盖并发扣减
+	columns := []string{}
 	if req.RemainQuota != nil {
 		if !validFundedQuota(c, *req.RemainQuota) {
 			return
 		}
 		tk.RemainQuota = *req.RemainQuota
+		columns = append(columns, "remain_quota")
 	}
 	if req.ExpiredTime != nil {
 		tk.ExpiredTime = *req.ExpiredTime
+		columns = append(columns, "expired_time")
 	}
 	if req.ModelLimitsEnabled != nil {
 		tk.ModelLimitsEnabled = *req.ModelLimitsEnabled
+		columns = append(columns, "model_limits_enabled")
 	}
 	if req.ModelLimits != nil {
 		tk.ModelLimits = *req.ModelLimits
+		columns = append(columns, "model_limits")
 	}
 	if req.Status != nil {
 		if *req.Status != common.TokenStatusEnabled && *req.Status != common.TokenStatusDisabled {
@@ -133,8 +142,13 @@ func AdjustSelfFundedToken(c *gin.Context) {
 			return
 		}
 		tk.Status = *req.Status
+		columns = append(columns, "status")
 	}
-	if err := tk.Update(); err != nil {
+	if len(columns) == 0 {
+		common.ApiErrorMsg(c, "没有需要调整的字段")
+		return
+	}
+	if err := tk.UpdateColumns(columns...); err != nil {
 		common.ApiError(c, err)
 		return
 	}
