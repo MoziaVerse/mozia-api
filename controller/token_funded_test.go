@@ -283,3 +283,40 @@ func TestTokenWrites_DoNotRestoreConsumedBalance(t *testing.T) {
 		t.Fatalf("响应体余额应为 %d, got %d (err=%v)", remainAfter, body.RemainQuota, err)
 	}
 }
+
+// 余额耗尽被标 Exhausted 的权益包 key，运营补额度后应自动回到启用；到期同理
+func TestAdjustSelfFundedToken_RevivesAutoDisabledStatus(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	tk := seedFundedToken(t, db, 1, 0)
+	db.Model(&model.Token{}).Where("id = ?", tk.Id).Update("status", common.TokenStatusExhausted)
+	ctx, rec := newAuthenticatedContext(t, http.MethodPut, "/api/sso/funded-token/x", map[string]any{"remain_quota": 1000}, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: itoa(tk.Id)}}
+	AdjustSelfFundedToken(ctx)
+	if resp := decodeAPIResponse(t, rec); !resp.Success {
+		t.Fatalf("补额度失败: %s", resp.Message)
+	}
+	var got model.Token
+	db.First(&got, tk.Id)
+	if got.Status != common.TokenStatusEnabled || got.RemainQuota != 1000 {
+		t.Fatalf("补额度后应自动启用: status=%d remain=%d", got.Status, got.RemainQuota)
+	}
+
+	db.Model(&model.Token{}).Where("id = ?", tk.Id).Update("status", common.TokenStatusExpired)
+	ctx, rec = newAuthenticatedContext(t, http.MethodPut, "/api/sso/funded-token/x", map[string]any{"expired_time": 1_950_000_000}, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: itoa(tk.Id)}}
+	AdjustSelfFundedToken(ctx)
+	db.First(&got, tk.Id)
+	if got.Status != common.TokenStatusEnabled {
+		t.Fatalf("延期后应自动启用: status=%d", got.Status)
+	}
+
+	// 运营主动停用的（Disabled）不会被补额度顺手打开
+	db.Model(&model.Token{}).Where("id = ?", tk.Id).Update("status", common.TokenStatusDisabled)
+	ctx, _ = newAuthenticatedContext(t, http.MethodPut, "/api/sso/funded-token/x", map[string]any{"remain_quota": 2000}, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: itoa(tk.Id)}}
+	AdjustSelfFundedToken(ctx)
+	db.First(&got, tk.Id)
+	if got.Status != common.TokenStatusDisabled {
+		t.Fatal("人工停用不应被补额度恢复")
+	}
+}
