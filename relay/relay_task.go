@@ -266,7 +266,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 	info.PriceData = priceData
-	if apiErr := service.EnforceMoziaQuotaPolicy(info.UserId, info.OriginModelName); apiErr != nil {
+	if apiErr := service.EnforceMoziaQuotaPolicy(c, info.UserId, info.OriginModelName); apiErr != nil {
 		return nil, service.TaskErrorFromAPIError(apiErr)
 	}
 	// 4.5 并发 / 排队 / 频率限制：在预扣费与创建上游任务之前，被拦的请求不产生上游成本。
