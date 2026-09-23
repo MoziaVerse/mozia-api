@@ -215,21 +215,13 @@ export function MoziaWalletBalancesSection() {
 
     setSaving(true)
     try {
-      const trimmedReason = reason.trim()
-      const payload =
-        mode === 'set'
-          ? {
-              source,
-              target_balance: parsedQuota,
-              reason: trimmedReason,
-              public_note: publicNote.trim(),
-            }
-          : {
-              source,
-              delta: mode === 'subtract' ? -parsedQuota : parsedQuota,
-              reason: trimmedReason,
-              public_note: publicNote.trim(),
-            }
+      const delta = mode === 'subtract' ? -parsedQuota : parsedQuota
+      const payload = {
+        source,
+        reason: reason.trim(),
+        public_note: publicNote.trim(),
+        ...(mode === 'set' ? { target_balance: parsedQuota } : { delta }),
+      }
       const res = await adjustWallet(wallet.user_id, payload)
       if (res.success) {
         setWallet(res.data)
