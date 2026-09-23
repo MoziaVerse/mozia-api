@@ -129,12 +129,17 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var usage = &dto.Usage{}
 	var lastStreamData string
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
+	var reportedCachedTokens int
+	var cacheUsageReported bool
 
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		service.ObserveSupplierResponse(c, info, []byte(data), true)
+		if cachedTokens, reported := extractReportedCachedTokens(info.ChannelType, common.StringToByteSlice(data)); reported {
+			reportedCachedTokens, cacheUsageReported = cachedTokens, true
+		}
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
@@ -185,6 +190,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	}
 	if containStreamUsage {
 		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+		if cacheUsageReported {
+			usage.CacheUsageReported = true
+			if usage.PromptTokensDetails.CachedTokens == 0 {
+				usage.PromptTokensDetails.CachedTokens = reportedCachedTokens
+			}
+		}
 		normalizedData, err := normalizeCachedTokens(lastStreamData, usage.PromptTokensDetails.CachedTokens)
 		if err != nil {
 			logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
@@ -203,6 +214,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		usage.CompletionTokens += toolCount * 7
 		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+		if cacheUsageReported {
+			usage.CacheUsageReported = true
+			if usage.PromptTokensDetails.CachedTokens == 0 {
+				usage.PromptTokensDetails.CachedTokens = reportedCachedTokens
+			}
+		}
 	}
 
 	// Finish upstream accounting before the final event lets the client start its next request.

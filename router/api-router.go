@@ -275,6 +275,8 @@ func SetApiRouter(router *gin.Engine) {
 		// TODO: remove once the classic frontend is removed; the default frontend uses /system-task/log-cleanup.
 		logRoute.DELETE("/", middleware.RootAuth(), controller.DeleteHistoryLogs)
 		logRoute.GET("/stat", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetLogsStat)
+		logRoute.GET("/analytics", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetCallAnalytics)
+		logRoute.GET("/analytics/users", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetCallAnalyticsUsers)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetChannelAffinityUsageCacheStats)
 		logRoute.GET("/search", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.SearchAllLogs)

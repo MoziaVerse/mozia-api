@@ -20,6 +20,9 @@ func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, res
 	if info == nil || usage == nil {
 		return
 	}
+	if _, reported := extractReportedCachedTokens(info.ChannelType, responseBody); reported {
+		usage.CacheUsageReported = true
+	}
 
 	switch info.ChannelType {
 	case constant.ChannelTypeDeepSeek:
@@ -61,6 +64,26 @@ func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, res
 	}
 }
 
+func extractReportedCachedTokens(channelType int, body []byte) (int, bool) {
+	switch channelType {
+	case constant.ChannelTypeOpenAI, constant.ChannelTypeDeepSeek, constant.ChannelTypeMoonshot, constant.ChannelTypeZhipu_v4:
+	default:
+		return 0, false
+	}
+	if channelType == constant.ChannelTypeMoonshot {
+		if cachedTokens, ok := extractMoonshotCachedTokensFromBody(body); ok {
+			return cachedTokens, true
+		}
+	}
+	if cachedTokens, ok := extractCachedTokensFromBody(body); ok {
+		return cachedTokens, true
+	}
+	if channelType == constant.ChannelTypeOpenAI {
+		return extractLlamaCachedTokensFromBody(body)
+	}
+	return 0, false
+}
+
 func extractCachedTokensFromBody(body []byte) (int, bool) {
 	if len(body) == 0 {
 		return 0, false
@@ -71,6 +94,9 @@ func extractCachedTokensFromBody(body []byte) (int, bool) {
 			PromptTokensDetails struct {
 				CachedTokens *int `json:"cached_tokens"`
 			} `json:"prompt_tokens_details"`
+			InputTokensDetails struct {
+				CachedTokens *int `json:"cached_tokens"`
+			} `json:"input_tokens_details"`
 			CachedTokens         *int `json:"cached_tokens"`
 			PromptCacheHitTokens *int `json:"prompt_cache_hit_tokens"`
 		} `json:"usage"`
@@ -82,6 +108,9 @@ func extractCachedTokensFromBody(body []byte) (int, bool) {
 
 	if payload.Usage.PromptTokensDetails.CachedTokens != nil {
 		return *payload.Usage.PromptTokensDetails.CachedTokens, true
+	}
+	if payload.Usage.InputTokensDetails.CachedTokens != nil {
+		return *payload.Usage.InputTokensDetails.CachedTokens, true
 	}
 	if payload.Usage.CachedTokens != nil {
 		return *payload.Usage.CachedTokens, true
@@ -112,13 +141,17 @@ func extractMoonshotCachedTokensFromBody(body []byte) (int, bool) {
 	}
 
 	// 遍历choices查找cached_tokens
+	reported := false
 	for _, choice := range payload.Choices {
-		if choice.Usage.CachedTokens != nil && *choice.Usage.CachedTokens > 0 {
-			return *choice.Usage.CachedTokens, true
+		if choice.Usage.CachedTokens != nil {
+			reported = true
+			if *choice.Usage.CachedTokens > 0 {
+				return *choice.Usage.CachedTokens, true
+			}
 		}
 	}
 
-	return 0, false
+	return 0, reported
 }
 
 // extractLlamaCachedTokensFromBody 从llama.cpp的非标准位置提取cache_n

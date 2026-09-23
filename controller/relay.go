@@ -89,6 +89,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			c.Set("call_analytics_error_status", newAPIError.StatusCode)
+			c.Set("call_analytics_error_code", string(newAPIError.GetErrorCode()))
 			if c.Writer.Written() {
 				return
 			}
