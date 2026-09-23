@@ -310,6 +310,32 @@ func (token *Token) Update() (err error) {
 	return err
 }
 
+// UpdateColumns 只写明确指定的列，写完用数据库最新行回填自身并刷新缓存。
+// 改名 / 启停 / 权益调整必须走这里：Update() 会把读取时的 remain_quota 整行回写，
+// 覆盖两次读写之间发生的原子扣减（已消费的余额被恢复）。
+func (token *Token) UpdateColumns(columns ...string) error {
+	if len(columns) == 0 {
+		return errors.New("no columns to update")
+	}
+	if err := DB.Model(&Token{}).Where("id = ?", token.Id).Select(columns).Updates(token).Error; err != nil {
+		return err
+	}
+	fresh, err := GetTokenById(token.Id)
+	if err != nil {
+		return err
+	}
+	*token = *fresh
+	if common.RedisEnabled {
+		snapshot := *fresh
+		gopool.Go(func() {
+			if err := cacheSetToken(snapshot); err != nil {
+				common.SysLog("failed to update token cache: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
 // UpdateGroup preserves quota and all other token settings, including concurrent usage.
 func (token *Token) UpdateGroup(group string) (cacheInvalidated bool, err error) {
 	if token.Group != group {

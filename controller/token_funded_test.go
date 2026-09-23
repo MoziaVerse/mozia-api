@@ -199,3 +199,87 @@ func TestSSOFundingAuth(t *testing.T) {
 func itoa(i int) string { return strconvItoa(i) }
 
 func strconvItoa(i int) string { return strconv.Itoa(i) }
+
+// 复现验收 P1（第二轮）：改名 / 启停 / 管理调整 读取 token 后、写回前，另一笔请求原子扣掉 300。
+// 旧实现整行回写把余额恢复成 500；现在只写涉及的列，余额必须始终是 200、已用 300。
+func TestTokenWrites_DoNotRestoreConsumedBalance(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	const remainAfter, usedAfter = 200, 300
+	interleave := func(id int) func() {
+		return func() {
+			if err := model.DecreaseSelfFundedTokenQuota(id, "", 300); err != nil {
+				t.Fatalf("interleaved decrease: %v", err)
+			}
+		}
+	}
+	check := func(id int, label string) {
+		t.Helper()
+		var got model.Token
+		if err := db.First(&got, id).Error; err != nil {
+			t.Fatal(err)
+		}
+		if got.RemainQuota != remainAfter || got.UsedQuota != usedAfter {
+			t.Fatalf("%s 把已消费余额写回了: remain=%d used=%d", label, got.RemainQuota, got.UsedQuota)
+		}
+	}
+
+	// 1) 普通改名（经 SSO 桥）
+	tk := seedFundedToken(t, db, 1, 500)
+	tokenUpdateTestHook = interleave(tk.Id)
+	ctx, rec := newAuthenticatedContext(t, http.MethodPut, "/api/sso/token/", map[string]any{
+		"id": tk.Id, "name": "renamed", "expired_time": -1, "remain_quota": 500, "unlimited_quota": false,
+		"model_limits_enabled": true, "model_limits": "minimax/minimax-h3-t2va", "group": "auto",
+	}, 1)
+	ctx.Set("sso_sub", "user-sso-sub")
+	UpdateToken(ctx)
+	if resp := decodeAPIResponse(t, rec); !resp.Success {
+		t.Fatalf("改名失败: %s", resp.Message)
+	}
+	check(tk.Id, "改名")
+	var renamed model.Token
+	db.First(&renamed, tk.Id)
+	if renamed.Name != "renamed" {
+		t.Fatal("改名未生效")
+	}
+
+	// 2) 普通停用（status_only）
+	tk = seedFundedToken(t, db, 1, 500)
+	tokenUpdateTestHook = interleave(tk.Id)
+	ctx, rec = newAuthenticatedContext(t, http.MethodPut, "/api/sso/token/?status_only=true", map[string]any{"id": tk.Id, "status": common.TokenStatusDisabled}, 1)
+	UpdateToken(ctx)
+	if resp := decodeAPIResponse(t, rec); !resp.Success {
+		t.Fatalf("停用失败: %s", resp.Message)
+	}
+	check(tk.Id, "停用")
+	var disabled model.Token
+	db.First(&disabled, tk.Id)
+	if disabled.Status != common.TokenStatusDisabled {
+		t.Fatal("停用未生效")
+	}
+
+	// 3) 管理接口只调整有效期
+	tk = seedFundedToken(t, db, 1, 500)
+	tokenUpdateTestHook = interleave(tk.Id)
+	ctx, rec = newAuthenticatedContext(t, http.MethodPut, "/api/sso/funded-token/x", map[string]any{"expired_time": 1_950_000_000}, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: itoa(tk.Id)}}
+	AdjustSelfFundedToken(ctx)
+	if resp := decodeAPIResponse(t, rec); !resp.Success {
+		t.Fatalf("调整失败: %s", resp.Message)
+	}
+	check(tk.Id, "管理调整有效期")
+	var adjusted model.Token
+	db.First(&adjusted, tk.Id)
+	if adjusted.ExpiredTime != 1_950_000_000 {
+		t.Fatal("有效期未生效")
+	}
+	tokenUpdateTestHook = nil
+
+	// 响应体应反映数据库最新余额，而不是读取时的旧值
+	var body struct {
+		RemainQuota int `json:"remain_quota"`
+	}
+	resp := decodeAPIResponse(t, rec)
+	if err := common.Unmarshal(resp.Data, &body); err != nil || body.RemainQuota != remainAfter {
+		t.Fatalf("响应体余额应为 %d, got %d (err=%v)", remainAfter, body.RemainQuota, err)
+	}
+}

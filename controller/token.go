@@ -237,6 +237,9 @@ func AddToken(c *gin.Context) {
 	})
 }
 
+// tokenUpdateTestHook 在「读取 token 之后、写回之前」被调用，仅测试用来固定并发扣款的交错顺序。
+var tokenUpdateTestHook func()
+
 // selfFundedDeleteGuard：自带资金的 key 是用户买到的商品，普通删除接口一律拒绝
 // （删了余额就没了），不论是否经 SSO 桥；撤销走 RevokeSelfFundedToken。
 func selfFundedDeleteGuard(ids []int, userId int) error {
@@ -299,6 +302,9 @@ func UpdateToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if tokenUpdateTestHook != nil {
+		tokenUpdateTestHook()
+	}
 	if token.Status == common.TokenStatusEnabled {
 		if cleanToken.Status == common.TokenStatusExpired && cleanToken.ExpiredTime <= common.GetTimestamp() && cleanToken.ExpiredTime != -1 {
 			common.ApiErrorI18n(c, i18n.MsgTokenExpiredCannotEnable)
@@ -309,26 +315,31 @@ func UpdateToken(c *gin.Context) {
 			return
 		}
 	}
+	// 启停与自带资金 key 的改名只写涉及的列：整行回写会把读取时的余额覆盖掉并发扣减
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
-	} else {
-		// If you add more fields, please also update token.Update()
+		err = cleanToken.UpdateColumns("status")
+	} else if cleanToken.SelfFunded {
+		// 自带资金的 key 余额 / 模型 / 有效期是商品内容，普通更新接口只能改名（及 IP / 分组
+		// 这类不涉及资金的字段），不论是否经 SSO 桥；调整权益走 AdjustSelfFundedToken。
 		cleanToken.Name = token.Name
-		if cleanToken.SelfFunded {
-			// 自带资金的 key 余额 / 模型 / 有效期是商品内容，普通更新接口只能改名和启停，
-			// 不论是否经 SSO 桥；调整权益走 AdjustSelfFundedToken。
-		} else {
-			cleanToken.ExpiredTime = token.ExpiredTime
-			cleanToken.RemainQuota = token.RemainQuota
-			cleanToken.UnlimitedQuota = token.UnlimitedQuota
-			cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
-			cleanToken.ModelLimits = token.ModelLimits
-		}
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		err = cleanToken.UpdateColumns("name", "allow_ips", "group", "cross_group_retry")
+	} else {
+		// If you add more fields, please also update token.Update()
+		cleanToken.Name = token.Name
+		cleanToken.ExpiredTime = token.ExpiredTime
+		cleanToken.RemainQuota = token.RemainQuota
+		cleanToken.UnlimitedQuota = token.UnlimitedQuota
+		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
+		cleanToken.ModelLimits = token.ModelLimits
+		cleanToken.AllowIps = token.AllowIps
+		cleanToken.Group = token.Group
+		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		err = cleanToken.Update()
 	}
-	err = cleanToken.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
