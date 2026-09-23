@@ -1,5 +1,3 @@
-import { zodResolver } from '@hookform/resolvers/zod'
-import { useQuery } from '@tanstack/react-query'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -18,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { zodResolver } from '@hookform/resolvers/zod'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -32,7 +32,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import dayjs from '@/lib/dayjs'
 import { formatTimestampForInput } from '@/lib/format'
 
-import { getCallAnalytics, searchAnalyticsUsers } from './api'
+import { getCallAnalytics } from './api'
 import {
   analyticsFilterSchema,
   analyticsQueryFilters,
@@ -60,17 +60,6 @@ export function CallAnalyticsPage() {
   })
   const [filters, setFilters] = useState(() => analyticsQueryFilters(initial))
   const [page, setPage] = useState(1)
-  const [userKeyword, setUserKeyword] = useState('')
-  const [userSearch, setUserSearch] = useState('')
-  const [selectedUser, setSelectedUser] = useState<{
-    id: number
-    username: string
-  } | null>(null)
-  const users = useQuery({
-    queryKey: ['call-analytics-users', userSearch],
-    queryFn: () => searchAnalyticsUsers(userSearch),
-    staleTime: 60000,
-  })
   const query = useQuery({
     queryKey: ['call-analytics', filters, page],
     queryFn: ({ signal }) => getCallAnalytics(filters, page, signal),
@@ -102,7 +91,7 @@ export function CallAnalyticsPage() {
       'Some upstreams do not report cache usage. A missing report is not proof of a cache miss.'
     ),
     completion_time_basis: t(
-      'Time filters and minute buckets use completion time. RPM and TPM averages cover the entire selected interval.'
+      'Time filters and minute buckets use request completion time.'
     ),
     legacy_missing_request_ids: t(
       'Some historical logs have no request ID and cannot be reliably grouped into requests.'
@@ -115,9 +104,6 @@ export function CallAnalyticsPage() {
     ['cancelled', t('Cancelled')],
     ['unknown', t('Unknown')],
   ]
-  const userOptions = users.data ?? []
-  const missingSelectedUser =
-    selectedUser && !userOptions.some((user) => user.id === selectedUser.id)
 
   return (
     <SectionPageLayout>
@@ -152,6 +138,26 @@ export function CallAnalyticsPage() {
                     />
                   </div>
                   <div className='space-y-2'>
+                    <Label htmlFor='analytics-user'>
+                      {t('User ID or username')}
+                    </Label>
+                    <Input
+                      id='analytics-user'
+                      placeholder={t(
+                        'Exact username or ID; leave blank for all'
+                      )}
+                      autoCapitalize='none'
+                      spellCheck={false}
+                      aria-invalid={Boolean(form.formState.errors.user)}
+                      aria-describedby={
+                        form.formState.errors.user
+                          ? 'analytics-user-error'
+                          : undefined
+                      }
+                      {...form.register('user')}
+                    />
+                  </div>
+                  <div className='space-y-2'>
                     <Label htmlFor='analytics-model'>{t('Model Name')}</Label>
                     <Input
                       id='analytics-model'
@@ -167,60 +173,6 @@ export function CallAnalyticsPage() {
                       placeholder={t('All')}
                       {...form.register('channel')}
                     />
-                  </div>
-                  <div className='space-y-2 sm:col-span-2'>
-                    <Label htmlFor='analytics-user-search'>
-                      {t('Search Users')}
-                    </Label>
-                    <div className='flex gap-2'>
-                      <Input
-                        id='analytics-user-search'
-                        value={userKeyword}
-                        onChange={(event) => setUserKeyword(event.target.value)}
-                        placeholder={t('Username or user ID')}
-                      />
-                      <Button
-                        type='button'
-                        variant='outline'
-                        disabled={users.isFetching}
-                        onClick={() => {
-                          if (userSearch === userKeyword.trim()) {
-                            void users.refetch()
-                          } else setUserSearch(userKeyword.trim())
-                        }}
-                      >
-                        {t('Search')}
-                      </Button>
-                    </div>
-                  </div>
-                  <div className='space-y-2'>
-                    <Label htmlFor='analytics-user'>{t('User')}</Label>
-                    <NativeSelect
-                      id='analytics-user'
-                      className='w-full'
-                      {...form.register('user', {
-                        onChange: (event) =>
-                          setSelectedUser(
-                            userOptions.find(
-                              (user) => String(user.id) === event.target.value
-                            ) ?? null
-                          ),
-                      })}
-                    >
-                      <NativeSelectOption value=''>
-                        {t('All Users')}
-                      </NativeSelectOption>
-                      {missingSelectedUser && (
-                        <NativeSelectOption value={selectedUser.id}>
-                          {selectedUser.username} (#{selectedUser.id})
-                        </NativeSelectOption>
-                      )}
-                      {userOptions.map((user) => (
-                        <NativeSelectOption key={user.id} value={user.id}>
-                          {user.username} (#{user.id})
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
                   </div>
                   <div className='space-y-2'>
                     <Label htmlFor='analytics-outcome'>{t('Result')}</Label>
@@ -250,17 +202,13 @@ export function CallAnalyticsPage() {
                 {Object.entries(form.formState.errors).map(([key, error]) => (
                   <p
                     key={key}
+                    id={`analytics-${key}-error`}
                     role='alert'
                     className='text-destructive text-sm'
                   >
                     {t(error.message || 'Invalid input')}
                   </p>
                 ))}
-                {users.error && (
-                  <p role='alert' className='text-destructive text-sm'>
-                    {t('Failed to load users')}: {users.error.message}
-                  </p>
-                )}
               </form>
             </CardContent>
           </Card>
@@ -289,31 +237,34 @@ export function CallAnalyticsPage() {
                     .unix(query.data.end_timestamp)
                     .format('YYYY-MM-DD HH:mm')}
                 </p>
-                <Alert>
-                  <AlertDescription className='space-y-1'>
-                    <p>
+                {query.data.warnings.includes('logging_disabled') && (
+                  <Alert variant='destructive'>
+                    <AlertDescription>
+                      {warnings.logging_disabled}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <details className='bg-card rounded-xl border px-4 py-3'>
+                  <summary className='cursor-pointer text-sm font-medium'>
+                    {t('Data coverage and notes')}
+                    {' · '}
+                    <span className='text-muted-foreground font-normal'>
                       {t('Final outcomes recorded')}:{' '}
                       {query.data.coverage.final_recorded_requests.toLocaleString()}{' '}
                       · {t('Inferred')}:{' '}
                       {query.data.coverage.inferred_requests.toLocaleString()} ·{' '}
                       {t('Unknown')}:{' '}
-                      {query.data.coverage.unknown_requests.toLocaleString()}
-                    </p>
-                    <p>
-                      {t(
-                        'First response latency measures the first non-empty stream event, not strictly the first token. Missing samples display —.'
-                      )}
-                    </p>
-                    <p>
-                      {t(
-                        'Cache hit rate includes only requests with reported cache usage; unknown usage is excluded.'
-                      )}
-                    </p>
-                    {query.data.warnings.map((warning) => (
-                      <p key={warning}>{warnings[warning] ?? warning}</p>
-                    ))}
-                  </AlertDescription>
-                </Alert>
+                      {query.data.summary.unknown.toLocaleString()}
+                    </span>
+                  </summary>
+                  <div className='text-muted-foreground mt-3 space-y-1 text-xs'>
+                    {query.data.warnings
+                      .filter((warning) => warning !== 'logging_disabled')
+                      .map((warning) => (
+                        <p key={warning}>{warnings[warning] ?? warning}</p>
+                      ))}
+                  </div>
+                </details>
                 <AnalyticsReport data={query.data} />
                 <AnalyticsRequests
                   data={query.data}

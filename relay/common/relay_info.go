@@ -102,6 +102,7 @@ type RelayInfo struct {
 	TokenUnlimited    bool
 	StartTime         time.Time
 	FirstResponseTime time.Time
+	StreamEndTime     time.Time
 	isFirstResponse   bool
 	//SendLastReasoningResponse bool
 	IsStream               bool

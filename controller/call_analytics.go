@@ -26,12 +26,3 @@ func GetCallAnalytics(c *gin.Context) {
 	}
 	common.ApiSuccess(c, report)
 }
-
-func GetCallAnalyticsUsers(c *gin.Context) {
-	users, err := model.SearchCallAnalyticsUsers(c.Request.Context(), c.Query("keyword"))
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	common.ApiSuccess(c, users)
-}

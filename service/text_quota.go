@@ -407,6 +407,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if usage != nil && usage.CacheUsageReported {
 		other["cache_usage_reported"] = true
 	}
+	generationMs := relayInfo.StreamEndTime.Sub(relayInfo.FirstResponseTime).Milliseconds()
+	if relayInfo.IsStream && relayInfo.StreamStatus != nil && relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors() && relayInfo.FirstResponseTime.After(relayInfo.StartTime) && generationMs > 0 && summary.CompletionTokens > 0 {
+		// First SSE event to upstream scan completion, excluding billing/cleanup.
+		// The first event can precede the first token, so this is an output-rate estimate.
+		other["generation_ms"] = generationMs
+	}
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason
 	}

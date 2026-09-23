@@ -84,16 +84,12 @@ func RecordRequestOutcome(c *gin.Context, started time.Time, panicked bool) {
 		"error_code":      errorCode,
 		"request_outcome": map[string]interface{}{
 			"status": outcome, "status_code": statusCode,
-			"started_at": started.Unix(), "duration_ms": finished.Sub(started).Milliseconds(),
+			"duration_ms": finished.Sub(started).Milliseconds(),
 		},
 		"admin_info": map[string]interface{}{
 			"routing_rule_id":           common.GetContextKeyString(c, constant.ContextKeyConditionalRouteID),
 			"routing_target_channel_id": common.GetContextKeyInt(c, constant.ContextKeyRouteChannelID),
-			"use_channel":               c.GetStringSlice("use_channel"),
 		},
-	}
-	if errorStatus := c.GetInt("call_analytics_error_status"); errorStatus != 0 {
-		other["status_code"] = errorStatus
 	}
 	log := &Log{
 		Type: LogTypeRequestOutcome, UserId: c.GetInt("id"), Username: c.GetString("username"),

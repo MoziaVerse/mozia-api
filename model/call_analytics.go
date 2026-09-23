@@ -24,6 +24,7 @@ type CallAnalyticsFilter struct {
 	StartTimestamp int64  `json:"start_timestamp" form:"start_timestamp"`
 	EndTimestamp   int64  `json:"end_timestamp" form:"end_timestamp"`
 	UserID         int    `json:"user_id" form:"user_id"`
+	User           string `json:"user" form:"user"`
 	ModelName      string `json:"model_name" form:"model_name"`
 	Channel        int    `json:"channel" form:"channel"`
 	Outcome        string `json:"outcome" form:"outcome"`
@@ -32,6 +33,7 @@ type CallAnalyticsFilter struct {
 }
 
 func (f *CallAnalyticsFilter) Normalize(now time.Time) error {
+	f.User = strings.TrimSpace(f.User)
 	if f.EndTimestamp == 0 {
 		f.EndTimestamp = now.Unix()
 	}
@@ -41,8 +43,8 @@ func (f *CallAnalyticsFilter) Normalize(now time.Time) error {
 	if f.StartTimestamp < 0 || f.EndTimestamp <= f.StartTimestamp || f.EndTimestamp-f.StartTimestamp > 31*86400 {
 		return errors.New("time range must be positive and no longer than 31 days")
 	}
-	if f.UserID < 0 || f.Channel < 0 {
-		return errors.New("user_id and channel must not be negative")
+	if f.UserID < 0 || f.Channel < 0 || len(f.User) > 128 || (f.UserID != 0 && f.User != "") {
+		return errors.New("invalid user or channel filter")
 	}
 	if len(f.ModelName) > 256 {
 		return errors.New("model_name is too long")
@@ -90,15 +92,30 @@ type CallAnalyticsSummary struct {
 	CacheWriteTokens  int64    `json:"cache_write_tokens"`
 	CacheHitRate      *float64 `json:"cache_hit_rate"`
 	AvgRPM            float64  `json:"avg_rpm"`
+	RecentRPM         *int     `json:"recent_rpm"`
 	PeakRPM           int      `json:"peak_rpm"`
 	AvgTPM            float64  `json:"avg_tpm"`
+	RecentTPM         *int64   `json:"recent_tpm"`
 	PeakTPM           int64    `json:"peak_tpm"`
-	AvgFRTMs          *float64 `json:"avg_frt_ms"`
-	P95FRTMs          *float64 `json:"p95_frt_ms"`
 	AvgDurationMs     *float64 `json:"avg_duration_ms"`
 	P95DurationMs     *float64 `json:"p95_duration_ms"`
 	RetriedRequests   int      `json:"retried_requests"`
 	RecoveredRequests int      `json:"recovered_requests"`
+}
+
+type CallAnalyticsQuantiles struct {
+	P50     *float64 `json:"p50"`
+	P95     *float64 `json:"p95"`
+	P99     *float64 `json:"p99"`
+	Samples int      `json:"samples"`
+}
+
+type CallAnalyticsDistributions struct {
+	FirstResponseMs CallAnalyticsQuantiles `json:"first_response_ms"`
+	OutputTPS       CallAnalyticsQuantiles `json:"output_tps"`
+	RPM             CallAnalyticsQuantiles `json:"rpm"`
+	TPM             CallAnalyticsQuantiles `json:"tpm"`
+	CacheShare      CallAnalyticsQuantiles `json:"cache_share"`
 }
 
 type CallAnalyticsAttempt struct {
@@ -125,6 +142,7 @@ type CallAnalyticsRequest struct {
 	CacheReadTokens    int64                  `json:"cache_read_tokens"`
 	CacheWriteTokens   int64                  `json:"cache_write_tokens"`
 	FRTMs              *float64               `json:"frt_ms"`
+	OutputTPS          *float64               `json:"output_tps"`
 	DurationMs         *float64               `json:"duration_ms"`
 	Attempts           int                    `json:"attempts"`
 	AttemptLogs        []CallAnalyticsAttempt `json:"attempt_logs"`
@@ -167,22 +185,18 @@ type CallAnalyticsCoverage struct {
 	UnknownModelRequests  int `json:"unknown_model_requests"`
 	FinalRecordedRequests int `json:"final_recorded_requests"`
 	InferredRequests      int `json:"inferred_requests"`
-	UnknownRequests       int `json:"unknown_requests"`
-	FRTSamples            int `json:"frt_samples"`
-	CacheSamples          int `json:"cache_samples"`
-	ScannedLogs           int `json:"scanned_logs"`
 }
 
 type CallAnalyticsReport struct {
-	StartTimestamp       int64                  `json:"start_timestamp"`
-	EndTimestamp         int64                  `json:"end_timestamp"`
-	TimeBasis            string                 `json:"time_basis"`
-	TrendIntervalSeconds int64                  `json:"trend_interval_seconds"`
-	Summary              CallAnalyticsSummary   `json:"summary"`
-	Trend                []CallAnalyticsTrend   `json:"trend"`
-	Users                []CallAnalyticsUser    `json:"users"`
-	Channels             []CallAnalyticsChannel `json:"channels"`
-	Errors               []CallAnalyticsError   `json:"errors"`
+	StartTimestamp       int64                      `json:"start_timestamp"`
+	EndTimestamp         int64                      `json:"end_timestamp"`
+	TrendIntervalSeconds int64                      `json:"trend_interval_seconds"`
+	Summary              CallAnalyticsSummary       `json:"summary"`
+	Distributions        CallAnalyticsDistributions `json:"distributions"`
+	Trend                []CallAnalyticsTrend       `json:"trend"`
+	Users                []CallAnalyticsUser        `json:"users"`
+	Channels             []CallAnalyticsChannel     `json:"channels"`
+	Errors               []CallAnalyticsError       `json:"errors"`
 	Requests             struct {
 		Items    []CallAnalyticsRequest `json:"items"`
 		Total    int                    `json:"total"`
@@ -199,7 +213,7 @@ var callAnalyticsMetadataPaths = []string{
 	"request_path", "request_outcome", "requested_model", "effective_model", "admin_info.requested_model", "admin_info.effective_model",
 	"admin_info.routing_rule_id", "admin_info.routing_target_channel_id", "status_code", "error_code", "stream_status.status", "stream_status.end_reason",
 	"violation_fee", "frt", "cache_tokens", "cache_creation_tokens", "cache_creation_tokens_5m", "cache_creation_tokens_1h",
-	"cache_write_tokens", "input_tokens_total", "usage_semantic", "claude", "cache_usage_reported", "task_id",
+	"cache_write_tokens", "input_tokens_total", "usage_semantic", "claude", "cache_usage_reported", "generation_ms", "task_id",
 }
 
 func callAnalyticsJSONValue(path string, dialect common.DatabaseType) string {
@@ -244,6 +258,21 @@ func GetCallAnalytics(ctx context.Context, filter CallAnalyticsFilter) (*CallAna
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	if filter.User != "" {
+		if id, err := strconv.Atoi(filter.User); err == nil && id > 0 {
+			filter.UserID = id
+		} else {
+			var user User
+			err := DB.WithContext(ctx).Unscoped().Model(&User{}).Select("id").Where("username = ?", filter.User).First(&user).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return buildCallAnalytics(nil, filter), nil
+			}
+			if err != nil {
+				return nil, err
+			}
+			filter.UserID = user.Id
+		}
+	}
 	dialect := common.LogDatabaseType()
 	base := LOG_DB.WithContext(ctx).Model(&Log{}).Where("type IN ?", []int{LogTypeConsume, LogTypeError, LogTypeRequestOutcome})
 	if filter.UserID != 0 {
@@ -325,8 +354,7 @@ func buildCallAnalytics(logs []Log, filter CallAnalyticsFilter) *CallAnalyticsRe
 		}
 		groups[key] = append(groups[key], log)
 	}
-	report := &CallAnalyticsReport{StartTimestamp: filter.StartTimestamp, EndTimestamp: filter.EndTimestamp, TimeBasis: "completed_at", TrendIntervalSeconds: 60, Trend: []CallAnalyticsTrend{}, Users: []CallAnalyticsUser{}, Channels: []CallAnalyticsChannel{}, Errors: []CallAnalyticsError{}, Warnings: []string{"completion_time_basis"}}
-	report.Coverage.ScannedLogs = len(logs)
+	report := &CallAnalyticsReport{StartTimestamp: filter.StartTimestamp, EndTimestamp: filter.EndTimestamp, TrendIntervalSeconds: 60, Trend: []CallAnalyticsTrend{}, Users: []CallAnalyticsUser{}, Channels: []CallAnalyticsChannel{}, Errors: []CallAnalyticsError{}, Warnings: []string{"completion_time_basis"}}
 	report.Requests.Items = []CallAnalyticsRequest{}
 	report.Requests.Page, report.Requests.PageSize = filter.Page, filter.PageSize
 	requests := make([]CallAnalyticsRequest, 0, len(groups))
@@ -357,15 +385,6 @@ func buildCallAnalytics(logs []Log, filter CallAnalyticsFilter) *CallAnalyticsRe
 		} else {
 			report.Coverage.InferredRequests++
 		}
-		if request.Outcome == "unknown" {
-			report.Coverage.UnknownRequests++
-		}
-		if request.FRTMs != nil {
-			report.Coverage.FRTSamples++
-		}
-		if request.CacheUsageReported {
-			report.Coverage.CacheSamples++
-		}
 	}
 	sort.Slice(requests, func(i, j int) bool {
 		if requests[i].CompletedAt != requests[j].CompletedAt {
@@ -377,10 +396,11 @@ func buildCallAnalytics(logs []Log, filter CallAnalyticsFilter) *CallAnalyticsRe
 		return requests[i].UserID < requests[j].UserID
 	})
 	report.Summary = summarizeCallMetrics(requests, filter)
+	report.Distributions = summarizeCallDistributions(requests)
 	if report.Coverage.InferredRequests > 0 {
 		report.Warnings = append(report.Warnings, "historical_outcomes_incomplete")
 	}
-	if report.Coverage.CacheSamples < len(requests) {
+	if report.Distributions.CacheShare.Samples < len(requests) {
 		report.Warnings = append(report.Warnings, "cache_usage_incomplete")
 	}
 	if missingIDs {
@@ -562,6 +582,10 @@ func summarizeCallRequest(logs []Log) (CallAnalyticsRequest, bool) {
 			v := frt.Float()
 			r.FRTMs = &v
 		}
+		if generation := meta.Get("generation_ms"); log.IsStream && generation.Type == gjson.Number && generation.Float() > 0 && log.CompletionTokens > 0 && meta.Get("stream_status_status").String() == "ok" {
+			v := float64(log.CompletionTokens) * 1000 / generation.Float()
+			r.OutputTPS = &v
+		}
 		if meta.Get("stream_status_status").String() == "error" {
 			streamError = true
 		}
@@ -617,12 +641,15 @@ func summarizeCallRequest(logs []Log) (CallAnalyticsRequest, bool) {
 		r.Outcome = "unknown"
 		r.FinalRecorded = false
 	}
+	if r.Outcome != "success" {
+		r.OutputTPS = nil
+	}
 	return r, true
 }
 
 func summarizeCallMetrics(requests []CallAnalyticsRequest, filter CallAnalyticsFilter) CallAnalyticsSummary {
 	s := CallAnalyticsSummary{Requests: len(requests)}
-	var frts, durations []float64
+	var durations []float64
 	var cacheInput, cacheRead int64
 	minutes := make(map[int64]*CallAnalyticsTrend)
 	for _, r := range requests {
@@ -643,9 +670,6 @@ func summarizeCallMetrics(requests []CallAnalyticsRequest, filter CallAnalyticsF
 		s.CacheWriteTokens += r.CacheWriteTokens
 		cacheInput += r.cacheInput
 		cacheRead += r.cacheRead
-		if r.FRTMs != nil {
-			frts = append(frts, *r.FRTMs)
-		}
 		if r.DurationMs != nil {
 			durations = append(durations, *r.DurationMs)
 		}
@@ -676,55 +700,81 @@ func summarizeCallMetrics(requests []CallAnalyticsRequest, filter CallAnalyticsF
 		s.AvgRPM = float64(s.Requests) / windowMinutes
 		s.AvgTPM = float64(s.InputTokens+s.OutputTokens) / windowMinutes
 	}
+	if filter.EndTimestamp-filter.StartTimestamp >= 60 {
+		recentRPM, recentTPM := 0, int64(0)
+		for _, r := range requests {
+			if r.CompletedAt >= filter.EndTimestamp-60 && r.CompletedAt < filter.EndTimestamp {
+				recentRPM++
+				recentTPM += r.InputTokens + r.OutputTokens
+			}
+		}
+		s.RecentRPM, s.RecentTPM = &recentRPM, &recentTPM
+	}
 	for _, bucket := range minutes {
 		s.PeakRPM = max(s.PeakRPM, bucket.Requests)
 		s.PeakTPM = max(s.PeakTPM, bucket.Tokens)
 	}
-	for i, values := range [][]float64{frts, durations} {
-		if len(values) == 0 {
-			continue
-		}
-		sort.Float64s(values)
+	if len(durations) > 0 {
+		sort.Float64s(durations)
 		sum := 0.0
-		for _, value := range values {
+		for _, value := range durations {
 			sum += value
 		}
-		avg := sum / float64(len(values))
-		p95 := values[int(math.Ceil(float64(len(values))*0.95))-1]
-		if i == 0 {
-			s.AvgFRTMs = &avg
-			s.P95FRTMs = &p95
-		} else {
-			s.AvgDurationMs = &avg
-			s.P95DurationMs = &p95
-		}
+		avg := sum / float64(len(durations))
+		p95 := durations[int(math.Ceil(float64(len(durations))*0.95))-1]
+		s.AvgDurationMs = &avg
+		s.P95DurationMs = &p95
 	}
 	return s
 }
 
-type CallAnalyticsUserOption struct {
-	ID       int    `json:"id"`
-	Username string `json:"username"`
+// Rate distributions describe active calendar minutes; they exclude idle minutes
+// and retain partial boundary buckets. First response and TPS use successful streams.
+func summarizeCallDistributions(requests []CallAnalyticsRequest) CallAnalyticsDistributions {
+	var firstResponses, outputTPS, cacheShares []float64
+	minutes := make(map[int64]struct {
+		requests int
+		tokens   int64
+	})
+	for _, request := range requests {
+		if request.Outcome == "success" && request.FRTMs != nil {
+			firstResponses = append(firstResponses, *request.FRTMs)
+		}
+		if request.Outcome == "success" && request.OutputTPS != nil {
+			outputTPS = append(outputTPS, *request.OutputTPS)
+		}
+		if request.CacheUsageReported && request.cacheInput > 0 {
+			cacheShares = append(cacheShares, float64(request.cacheRead)/float64(request.cacheInput))
+		}
+		minute := request.CompletedAt / 60
+		value := minutes[minute]
+		value.requests++
+		value.tokens += request.InputTokens + request.OutputTokens
+		minutes[minute] = value
+	}
+	rpms, tpms := make([]float64, 0, len(minutes)), make([]float64, 0, len(minutes))
+	for _, minute := range minutes {
+		rpms = append(rpms, float64(minute.requests))
+		tpms = append(tpms, float64(minute.tokens))
+	}
+	return CallAnalyticsDistributions{
+		FirstResponseMs: callAnalyticsQuantiles(firstResponses),
+		OutputTPS:       callAnalyticsQuantiles(outputTPS),
+		RPM:             callAnalyticsQuantiles(rpms),
+		TPM:             callAnalyticsQuantiles(tpms),
+		CacheShare:      callAnalyticsQuantiles(cacheShares),
+	}
 }
 
-// SearchCallAnalyticsUsers exposes only stable customer identifiers to analytics
-// readers, without granting the user-management permission or returning profiles.
-func SearchCallAnalyticsUsers(ctx context.Context, keyword string) ([]CallAnalyticsUserOption, error) {
-	keyword = strings.TrimSpace(keyword)
-	if len(keyword) > 128 {
-		return nil, errors.New("user keyword is too long")
+func callAnalyticsQuantiles(values []float64) CallAnalyticsQuantiles {
+	q := CallAnalyticsQuantiles{Samples: len(values)}
+	if len(values) == 0 {
+		return q
 	}
-	query := DB.WithContext(ctx).Unscoped().Model(&User{}).Select("id, username")
-	if keyword != "" {
-		escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(keyword)
-		pattern := "%" + escaped + "%"
-		if id, err := strconv.Atoi(keyword); err == nil {
-			query = query.Where("id = ? OR username LIKE ? ESCAPE '!'", id, pattern)
-		} else {
-			query = query.Where("username LIKE ? ESCAPE '!'", pattern)
-		}
-	}
-	users := []CallAnalyticsUserOption{}
-	err := query.Order("id DESC").Limit(20).Find(&users).Error
-	return users, err
+	sort.Float64s(values)
+	p50 := values[int(math.Ceil(float64(len(values))*0.5))-1]
+	p95 := values[int(math.Ceil(float64(len(values))*0.95))-1]
+	p99 := values[int(math.Ceil(float64(len(values))*0.99))-1]
+	q.P50, q.P95, q.P99 = &p50, &p95, &p99
+	return q
 }

@@ -68,12 +68,12 @@ func TestCallAnalyticsRequestResultsAndCrossWindowRetries(t *testing.T) {
 	assert.Equal(t, 2, report.Summary.RecoveredRequests)
 	require.NotNil(t, report.Summary.CacheHitRate)
 	assert.InDelta(t, 0.5, *report.Summary.CacheHitRate, 0.00001) // 80 / (100+10+50); missing zero usage excluded.
-	assert.Equal(t, 3, report.Coverage.CacheSamples)
+	assert.Equal(t, 3, report.Distributions.CacheShare.Samples)
 	assert.Equal(t, 2, report.Coverage.FinalRecordedRequests)
 	assert.Equal(t, 4, report.Coverage.InferredRequests)
-	require.NotNil(t, report.Summary.AvgFRTMs)
-	assert.Equal(t, 30.0, *report.Summary.AvgFRTMs)
-	assert.Equal(t, 50.0, *report.Summary.P95FRTMs)
+	assert.Equal(t, 1, report.Distributions.FirstResponseMs.Samples)
+	assert.Equal(t, 50.0, *report.Distributions.FirstResponseMs.P50)
+	assert.Equal(t, 50.0, *report.Distributions.FirstResponseMs.P95)
 	assert.InDelta(t, 0.1, report.Summary.AvgRPM, 0.00001)
 	assert.Equal(t, 5, report.Summary.PeakRPM)
 	assert.Len(t, report.Requests.Items, 2)
@@ -138,7 +138,7 @@ func TestCallAnalyticsRedirectCacheNormalizationAndStreamFailures(t *testing.T) 
 	assert.Equal(t, int64(10), report.Summary.CacheWriteTokens)
 	require.NotNil(t, report.Summary.CacheHitRate)
 	assert.Equal(t, 0.75, *report.Summary.CacheHitRate)
-	assert.Equal(t, 1, report.Coverage.FRTSamples)
+	assert.Equal(t, 1, report.Distributions.FirstResponseMs.Samples)
 	redirect := report.Requests.Items[3]
 	assert.Equal(t, "public-model", redirect.ModelName)
 	assert.Equal(t, "actual-model", redirect.EffectiveModel)
@@ -165,20 +165,32 @@ func TestCallAnalyticsTimeRangeAndPathValidation(t *testing.T) {
 	}
 }
 
-func TestCallAnalyticsUserSearchReturnsOnlyIdentifiers(t *testing.T) {
+func TestCallAnalyticsUserFilterResolvesExactUsernameOrID(t *testing.T) {
 	db := callAnalyticsTestDB(t)
 	users := []User{{Id: 70, Username: "customer_7", AffCode: "aff70", Password: "secret-password", Email: "private@example.org"}, {Id: 71, Username: "customerX7", AffCode: "aff71"}}
 	require.NoError(t, db.Create(&users).Error)
-	matches, err := SearchCallAnalyticsUsers(context.Background(), "customer_7")
+	start := int64(1800000000)
+	require.NoError(t, db.Create(&[]Log{
+		{UserId: 70, RequestId: "matching", CreatedAt: start + 10, Type: LogTypeConsume, Other: `{"request_path":"/v1/chat/completions"}`},
+		{UserId: 71, RequestId: "other", CreatedAt: start + 11, Type: LogTypeConsume, Other: `{"request_path":"/v1/chat/completions"}`},
+	}).Error)
+	filter := CallAnalyticsFilter{StartTimestamp: start, EndTimestamp: start + 60, User: " customer_7 "}
+	report, err := GetCallAnalytics(context.Background(), filter)
 	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	assert.Equal(t, 70, matches[0].ID)
-	matches, err = SearchCallAnalyticsUsers(context.Background(), "70")
+	assert.Equal(t, 1, report.Summary.Requests)
+	assert.Equal(t, 70, report.Requests.Items[0].UserID)
+	filter.User = "70"
+	report, err = GetCallAnalytics(context.Background(), filter)
 	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	bytes, err := common.Marshal(matches)
+	assert.Equal(t, 1, report.Summary.Requests)
+	filter.User = "customer_7x"
+	report, err = GetCallAnalytics(context.Background(), filter)
 	require.NoError(t, err)
-	assert.JSONEq(t, `[{"id":70,"username":"customer_7"}]`, string(bytes))
+	assert.Zero(t, report.Summary.Requests)
+	filter.User = ""
+	report, err = GetCallAnalytics(context.Background(), filter)
+	require.NoError(t, err)
+	assert.Equal(t, 2, report.Summary.Requests)
 }
 
 func TestCallAnalyticsProjectsOnlyWhitelistedFields(t *testing.T) {
@@ -207,7 +219,7 @@ func TestCallAnalyticsUnknownStreamsAndUnavailableRouteTargets(t *testing.T) {
 	assert.Equal(t, 1, report.Summary.Unknown)
 	assert.Equal(t, 0, report.Summary.Success)
 	assert.Nil(t, report.Summary.CacheHitRate)
-	assert.Nil(t, report.Summary.AvgFRTMs)
+	assert.Zero(t, report.Distributions.FirstResponseMs.Samples)
 	assert.Equal(t, 1, report.Coverage.UnknownModelRequests)
 	assert.Contains(t, report.Warnings, "unknown_request_models")
 	filter.Channel = 419
@@ -218,4 +230,81 @@ func TestCallAnalyticsUnknownStreamsAndUnavailableRouteTargets(t *testing.T) {
 	assert.Equal(t, "error", report.Requests.Items[0].Outcome)
 	assert.Equal(t, 419, report.Requests.Items[0].ChannelID)
 	assert.False(t, report.Requests.Items[0].CacheUsageReported)
+}
+
+func TestCallAnalyticsRecentMinuteAndDistributionsUseSelectedInterval(t *testing.T) {
+	db := callAnalyticsTestDB(t)
+	start := int64(1800000000)
+	logs := []Log{
+		{UserId: 7, RequestId: "before-last-minute", Type: LogTypeConsume, CreatedAt: start + 59, ModelName: "kimi", PromptTokens: 10, CompletionTokens: 1, Other: `{"request_path":"/v1/chat/completions"}`},
+		{UserId: 7, RequestId: "cutoff-included", Type: LogTypeConsume, CreatedAt: start + 60, ModelName: "kimi", PromptTokens: 20, CompletionTokens: 2, Other: `{"request_path":"/v1/chat/completions","cache_tokens":0,"cache_usage_reported":true}`},
+		{UserId: 7, RequestId: "end-included", Type: LogTypeConsume, CreatedAt: start + 119, ModelName: "kimi", PromptTokens: 30, CompletionTokens: 3, Other: `{"request_path":"/v1/chat/completions","cache_tokens":15}`},
+		{UserId: 7, RequestId: "end-excluded", Type: LogTypeConsume, CreatedAt: start + 120, ModelName: "kimi", PromptTokens: 999, CompletionTokens: 999, Other: `{"request_path":"/v1/chat/completions"}`},
+	}
+	require.NoError(t, db.Create(&logs).Error)
+	filter := CallAnalyticsFilter{StartTimestamp: start, EndTimestamp: start + 120, UserID: 7}
+	report, err := GetCallAnalytics(context.Background(), filter)
+	require.NoError(t, err)
+	require.NotNil(t, report.Summary.RecentRPM)
+	require.NotNil(t, report.Summary.RecentTPM)
+	assert.Equal(t, 2, *report.Summary.RecentRPM)
+	assert.Equal(t, int64(55), *report.Summary.RecentTPM)
+	assert.Equal(t, 1.5, report.Summary.AvgRPM)
+	assert.Equal(t, 33.0, report.Summary.AvgTPM)
+	assert.Equal(t, 2, report.Distributions.RPM.Samples)
+	assert.Equal(t, 1.0, *report.Distributions.RPM.P50)
+	assert.Equal(t, 2.0, *report.Distributions.RPM.P95)
+	assert.Equal(t, 55.0, *report.Distributions.TPM.P99)
+	assert.Equal(t, 2, report.Distributions.CacheShare.Samples)
+	assert.Equal(t, 0.0, *report.Distributions.CacheShare.P50)
+	assert.Equal(t, 0.5, *report.Distributions.CacheShare.P95)
+	assert.Equal(t, 0.3, *report.Summary.CacheHitRate) // Token-weighted overall rate differs from per-request quantiles.
+	filter.StartTimestamp = start + 90
+	short, err := GetCallAnalytics(context.Background(), filter)
+	require.NoError(t, err)
+	assert.Nil(t, short.Summary.RecentRPM)
+	assert.Nil(t, short.Summary.RecentTPM)
+}
+
+func TestCallAnalyticsPerformanceDistributionsExcludeIncompleteStreams(t *testing.T) {
+	db := callAnalyticsTestDB(t)
+	start := int64(1800000000)
+	logs := []Log{
+		{UserId: 7, RequestId: "measured", Type: LogTypeConsume, CreatedAt: start + 1, ModelName: "kimi", IsStream: true, CompletionTokens: 80, UseTime: 9, Other: `{"request_path":"/v1/chat/completions","frt":500,"generation_ms":2000,"stream_status":{"status":"ok"}}`},
+		{UserId: 7, RequestId: "historical", Type: LogTypeConsume, CreatedAt: start + 2, ModelName: "kimi", IsStream: true, CompletionTokens: 200, UseTime: 10, Other: `{"request_path":"/v1/chat/completions","frt":1500,"stream_status":{"status":"ok"}}`},
+		{UserId: 7, RequestId: "failed", Type: LogTypeConsume, CreatedAt: start + 3, ModelName: "kimi", IsStream: true, CompletionTokens: 99, Other: `{"request_path":"/v1/chat/completions","frt":99999,"generation_ms":100,"stream_status":{"status":"error","end_reason":"timeout"}}`},
+		{UserId: 7, RequestId: "final-failure", Type: LogTypeConsume, CreatedAt: start + 4, ModelName: "kimi", IsStream: true, CompletionTokens: 99, Other: `{"request_path":"/v1/chat/completions","frt":99999,"generation_ms":100,"stream_status":{"status":"ok"}}`},
+		{UserId: 7, RequestId: "final-failure", Type: LogTypeRequestOutcome, CreatedAt: start + 4, ModelName: "kimi", Other: `{"request_path":"/v1/chat/completions","request_outcome":{"status":"error","status_code":500,"duration_ms":99999}}`},
+		{UserId: 7, RequestId: "nonstream", Type: LogTypeConsume, CreatedAt: start + 5, ModelName: "kimi", CompletionTokens: 99, Other: `{"request_path":"/v1/chat/completions","frt":99999,"generation_ms":100,"stream_status":{"status":"ok"}}`},
+	}
+	require.NoError(t, db.Create(&logs).Error)
+	report, err := GetCallAnalytics(context.Background(), CallAnalyticsFilter{StartTimestamp: start, EndTimestamp: start + 60, UserID: 7})
+	require.NoError(t, err)
+	assert.Equal(t, 2, report.Distributions.FirstResponseMs.Samples)
+	assert.Equal(t, 500.0, *report.Distributions.FirstResponseMs.P50)
+	assert.Equal(t, 1500.0, *report.Distributions.FirstResponseMs.P95)
+	assert.Equal(t, 1, report.Distributions.OutputTPS.Samples)
+	assert.Equal(t, 40.0, *report.Distributions.OutputTPS.P50)
+	for _, request := range report.Requests.Items {
+		if request.RequestID != "measured" {
+			assert.Nil(t, request.OutputTPS, request.RequestID)
+		}
+	}
+}
+
+func TestCallAnalyticsQuantilesNearestRankAndEmptySamples(t *testing.T) {
+	// Twenty observations distinguish the 95th percentile from the maximum.
+	samples := []float64{20, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
+	q := callAnalyticsQuantiles(samples)
+	require.NotNil(t, q.P50)
+	require.NotNil(t, q.P95)
+	require.NotNil(t, q.P99)
+	assert.Equal(t, 10.0, *q.P50)
+	assert.Equal(t, 19.0, *q.P95)
+	assert.Equal(t, 20.0, *q.P99)
+	empty := callAnalyticsQuantiles(nil)
+	assert.Zero(t, empty.Samples)
+	assert.Nil(t, empty.P50)
+	assert.Nil(t, empty.P95)
+	assert.Nil(t, empty.P99)
 }

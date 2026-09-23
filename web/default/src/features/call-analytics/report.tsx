@@ -20,6 +20,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 
+import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import {
   ChartContainer,
@@ -44,6 +45,7 @@ import type { CallAnalytics } from './api'
 export function AnalyticsReport(props: { data: CallAnalytics }) {
   const { t } = useTranslation()
   const [metric, setMetric] = useState('requests')
+  const [rateMode, setRateMode] = useState<'interval' | 'recent'>('interval')
   const summary = props.data.summary
   const number = (value: number | null) =>
     value == null
@@ -55,7 +57,7 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
             : { maximumFractionDigits: 2 }
         )
   const percent = (value: number | null) =>
-    value == null ? '—' : `${(value * 100).toFixed(2)}%`
+    value == null ? '—' : `${number(value * 100)}%`
   const milliseconds = (value: number | null) =>
     value == null ? '—' : `${number(value)} ms`
   const cards = [
@@ -67,7 +69,7 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
     [
       t('Success Rate'),
       percent(summary.success_rate),
-      `${t('Error Rate')}: ${percent(summary.error_rate)}`,
+      `${t('Error Rate')}: ${percent(summary.error_rate)} · ${t('Cancelled')}: ${number(summary.cancelled)} · ${t('Unknown')}: ${number(summary.unknown)}`,
     ],
     [
       t('Consumption'),
@@ -75,50 +77,81 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
       t('Recorded usage charges; refunds are not deducted.'),
     ],
     [
-      t('Input Tokens'),
-      number(summary.input_tokens),
-      `${t('Output Tokens')}: ${number(summary.output_tokens)}`,
-    ],
-    [
-      t('Average RPM'),
-      number(summary.avg_rpm),
-      `${t('Peak RPM')}: ${number(summary.peak_rpm)}`,
-    ],
-    [
-      t('Average TPM'),
-      number(summary.avg_tpm),
-      `${t('Peak TPM')}: ${number(summary.peak_tpm)}`,
-    ],
-    [
-      t('First response latency'),
-      milliseconds(summary.avg_frt_ms),
-      `P95: ${milliseconds(summary.p95_frt_ms)} · ${t('Samples')}: ${number(props.data.coverage.frt_samples)}`,
-    ],
-    [
-      t('Average Duration'),
-      milliseconds(summary.avg_duration_ms),
-      `P95: ${milliseconds(summary.p95_duration_ms)}`,
-    ],
-    [
       t('Cache Hit Rate'),
       percent(summary.cache_hit_rate),
-      `${t('Reported samples')}: ${number(props.data.coverage.cache_samples)}`,
+      t('Token-weighted; only reported cache usage is included.'),
     ],
-    [
-      t('Cache Read Tokens'),
-      number(summary.cache_read_tokens),
-      `${t('Cache Write Tokens')}: ${number(summary.cache_write_tokens)}`,
-    ],
-    [
-      t('Retried requests'),
-      number(summary.retried_requests),
-      `${t('Recovered requests')}: ${number(summary.recovered_requests)}`,
-    ],
-    [
-      t('Cancelled'),
-      number(summary.cancelled),
-      `${t('Unknown')}: ${number(summary.unknown)}`,
-    ],
+  ]
+  const usageDetails = [
+    [t('Input Tokens'), number(summary.input_tokens)],
+    [t('Output Tokens'), number(summary.output_tokens)],
+    [t('Cache Read Tokens'), number(summary.cache_read_tokens)],
+    [t('Cache Write Tokens'), number(summary.cache_write_tokens)],
+    [t('Average Duration'), milliseconds(summary.avg_duration_ms)],
+    [t('Duration P95'), milliseconds(summary.p95_duration_ms)],
+    [t('Retried requests'), number(summary.retried_requests)],
+    [t('Recovered requests'), number(summary.recovered_requests)],
+  ]
+  const rates = [
+    {
+      label: 'RPM',
+      value: rateMode === 'interval' ? summary.avg_rpm : summary.recent_rpm,
+      peak: summary.peak_rpm,
+      peakLabel: t('Peak RPM'),
+    },
+    {
+      label: 'TPM',
+      value: rateMode === 'interval' ? summary.avg_tpm : summary.recent_tpm,
+      peak: summary.peak_tpm,
+      peakLabel: t('Peak TPM'),
+    },
+  ]
+  const distributionRows = [
+    {
+      key: 'first_response_ms' as const,
+      label: t('TTFT (approx.)'),
+      format: milliseconds,
+      unit: t('Requests'),
+      description: t(
+        'First non-empty stream event, not an exact token timestamp.'
+      ),
+    },
+    {
+      key: 'output_tps' as const,
+      label: t('Estimated output TPS'),
+      format: number,
+      unit: t('Requests'),
+      description: t(
+        'Successful streaming output tokens per second, measured from first response to stream end.'
+      ),
+    },
+    {
+      key: 'rpm' as const,
+      label: t('Active-minute RPM'),
+      format: number,
+      unit: t('Active minutes'),
+      description: t(
+        'Requests per completion-time minute; idle minutes are excluded.'
+      ),
+    },
+    {
+      key: 'tpm' as const,
+      label: t('Active-minute TPM'),
+      format: number,
+      unit: t('Active minutes'),
+      description: t(
+        'Input and output tokens per completion-time minute; idle minutes are excluded.'
+      ),
+    },
+    {
+      key: 'cache_share' as const,
+      label: t('Cached input share per request'),
+      format: percent,
+      unit: t('Requests'),
+      description: t(
+        'Cache-read tokens divided by input tokens for each reported request; requests have equal weight.'
+      ),
+    },
   ]
   const metrics = [
     { key: 'requests', label: t('Requests') },
@@ -146,6 +179,157 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
           </Card>
         ))}
       </div>
+      <Card className='gap-4'>
+        <CardHeader className='flex flex-wrap items-center justify-between gap-3'>
+          <CardTitle>{t('Request and token rates')}</CardTitle>
+          <div
+            role='group'
+            aria-label={t('Rate calculation window')}
+            className='bg-muted flex rounded-lg p-0.5'
+          >
+            <Button
+              type='button'
+              size='sm'
+              variant={rateMode === 'interval' ? 'secondary' : 'ghost'}
+              aria-pressed={rateMode === 'interval'}
+              onClick={() => setRateMode('interval')}
+            >
+              {t('Interval average')}
+            </Button>
+            <Button
+              type='button'
+              size='sm'
+              variant={rateMode === 'recent' ? 'secondary' : 'ghost'}
+              aria-pressed={rateMode === 'recent'}
+              onClick={() => setRateMode('recent')}
+            >
+              {t('Final 60 seconds')}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className='space-y-3'>
+          <dl className='grid grid-cols-2 gap-6'>
+            {rates.map((rate) => (
+              <div key={rate.label} className='space-y-1'>
+                <dt className='text-muted-foreground text-sm'>{rate.label}</dt>
+                <dd className='text-2xl font-semibold tabular-nums'>
+                  {number(rate.value)}
+                </dd>
+                {rateMode === 'interval' && (
+                  <dd className='text-muted-foreground text-xs'>
+                    {rate.peakLabel}: {number(rate.peak)}
+                  </dd>
+                )}
+              </div>
+            ))}
+          </dl>
+          <p className='text-muted-foreground text-xs'>
+            {rateMode === 'interval'
+              ? t(
+                  'Totals divided by all minutes in the selected interval, including idle minutes.'
+                )
+              : t(
+                  'Counts in the 60 seconds before the selected end time. Intervals shorter than 60 seconds display —.'
+                )}
+          </p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('Performance distributions')}</CardTitle>
+          <p className='text-muted-foreground text-xs'>
+            {t(
+              'P50 is the median. P95 and P99 show the upper tail. Missing samples display —.'
+            )}
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className='space-y-3 md:hidden'>
+            {distributionRows.map((row) => {
+              const distribution = props.data.distributions[row.key]
+              return (
+                <div key={row.key} className='rounded-lg border p-3'>
+                  <p className='font-medium'>{row.label}</p>
+                  <p className='text-muted-foreground mt-1 text-xs'>
+                    {row.description}
+                  </p>
+                  <dl className='mt-3 grid grid-cols-3 gap-2'>
+                    {(['p50', 'p95', 'p99'] as const).map((quantile) => (
+                      <div key={quantile}>
+                        <dt className='text-muted-foreground text-xs'>
+                          {quantile.toUpperCase()}
+                        </dt>
+                        <dd className='font-medium tabular-nums'>
+                          {row.format(distribution[quantile])}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className='text-muted-foreground mt-2 text-xs'>
+                    {t('Samples')}: {number(distribution.samples)} {row.unit}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+          <div className='hidden md:block'>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('Metric')}</TableHead>
+                  <TableHead className='text-right'>P50</TableHead>
+                  <TableHead className='text-right'>P95</TableHead>
+                  <TableHead className='text-right'>P99</TableHead>
+                  <TableHead className='text-right'>{t('Samples')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {distributionRows.map((row) => {
+                  const distribution = props.data.distributions[row.key]
+                  return (
+                    <TableRow key={row.key}>
+                      <TableCell className='max-w-72 min-w-40 whitespace-normal'>
+                        <span className='font-medium'>{row.label}</span>
+                        <p className='text-muted-foreground mt-1 text-xs'>
+                          {row.description}
+                        </p>
+                      </TableCell>
+                      <TableCell className='text-right tabular-nums'>
+                        {row.format(distribution.p50)}
+                      </TableCell>
+                      <TableCell className='text-right tabular-nums'>
+                        {row.format(distribution.p95)}
+                      </TableCell>
+                      <TableCell className='text-right tabular-nums'>
+                        {row.format(distribution.p99)}
+                      </TableCell>
+                      <TableCell className='text-right tabular-nums'>
+                        {number(distribution.samples)}{' '}
+                        <span className='text-muted-foreground text-xs'>
+                          {row.unit}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+      <details className='bg-card rounded-xl border p-4'>
+        <summary className='cursor-pointer text-sm font-medium'>
+          {t('Usage details')}
+        </summary>
+        <dl className='mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4'>
+          {usageDetails.map(([label, value]) => (
+            <div key={label}>
+              <dt className='text-muted-foreground text-xs'>{label}</dt>
+              <dd className='mt-1 text-sm font-medium tabular-nums'>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
       <Card>
         <CardHeader className='flex flex-row items-center justify-between gap-2'>
           <div>

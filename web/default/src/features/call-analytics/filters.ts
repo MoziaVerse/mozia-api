@@ -33,7 +33,7 @@ export const analyticsFilterSchema = z
   .object({
     start: z.string(),
     end: z.string(),
-    user: optionalID,
+    user: z.string().trim().max(128),
     model: z.string(),
     channel: optionalID,
     outcome: z.enum(['', 'success', 'error', 'cancelled', 'unknown']),
@@ -60,7 +60,7 @@ export function analyticsQueryFilters(
   return {
     start_timestamp: Math.floor(new Date(value.start).getTime() / 1000),
     end_timestamp: Math.floor(new Date(value.end).getTime() / 1000),
-    user_id: value.user ? Number(value.user) : undefined,
+    user: value.user.trim() || undefined,
     model_name: value.model.trim() || undefined,
     channel: value.channel ? Number(value.channel) : undefined,
     outcome: value.outcome || undefined,

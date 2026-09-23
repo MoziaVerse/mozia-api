@@ -23,7 +23,7 @@ export type CallOutcome = 'success' | 'error' | 'cancelled' | 'unknown'
 export interface AnalyticsFilters {
   start_timestamp: number
   end_timestamp: number
-  user_id?: number
+  user?: string
   model_name?: string
   channel?: number
   outcome?: CallOutcome
@@ -44,11 +44,11 @@ export interface AnalyticsSummary {
   cache_write_tokens: number
   cache_hit_rate: number | null
   avg_rpm: number | null
+  recent_rpm: number | null
   peak_rpm: number | null
   avg_tpm: number | null
+  recent_tpm: number | null
   peak_tpm: number | null
-  avg_frt_ms: number | null
-  p95_frt_ms: number | null
   avg_duration_ms: number | null
   p95_duration_ms: number | null
   retried_requests: number
@@ -89,8 +89,16 @@ export interface AnalyticsRequest {
 export interface CallAnalytics {
   start_timestamp: number
   end_timestamp: number
-  time_basis: 'completed_at'
   summary: AnalyticsSummary
+  distributions: Record<
+    'first_response_ms' | 'output_tps' | 'rpm' | 'tpm' | 'cache_share',
+    {
+      p50: number | null
+      p95: number | null
+      p99: number | null
+      samples: number
+    }
+  >
   trend_interval_seconds: number
   trend: {
     timestamp: number
@@ -112,10 +120,6 @@ export interface CallAnalytics {
   coverage: {
     final_recorded_requests: number
     inferred_requests: number
-    unknown_requests: number
-    frt_samples: number
-    cache_samples: number
-    scanned_logs: number
   }
   warnings: string[]
 }
@@ -135,20 +139,6 @@ export async function getCallAnalytics(
   })
   if (!response.data.success) {
     throw new Error(response.data.message || 'Failed to load call analytics')
-  }
-  return response.data.data
-}
-
-export async function searchAnalyticsUsers(
-  keyword: string
-): Promise<{ id: number; username: string }[]> {
-  const response = await api.get<{
-    success: boolean
-    message?: string
-    data: { id: number; username: string }[]
-  }>('/api/log/analytics/users', { params: { keyword } })
-  if (!response.data.success) {
-    throw new Error(response.data.message || 'Failed to load users')
   }
   return response.data.data
 }
