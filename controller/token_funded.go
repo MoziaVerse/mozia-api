@@ -148,6 +148,16 @@ func AdjustSelfFundedToken(c *gin.Context) {
 		common.ApiErrorMsg(c, "没有需要调整的字段")
 		return
 	}
+	// 余额耗尽 / 到期后校验会把 status 写成 Exhausted / Expired；运营补额度或延期时若没显式
+	// 传 status，令牌会一直停在失效态，等于补了也用不了。这两种自动失效态随调整自动恢复。
+	if req.Status == nil {
+		revived := (req.RemainQuota != nil && tk.Status == common.TokenStatusExhausted) ||
+			(req.ExpiredTime != nil && tk.Status == common.TokenStatusExpired)
+		if revived {
+			tk.Status = common.TokenStatusEnabled
+			columns = append(columns, "status")
+		}
+	}
 	if err := tk.UpdateColumns(columns...); err != nil {
 		common.ApiError(c, err)
 		return
