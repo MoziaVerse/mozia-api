@@ -42,6 +42,20 @@ func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id
 		out.IncompleteDetails = details
 	}
 
+	if reasoning := choice.Message.GetReasoningContent(); reasoning != "" {
+		out.Output = append(out.Output, dto.ResponsesOutput{
+			Type:   responsesOutputTypeReasoning,
+			ID:     fmt.Sprintf("%s_reasoning_0", id),
+			Status: responseOutputStatus(out),
+			Summary: []dto.ResponsesReasoningSummaryPart{
+				{
+					Type: "summary_text",
+					Text: reasoning,
+				},
+			},
+		})
+	}
+
 	if text := choice.Message.StringContent(); text != "" {
 		out.Output = append(out.Output, dto.ResponsesOutput{
 			Type:   responsesOutputTypeMessage,
@@ -53,19 +67,6 @@ func ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id
 					Type:        "output_text",
 					Text:        text,
 					Annotations: []interface{}{},
-				},
-			},
-		})
-	}
-	if reasoning := choice.Message.GetReasoningContent(); reasoning != "" {
-		out.Output = append(out.Output, dto.ResponsesOutput{
-			Type:   responsesOutputTypeReasoning,
-			ID:     fmt.Sprintf("%s_reasoning_0", id),
-			Status: responseOutputStatus(out),
-			Content: []dto.ResponsesOutputContent{
-				{
-					Type: "summary_text",
-					Text: reasoning,
 				},
 			},
 		})
@@ -139,21 +140,22 @@ type ChatToResponsesStreamState struct {
 	Created int64
 	Usage   *dto.Usage
 
-	status            string
-	incompleteDetails *dto.IncompleteDetails
-	sentCreated       bool
-	textOutputIndex   int
-	textStarted       bool
-	textDone          bool
-	reasoningIndex    int
-	reasoningStarted  bool
-	reasoningDone     bool
-	finalized         bool
-	nextOutputIndex   int
-	toolsByIndex      map[int]*chatToResponsesStreamTool
-	outputOrder       []chatToResponsesOutputRef
-	text              strings.Builder
-	reasoning         strings.Builder
+	status             string
+	incompleteDetails  *dto.IncompleteDetails
+	sentCreated        bool
+	textOutputIndex    int
+	textStarted        bool
+	textDone           bool
+	reasoningIndex     int
+	reasoningStarted   bool
+	reasoningDone      bool
+	finalized          bool
+	nextSequenceNumber int
+	nextOutputIndex    int
+	toolsByIndex       map[int]*chatToResponsesStreamTool
+	outputOrder        []chatToResponsesOutputRef
+	text               strings.Builder
+	reasoning          strings.Builder
 }
 
 type chatToResponsesStreamTool struct {
@@ -203,7 +205,7 @@ func ChatCompletionsStreamChunkToResponsesEvents(chunk *dto.ChatCompletionsStrea
 	events := make([]ChatToResponsesStreamEvent, 0)
 	if !state.sentCreated {
 		state.sentCreated = true
-		events = append(events, responsesStreamEvent(responsesEventCreated, dto.ResponsesStreamResponse{
+		events = append(events, state.event(responsesEventCreated, dto.ResponsesStreamResponse{
 			Type:     responsesEventCreated,
 			Response: state.createdResponse(),
 		}))
@@ -241,7 +243,7 @@ func FinalizeChatCompletionsStreamToResponses(state *ChatToResponsesStreamState)
 	if state.status == "incomplete" {
 		eventType = responsesEventIncomplete
 	}
-	events = append(events, responsesStreamEvent(eventType, dto.ResponsesStreamResponse{
+	events = append(events, state.event(eventType, dto.ResponsesStreamResponse{
 		Type:     eventType,
 		Response: resp,
 	}))
@@ -260,7 +262,7 @@ func (s *ChatToResponsesStreamState) appendTextDelta(delta string) []ChatToRespo
 	if !s.textStarted {
 		s.textStarted = true
 		s.textOutputIndex = s.nextIndex("message", -1)
-		events = append(events, responsesStreamEvent(responsesEventOutputItemAdded, dto.ResponsesStreamResponse{
+		events = append(events, s.event(responsesEventOutputItemAdded, dto.ResponsesStreamResponse{
 			Type:        responsesEventOutputItemAdded,
 			OutputIndex: intPtr(s.textOutputIndex),
 			Item: &dto.ResponsesOutput{
@@ -271,9 +273,13 @@ func (s *ChatToResponsesStreamState) appendTextDelta(delta string) []ChatToRespo
 				Content: []dto.ResponsesOutputContent{},
 			},
 		}))
+		events = append(events, s.event("response.content_part.added", dto.ResponsesStreamResponse{
+			OutputIndex: intPtr(s.textOutputIndex), ContentIndex: intPtr(0), ItemID: s.messageID(),
+			Part: &dto.ResponsesOutputContent{Type: "output_text", Text: "", Annotations: []interface{}{}},
+		}))
 	}
 	s.text.WriteString(delta)
-	events = append(events, responsesStreamEvent(responsesEventOutputTextDelta, dto.ResponsesStreamResponse{
+	events = append(events, s.event(responsesEventOutputTextDelta, dto.ResponsesStreamResponse{
 		Type:         responsesEventOutputTextDelta,
 		OutputIndex:  intPtr(s.textOutputIndex),
 		ContentIndex: intPtr(0),
@@ -288,7 +294,7 @@ func (s *ChatToResponsesStreamState) appendReasoningDelta(delta string) []ChatTo
 	if !s.reasoningStarted {
 		s.reasoningStarted = true
 		s.reasoningIndex = s.nextIndex("reasoning", -1)
-		events = append(events, responsesStreamEvent(responsesEventOutputItemAdded, dto.ResponsesStreamResponse{
+		events = append(events, s.event(responsesEventOutputItemAdded, dto.ResponsesStreamResponse{
 			Type:        responsesEventOutputItemAdded,
 			OutputIndex: intPtr(s.reasoningIndex),
 			Item: &dto.ResponsesOutput{
@@ -298,9 +304,13 @@ func (s *ChatToResponsesStreamState) appendReasoningDelta(delta string) []ChatTo
 				Content: []dto.ResponsesOutputContent{},
 			},
 		}))
+		events = append(events, s.event("response.reasoning_summary_part.added", dto.ResponsesStreamResponse{
+			OutputIndex: intPtr(s.reasoningIndex), SummaryIndex: intPtr(0), ItemID: s.reasoningID(),
+			Part: &dto.ResponsesReasoningSummaryPart{Type: "summary_text", Text: ""},
+		}))
 	}
 	s.reasoning.WriteString(delta)
-	events = append(events, responsesStreamEvent(responsesEventReasoningSummaryDelta, dto.ResponsesStreamResponse{
+	events = append(events, s.event(responsesEventReasoningSummaryDelta, dto.ResponsesStreamResponse{
 		Type:         responsesEventReasoningSummaryDelta,
 		OutputIndex:  intPtr(s.reasoningIndex),
 		SummaryIndex: intPtr(0),
@@ -328,7 +338,7 @@ func (s *ChatToResponsesStreamState) appendToolCallDelta(toolCall dto.ToolCallRe
 			tool.ID = fmt.Sprintf("%s_call_%d", s.ID, chatIndex)
 		}
 		s.toolsByIndex[chatIndex] = tool
-		events = append(events, responsesStreamEvent(responsesEventOutputItemAdded, dto.ResponsesStreamResponse{
+		events = append(events, s.event(responsesEventOutputItemAdded, dto.ResponsesStreamResponse{
 			Type:        responsesEventOutputItemAdded,
 			OutputIndex: intPtr(tool.OutputIndex),
 			ItemID:      tool.ID,
@@ -350,7 +360,7 @@ func (s *ChatToResponsesStreamState) appendToolCallDelta(toolCall dto.ToolCallRe
 	}
 	if toolCall.Function.Arguments != "" {
 		tool.Arguments.WriteString(toolCall.Function.Arguments)
-		events = append(events, responsesStreamEvent(responsesEventFunctionArgsDelta, dto.ResponsesStreamResponse{
+		events = append(events, s.event(responsesEventFunctionArgsDelta, dto.ResponsesStreamResponse{
 			Type:        responsesEventFunctionArgsDelta,
 			OutputIndex: intPtr(tool.OutputIndex),
 			ItemID:      tool.ID,
@@ -365,13 +375,18 @@ func (s *ChatToResponsesStreamState) doneDeltaEvents() []ChatToResponsesStreamEv
 	status := s.outputStatus()
 	if s.textStarted && !s.textDone {
 		s.textDone = true
-		events = append(events, responsesStreamEvent("response.output_text.done", dto.ResponsesStreamResponse{
+		events = append(events, s.event("response.output_text.done", dto.ResponsesStreamResponse{
 			Type:         "response.output_text.done",
+			Text:         common.GetPointer(s.text.String()),
 			OutputIndex:  intPtr(s.textOutputIndex),
 			ContentIndex: intPtr(0),
 			ItemID:       s.messageID(),
 		}))
-		events = append(events, responsesStreamEvent(responsesEventOutputItemDone, dto.ResponsesStreamResponse{
+		events = append(events, s.event("response.content_part.done", dto.ResponsesStreamResponse{
+			OutputIndex: intPtr(s.textOutputIndex), ContentIndex: intPtr(0), ItemID: s.messageID(),
+			Part: &dto.ResponsesOutputContent{Type: "output_text", Text: s.text.String(), Annotations: []interface{}{}},
+		}))
+		events = append(events, s.event(responsesEventOutputItemDone, dto.ResponsesStreamResponse{
 			Type:        responsesEventOutputItemDone,
 			OutputIndex: intPtr(s.textOutputIndex),
 			Item:        s.messageOutput(status),
@@ -379,17 +394,18 @@ func (s *ChatToResponsesStreamState) doneDeltaEvents() []ChatToResponsesStreamEv
 	}
 	if s.reasoningStarted && !s.reasoningDone {
 		s.reasoningDone = true
-		events = append(events, responsesStreamEvent(responsesEventReasoningSummaryDone, dto.ResponsesStreamResponse{
+		events = append(events, s.event(responsesEventReasoningSummaryDone, dto.ResponsesStreamResponse{
 			Type:         responsesEventReasoningSummaryDone,
 			OutputIndex:  intPtr(s.reasoningIndex),
 			SummaryIndex: intPtr(0),
 			ItemID:       s.reasoningID(),
-			Part: &dto.ResponsesReasoningSummaryPart{
-				Type: "summary_text",
-				Text: s.reasoning.String(),
-			},
+			Text:         common.GetPointer(s.reasoning.String()),
 		}))
-		events = append(events, responsesStreamEvent(responsesEventOutputItemDone, dto.ResponsesStreamResponse{
+		events = append(events, s.event("response.reasoning_summary_part.done", dto.ResponsesStreamResponse{
+			OutputIndex: intPtr(s.reasoningIndex), SummaryIndex: intPtr(0), ItemID: s.reasoningID(),
+			Part: &dto.ResponsesReasoningSummaryPart{Type: "summary_text", Text: s.reasoning.String()},
+		}))
+		events = append(events, s.event(responsesEventOutputItemDone, dto.ResponsesStreamResponse{
 			Type:        responsesEventOutputItemDone,
 			OutputIndex: intPtr(s.reasoningIndex),
 			Item:        s.reasoningOutput(status),
@@ -400,12 +416,14 @@ func (s *ChatToResponsesStreamState) doneDeltaEvents() []ChatToResponsesStreamEv
 			continue
 		}
 		tool.Done = true
-		events = append(events, responsesStreamEvent(responsesEventFunctionArgsDone, dto.ResponsesStreamResponse{
+		events = append(events, s.event(responsesEventFunctionArgsDone, dto.ResponsesStreamResponse{
 			Type:        responsesEventFunctionArgsDone,
+			Arguments:   common.GetPointer(tool.Arguments.String()),
+			Name:        tool.Name,
 			OutputIndex: intPtr(tool.OutputIndex),
 			ItemID:      tool.ID,
 		}))
-		events = append(events, responsesStreamEvent(responsesEventOutputItemDone, dto.ResponsesStreamResponse{
+		events = append(events, s.event(responsesEventOutputItemDone, dto.ResponsesStreamResponse{
 			Type:        responsesEventOutputItemDone,
 			OutputIndex: intPtr(tool.OutputIndex),
 			Item:        s.toolOutput(tool, status),
@@ -515,7 +533,7 @@ func (s *ChatToResponsesStreamState) reasoningOutput(status string) *dto.Respons
 		Type:   responsesOutputTypeReasoning,
 		ID:     s.reasoningID(),
 		Status: status,
-		Content: []dto.ResponsesOutputContent{
+		Summary: []dto.ResponsesReasoningSummaryPart{
 			{
 				Type: "summary_text",
 				Text: s.reasoning.String(),
@@ -592,7 +610,9 @@ func chatCreatedAt(created any) int {
 	return int(time.Now().Unix())
 }
 
-func responsesStreamEvent(eventType string, payload dto.ResponsesStreamResponse) ChatToResponsesStreamEvent {
+func (s *ChatToResponsesStreamState) event(eventType string, payload dto.ResponsesStreamResponse) ChatToResponsesStreamEvent {
+	payload.SequenceNumber = intPtr(s.nextSequenceNumber)
+	s.nextSequenceNumber++
 	payload.Type = eventType
 	return ChatToResponsesStreamEvent{
 		Type:    eventType,

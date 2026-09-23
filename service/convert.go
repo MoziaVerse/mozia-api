@@ -33,10 +33,11 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 	}
 
 	isOpenRouter := info.ChannelType == constant.ChannelTypeOpenRouter
+	requiresStringAssistantContent := false
 
 	if isOpenRouter {
 		if effort := claudeRequest.GetEfforts(); effort != "" {
-			effortBytes, _ := json.Marshal(effort)
+			effortBytes, _ := common.Marshal(effort)
 			openAIRequest.Verbosity = effortBytes
 		}
 		if claudeRequest.Thinking != nil {
@@ -51,7 +52,7 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					Enabled: true,
 				}
 			}
-			reasoningJSON, err := json.Marshal(reasoning)
+			reasoningJSON, err := common.Marshal(reasoning)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal reasoning: %w", err)
 			}
@@ -62,6 +63,30 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 		if strings.HasSuffix(info.OriginModelName, thinkingSuffix) &&
 			!strings.HasSuffix(openAIRequest.Model, thinkingSuffix) {
 			openAIRequest.Model = openAIRequest.Model + thinkingSuffix
+		}
+		model := openAIRequest.Model[strings.LastIndex(openAIRequest.Model, "/")+1:]
+		switch model {
+		case "deepseek-v4-flash", "deepseek-v4-pro", "kimi-k3":
+			requiresStringAssistantContent = true
+			// Kimi K3 always thinks; its OpenAI endpoint does not accept `thinking`.
+			if model != "kimi-k3" && claudeRequest.Thinking != nil {
+				switch claudeRequest.Thinking.Type {
+				case "enabled", "adaptive":
+					openAIRequest.THINKING = json.RawMessage(`{"type":"enabled"}`)
+				case "disabled":
+					openAIRequest.THINKING = json.RawMessage(`{"type":"disabled"}`)
+				default:
+					return nil, fmt.Errorf("unsupported thinking type: %q", claudeRequest.Thinking.Type)
+				}
+			}
+			if model == "kimi-k3" || claudeRequest.Thinking == nil || claudeRequest.Thinking.Type != "disabled" {
+				effort := claudeRequest.GetEfforts()
+				// Both APIs support low/high/max; map Claude's intermediate levels to high.
+				if effort == "medium" || effort == "xhigh" {
+					effort = "high"
+				}
+				openAIRequest.ReasoningEffort = effort
+			}
 		}
 	}
 
@@ -82,11 +107,40 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 				Name:        claudeTool.Name,
 				Description: claudeTool.Description,
 				Parameters:  claudeTool.InputSchema,
+				Strict:      claudeTool.Strict,
 			},
 		}
 		openAITools = append(openAITools, openAITool)
 	}
 	openAIRequest.Tools = openAITools
+	if claudeRequest.ToolChoice != nil {
+		choice, err := common.Any2Type[struct {
+			Type                   string `json:"type"`
+			Name                   string `json:"name"`
+			DisableParallelToolUse *bool  `json:"disable_parallel_tool_use"`
+		}](claudeRequest.ToolChoice)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tool_choice: %w", err)
+		}
+		switch choice.Type {
+		case "auto", "none":
+			openAIRequest.ToolChoice = choice.Type
+		case "any":
+			openAIRequest.ToolChoice = "required"
+		case "tool":
+			if choice.Name == "" {
+				return nil, fmt.Errorf("tool_choice.name is required for type tool")
+			}
+			openAIRequest.ToolChoice = map[string]any{
+				"type": "function", "function": map[string]string{"name": choice.Name},
+			}
+		default:
+			return nil, fmt.Errorf("unsupported tool_choice type: %q", choice.Type)
+		}
+		if choice.DisableParallelToolUse != nil && choice.Type != "none" {
+			openAIRequest.ParallelTooCalls = common.GetPointer(!*choice.DisableParallelToolUse)
+		}
+	}
 
 	// Convert messages
 	openAIMessages := make([]dto.Message, 0)
@@ -204,10 +258,20 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 			contents := content
 			var toolCalls []dto.ToolCallRequest
 			mediaMessages := make([]dto.MediaContent, 0, len(contents))
+			textContent := ""
+			textOnly := true
 
 			for _, mediaMsg := range contents {
 				switch mediaMsg.Type {
+				case "thinking":
+					if mediaMsg.Thinking != nil {
+						openAIMessage.ReasoningContent = common.GetPointer(openAIMessage.GetReasoningContent() + *mediaMsg.Thinking)
+					}
 				case "text", "input_text":
+					textContent += mediaMsg.GetText()
+					if len(mediaMsg.CacheControl) > 0 && !(requiresStringAssistantContent && claudeMessage.Role == "assistant") {
+						textOnly = false
+					}
 					message := dto.MediaContent{
 						Type:         "text",
 						Text:         mediaMsg.GetText(),
@@ -215,6 +279,7 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 					}
 					mediaMessages = append(mediaMessages, message)
 				case "image":
+					textOnly = false
 					// Handle image conversion (base64 to URL or keep as is)
 					imageData := fmt.Sprintf("data:%s;base64,%s", mediaMsg.Source.MediaType, mediaMsg.Source.Data)
 					//textContent += fmt.Sprintf("[Image: %s]", imageData)
@@ -260,11 +325,16 @@ func ClaudeToOpenAIRequest(claudeRequest dto.ClaudeRequest, info *relaycommon.Re
 				openAIMessage.SetToolCalls(toolCalls)
 			}
 
-			if len(mediaMessages) > 0 && len(toolCalls) == 0 {
-				openAIMessage.SetMediaContent(mediaMessages)
+			if len(mediaMessages) > 0 {
+				// Plain text must also work with providers requiring string assistant content.
+				if textOnly {
+					openAIMessage.SetStringContent(textContent)
+				} else {
+					openAIMessage.SetMediaContent(mediaMessages)
+				}
 			}
 		}
-		if len(openAIMessage.ParseContent()) > 0 || len(openAIMessage.ToolCalls) > 0 {
+		if len(openAIMessage.ParseContent()) > 0 || len(openAIMessage.ToolCalls) > 0 || openAIMessage.ReasoningContent != nil {
 			openAIMessages = append(openAIMessages, openAIMessage)
 		}
 	}
@@ -713,6 +783,11 @@ func ResponseOpenAI2Claude(openAIResponse *dto.OpenAITextResponse, info *relayco
 	}
 	for _, choice := range openAIResponse.Choices {
 		stopReason = stopReasonOpenAI2Claude(choice.FinishReason)
+		if reasoning := choice.Message.GetReasoningContent(); reasoning != "" {
+			contents = append(contents, dto.ClaudeMediaMessage{
+				Type: "thinking", Thinking: common.GetPointer(reasoning),
+			})
+		}
 		textContent := choice.Message.StringContent()
 		toolCalls := choice.Message.ParseToolCalls()
 		if textContent != "" || len(toolCalls) == 0 {
@@ -749,7 +824,7 @@ func stopReasonOpenAI2Claude(reason string) string {
 }
 
 func toJSONString(v interface{}) string {
-	b, err := json.Marshal(v)
+	b, err := common.Marshal(v)
 	if err != nil {
 		return "{}"
 	}
@@ -1069,7 +1144,7 @@ func StreamResponseOpenAI2Gemini(openAIResponse *dto.ChatCompletionsStreamRespon
 				// 解析参数
 				var args map[string]interface{}
 				if toolCall.Function.Arguments != "" {
-					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+					if err := common.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 						args = map[string]interface{}{"arguments": toolCall.Function.Arguments}
 					}
 				} else {
