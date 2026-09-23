@@ -188,14 +188,18 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		&containStreamUsage, info, &shouldSendLastResp); err != nil {
 		logger.LogError(c, fmt.Sprintf("error handling last response: %s, lastStreamData: [%s]", err.Error(), lastStreamData))
 	}
-	if containStreamUsage {
-		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
-		if cacheUsageReported {
-			usage.CacheUsageReported = true
-			if usage.PromptTokensDetails.CachedTokens == 0 {
-				usage.PromptTokensDetails.CachedTokens = reportedCachedTokens
-			}
+	if !containStreamUsage {
+		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage.CompletionTokens += toolCount * 7
+	}
+	applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
+	if cacheUsageReported {
+		usage.CacheUsageReported = true
+		if usage.PromptTokensDetails.CachedTokens == 0 {
+			usage.PromptTokensDetails.CachedTokens = reportedCachedTokens
 		}
+	}
+	if containStreamUsage {
 		normalizedData, err := normalizeCachedTokens(lastStreamData, usage.PromptTokensDetails.CachedTokens)
 		if err != nil {
 			logger.LogError(c, "failed to normalize stream cache usage: "+err.Error())
@@ -207,18 +211,6 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	if info.RelayFormat == types.RelayFormatOpenAI {
 		if shouldSendLastResp {
 			_ = sendStreamData(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent)
-		}
-	}
-
-	if !containStreamUsage {
-		usage = service.ResponseText2Usage(c, responseTextBuilder.String(), info.UpstreamModelName, info.GetEstimatePromptTokens())
-		usage.CompletionTokens += toolCount * 7
-		applyUsagePostProcessing(info, usage, common.StringToByteSlice(lastStreamData))
-		if cacheUsageReported {
-			usage.CacheUsageReported = true
-			if usage.PromptTokensDetails.CachedTokens == 0 {
-				usage.PromptTokensDetails.CachedTokens = reportedCachedTokens
-			}
 		}
 	}
 

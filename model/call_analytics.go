@@ -21,14 +21,14 @@ const CallAnalyticsMaxLogs = 50000
 var ErrCallAnalyticsLimit = errors.New("too many matching logs; narrow the time range or select a user/model (maximum 50000 logs)")
 
 type CallAnalyticsFilter struct {
-	StartTimestamp int64  `json:"start_timestamp"`
-	EndTimestamp   int64  `json:"end_timestamp"`
-	UserID         int    `json:"user_id"`
-	ModelName      string `json:"model_name"`
-	Channel        int    `json:"channel"`
-	Outcome        string `json:"outcome"`
-	Page           int    `json:"p"`
-	PageSize       int    `json:"page_size"`
+	StartTimestamp int64  `json:"start_timestamp" form:"start_timestamp"`
+	EndTimestamp   int64  `json:"end_timestamp" form:"end_timestamp"`
+	UserID         int    `json:"user_id" form:"user_id"`
+	ModelName      string `json:"model_name" form:"model_name"`
+	Channel        int    `json:"channel" form:"channel"`
+	Outcome        string `json:"outcome" form:"outcome"`
+	Page           int    `json:"p" form:"p"`
+	PageSize       int    `json:"page_size" form:"page_size"`
 }
 
 func (f *CallAnalyticsFilter) Normalize(now time.Time) error {
@@ -430,13 +430,11 @@ func buildCallAnalytics(logs []Log, filter CallAnalyticsFilter) *CallAnalyticsRe
 	for (filter.EndTimestamp-filter.StartTimestamp)/report.TrendIntervalSeconds > 1000 {
 		report.TrendIntervalSeconds *= 2
 	}
-	trend := make(map[int64]*CallAnalyticsTrend)
+	for bucket := filter.StartTimestamp; bucket < filter.EndTimestamp; bucket += report.TrendIntervalSeconds {
+		report.Trend = append(report.Trend, CallAnalyticsTrend{Timestamp: bucket})
+	}
 	for _, request := range requests {
-		bucket := filter.StartTimestamp + (request.CompletedAt-filter.StartTimestamp)/report.TrendIntervalSeconds*report.TrendIntervalSeconds
-		if trend[bucket] == nil {
-			trend[bucket] = &CallAnalyticsTrend{Timestamp: bucket}
-		}
-		entry := trend[bucket]
+		entry := &report.Trend[(request.CompletedAt-filter.StartTimestamp)/report.TrendIntervalSeconds]
 		entry.Requests++
 		entry.Tokens += request.InputTokens + request.OutputTokens
 		entry.Quota += request.Quota
@@ -446,13 +444,6 @@ func buildCallAnalytics(logs []Log, filter CallAnalyticsFilter) *CallAnalyticsRe
 		if request.Outcome == "error" {
 			entry.Errors++
 		}
-	}
-	for bucket := filter.StartTimestamp; bucket < filter.EndTimestamp; bucket += report.TrendIntervalSeconds {
-		entry := CallAnalyticsTrend{Timestamp: bucket}
-		if trend[bucket] != nil {
-			entry = *trend[bucket]
-		}
-		report.Trend = append(report.Trend, entry)
 	}
 	report.Requests.Total = len(requests)
 	start := (filter.Page - 1) * filter.PageSize

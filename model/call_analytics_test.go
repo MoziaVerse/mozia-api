@@ -97,6 +97,26 @@ func TestCallAnalyticsRequestResultsAndCrossWindowRetries(t *testing.T) {
 	assert.Equal(t, "failure", failures.Requests.Items[0].RequestID)
 }
 
+func TestCallAnalyticsTrendPreservesEmptyBucketsAndTimeBoundaries(t *testing.T) {
+	db := callAnalyticsTestDB(t)
+	start := int64(1800000007)
+	logs := []Log{
+		{UserId: 7, RequestId: "before", Type: LogTypeConsume, CreatedAt: start - 1, Quota: 100, Other: `{"request_path":"/v1/chat/completions"}`},
+		{UserId: 7, RequestId: "first", Type: LogTypeConsume, CreatedAt: start, PromptTokens: 4, CompletionTokens: 1, Quota: 7, Other: `{"request_path":"/v1/chat/completions"}`},
+		{UserId: 7, RequestId: "last", Type: LogTypeConsume, CreatedAt: start + 124, PromptTokens: 6, CompletionTokens: 3, Quota: 11, Other: `{"request_path":"/v1/chat/completions"}`},
+		{UserId: 7, RequestId: "end", Type: LogTypeConsume, CreatedAt: start + 125, Quota: 100, Other: `{"request_path":"/v1/chat/completions"}`},
+	}
+	require.NoError(t, db.Create(&logs).Error)
+	report, err := GetCallAnalytics(context.Background(), CallAnalyticsFilter{StartTimestamp: start, EndTimestamp: start + 125, UserID: 7})
+	require.NoError(t, err)
+	assert.Equal(t, 2, report.Summary.Requests)
+	assert.Equal(t, []CallAnalyticsTrend{
+		{Timestamp: start, Requests: 1, Success: 1, Tokens: 5, Quota: 7},
+		{Timestamp: start + 60},
+		{Timestamp: start + 120, Requests: 1, Success: 1, Tokens: 9, Quota: 11},
+	}, report.Trend)
+}
+
 func TestCallAnalyticsRedirectCacheNormalizationAndStreamFailures(t *testing.T) {
 	db := callAnalyticsTestDB(t)
 	start := int64(1800000000)

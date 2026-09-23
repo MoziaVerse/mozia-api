@@ -85,15 +85,21 @@ func TestOaiStreamHandlerPreservesEarlierCacheReport(t *testing.T) {
 		cacheData string
 		reported  bool
 		cached    int
+		estimated bool
 	}{
-		{"missing", constant.ChannelTypeOpenAI, `"choices":[{"delta":{"content":"OK"}}]`, false, 0},
-		{"explicit-zero", constant.ChannelTypeOpenAI, `"usage":{"prompt_tokens_details":{"cached_tokens":0}}`, true, 0},
-		{"positive", constant.ChannelTypeOpenAI, `"usage":{"prompt_tokens_details":{"cached_tokens":80}}`, true, 80},
-		{"moonshot-zero", constant.ChannelTypeMoonshot, `"choices":[{"usage":{"cached_tokens":0}}]`, true, 0},
+		{"missing", constant.ChannelTypeOpenAI, `"choices":[{"delta":{"content":"OK"}}]`, false, 0, false},
+		{"explicit-zero", constant.ChannelTypeOpenAI, `"usage":{"prompt_tokens_details":{"cached_tokens":0}}`, true, 0, false},
+		{"positive", constant.ChannelTypeOpenAI, `"usage":{"prompt_tokens_details":{"cached_tokens":80}}`, true, 80, false},
+		{"moonshot-zero", constant.ChannelTypeMoonshot, `"choices":[{"usage":{"cached_tokens":0}}]`, true, 0, false},
+		{"estimated", constant.ChannelTypeOpenAI, `"usage":{"prompt_tokens_details":{"cached_tokens":80}}`, true, 80, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			finalUsage := `,"usage":{"prompt_tokens":100,"completion_tokens":1,"total_tokens":101}`
+			if test.estimated {
+				finalUsage = ""
+			}
 			body := "data: {" + test.cacheData + "}\n\n" +
-				`data: {"id":"cache-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":1,"total_tokens":101}}` + "\n\ndata: [DONE]\n\n"
+				`data: {"id":"cache-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]` + finalUsage + "}\n\ndata: [DONE]\n\n"
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -101,9 +107,11 @@ func TestOaiStreamHandlerPreservesEarlierCacheReport(t *testing.T) {
 				ChannelMeta: &relaycommon.ChannelMeta{ChannelType: test.channel, UpstreamModelName: "kimi-k3"},
 				RelayFormat: types.RelayFormatOpenAI, IsStream: true, ShouldIncludeUsage: true, DisablePing: true,
 			}
+			info.SetEstimatePromptTokens(100)
 			usage, apiErr := OaiStreamHandler(c, info, &http.Response{Body: io.NopCloser(strings.NewReader(body))})
 			require.Nil(t, apiErr)
 			require.NotNil(t, usage)
+			assert.Equal(t, 100, usage.PromptTokens)
 			assert.Equal(t, test.reported, usage.CacheUsageReported)
 			assert.Equal(t, test.cached, usage.PromptTokensDetails.CachedTokens)
 		})
