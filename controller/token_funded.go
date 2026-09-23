@@ -165,13 +165,10 @@ func AdjustSelfFundedToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": buildMaskedTokenResponse(tk)})
 }
 
-// RevokeSelfFundedToken 撤销（删除）自带资金的令牌，余额随之作废。
+// RevokeSelfFundedToken 撤销自带资金的令牌；同一用户重试已撤销的令牌仍返回成功。
 func RevokeSelfFundedToken(c *gin.Context) {
-	tk, ok := loadFundedToken(c)
-	if !ok {
-		return
-	}
-	if err := model.DeleteTokenById(tk.Id, tk.UserId); err != nil {
+	id, _ := strconv.Atoi(c.Param("id"))
+	if err := model.RevokeSelfFundedToken(id, c.GetInt("id")); err != nil {
 		common.ApiError(c, err)
 		return
 	}

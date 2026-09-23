@@ -10,6 +10,8 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -166,6 +168,59 @@ func TestFundedTokenRoutes_IssueAdjustRevoke(t *testing.T) {
 	if cnt != 0 {
 		t.Fatal("撤销后令牌仍在")
 	}
+}
+
+func TestRevokeSelfFundedToken_RetryPreservesRevocation(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedFundedToken(t, db, 1, 500)
+	for attempt := 0; attempt < 2; attempt++ {
+		ctx, rec := newAuthenticatedContext(t, http.MethodDelete, "/api/sso/funded-token/1", nil, 1)
+		ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+		RevokeSelfFundedToken(ctx)
+		require.True(t, decodeAPIResponse(t, rec).Success, "an uncertain revoke can be retried")
+	}
+	var revoked model.Token
+	require.NoError(t, db.Unscoped().First(&revoked, token.Id).Error)
+	assert.True(t, revoked.DeletedAt.Valid)
+	_, err := model.ValidateUserToken(token.Key)
+	require.Error(t, err, "a revoked key must not authorize consumption")
+
+	ctx, rec := newAuthenticatedContext(t, http.MethodPut, "/api/sso/token/?status_only=true", map[string]any{
+		"id": token.Id, "status": common.TokenStatusEnabled,
+	}, 1)
+	UpdateToken(ctx)
+	assert.False(t, decodeAPIResponse(t, rec).Success, "ordinary enable must not restore revoked funds")
+}
+
+func TestRevokeSelfFundedToken_RejectsInvalidTargets(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	other := seedFundedToken(t, db, 2, 500)
+	otherRevoked := seedFundedToken(t, db, 2, 500)
+	require.NoError(t, db.Delete(otherRevoked).Error)
+	plain := seedToken(t, db, 1, "plain", "plain-not-funded")
+	plainRevoked := seedToken(t, db, 1, "plain revoked", "plain-revoked-not-funded")
+	require.NoError(t, db.Delete(plainRevoked).Error)
+	for _, tc := range []struct {
+		name string
+		id   int
+	}{
+		{"other owner", other.Id},
+		{"other owner already revoked", otherRevoked.Id},
+		{"ordinary key", plain.Id},
+		{"ordinary key already deleted", plainRevoked.Id},
+		{"unknown key", plainRevoked.Id + 1000},
+		{"invalid id", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, rec := newAuthenticatedContext(t, http.MethodDelete, "/api/sso/funded-token/1", nil, 1)
+			ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(tc.id)}}
+			RevokeSelfFundedToken(ctx)
+			assert.False(t, decodeAPIResponse(t, rec).Success)
+		})
+	}
+	var active int64
+	require.NoError(t, db.Model(&model.Token{}).Count(&active).Error)
+	assert.EqualValues(t, 2, active, "rejected requests must leave both active keys intact")
 }
 
 func TestSSOFundingAuth(t *testing.T) {

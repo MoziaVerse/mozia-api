@@ -433,6 +433,20 @@ func DeleteTokenById(id int, userId int) (err error) {
 	return token.Delete()
 }
 
+// RevokeSelfFundedToken acknowledges retries for the same owner's soft-deleted
+// funded token, so callers can finish their local revocation after a lost response.
+func RevokeSelfFundedToken(id int, userId int) error {
+	if id <= 0 || userId <= 0 {
+		return errors.New("id 或 userId 无效")
+	}
+	var token Token
+	if err := DB.Unscoped().Where("id = ? AND user_id = ? AND self_funded = ?", id, userId, true).
+		First(&token).Error; err != nil {
+		return err
+	}
+	return token.Delete()
+}
+
 func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")

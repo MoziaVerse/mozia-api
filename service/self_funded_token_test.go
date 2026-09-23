@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -70,9 +71,48 @@ func TestSelfFundedToken_RefundReturnsToKey(t *testing.T) {
 	info := selfFundedRelay(903, 9003, "sk-sf-3", "subscription_first")
 	require.Nil(t, PreConsumeBilling(testGinContext(), 200, info))
 	assert.Equal(t, 300, getTokenRemainQuota(t, 9003))
+	require.NoError(t, info.Billing.Reserve(350))
+	assert.Equal(t, 150, getTokenRemainQuota(t, 9003))
+	err := info.Billing.Reserve(501)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token quota is not enough")
+	assert.Equal(t, 350, info.FinalPreConsumedQuota, "failed reserve must not change refundable quota")
+	assert.Equal(t, 150, getTokenRemainQuota(t, 9003))
+	assert.Equal(t, 0, getUserQuota(t, 903))
 	info.Billing.Refund(testGinContext())
 	require.Eventually(t, func() bool { return getTokenRemainQuota(t, 9003) == 500 }, 3*time.Second, 20*time.Millisecond)
+	assert.Equal(t, 0, getTokenUsedQuota(t, 9003), "refund includes the successful extra reserve only")
 	assert.Equal(t, 0, getUserQuota(t, 903))
+}
+
+func TestSelfFundedToken_RealtimeReserveWithZeroWallet(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+	seedUser(t, 908, 0)
+	seedSelfFundedToken(t, 9008, 908, "sk-sf-wss", 1_000)
+	originalRatios := ratio_setting.ModelRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(originalRatios))
+	})
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"self-funded-realtime":1}`))
+	info := selfFundedRelay(908, 9008, "sk-sf-wss", "wallet_only")
+	info.OriginModelName = "self-funded-realtime"
+	info.PriceData.GroupRatioInfo.GroupRatio = 1
+	require.Nil(t, PreConsumeBilling(testGinContext(), 100, info))
+	usage := &dto.RealtimeUsage{
+		TotalTokens: 50, InputTokens: 50,
+		InputTokenDetails: dto.InputTokenDetails{TextTokens: 50},
+	}
+	require.NoError(t, PreWssConsumeQuota(testGinContext(), info, usage))
+	assert.Equal(t, 150, info.FinalPreConsumedQuota)
+	assert.Equal(t, 850, getTokenRemainQuota(t, 9008))
+	assert.Equal(t, 0, getUserQuota(t, 908))
+
+	// Final usage is 50; the initial reservation must not become an extra charge.
+	require.NoError(t, SettleBilling(testGinContext(), info, 50))
+	assert.Equal(t, 950, getTokenRemainQuota(t, 9008))
+	assert.Equal(t, 50, getTokenUsedQuota(t, 9008))
+	assert.Equal(t, 0, getUserQuota(t, 908))
 }
 
 // 异步任务：资金分支不碰钱包，令牌分支照常
