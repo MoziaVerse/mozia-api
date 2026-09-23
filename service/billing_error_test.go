@@ -17,11 +17,6 @@ import (
 )
 
 func TestBillingRejectionLogsAndRollback(t *testing.T) {
-	for _, table := range []interface{}{&model.SubscriptionPlan{}, &model.SubscriptionPreConsumeRecord{}} {
-		if !model.DB.Migrator().HasTable(table) {
-			require.NoError(t, model.DB.AutoMigrate(table))
-		}
-	}
 	for _, tc := range []struct {
 		name         string
 		paid         int
