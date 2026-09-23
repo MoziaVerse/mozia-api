@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Internal audit reason": "Internal audit reason",
+    "Customer-visible note": "Customer-visible note",
+    "Optional. Shown in wallet history; internal audit reasons stay private.": "Optional. Shown in wallet history; internal audit reasons stay private.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

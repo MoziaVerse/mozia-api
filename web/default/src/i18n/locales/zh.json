@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Internal audit reason": "内部审计备注",
+    "Customer-visible note": "用户可见说明",
+    "Optional. Shown in wallet history; internal audit reasons stay private.": "选填，将显示在用户的钱包记录中；内部审计备注不会公开。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

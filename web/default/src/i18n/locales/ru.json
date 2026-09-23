@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Internal audit reason": "Внутренняя причина для аудита",
+    "Customer-visible note": "Примечание для клиента",
+    "Optional. Shown in wallet history; internal audit reasons stay private.": "Необязательно. Показывается в истории кошелька; внутренние причины остаются скрытыми.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

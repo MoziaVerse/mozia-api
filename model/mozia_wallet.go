@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -59,7 +60,7 @@ type MoziaWalletBalance struct {
 }
 
 // MoziaWalletTransaction is a sidecar ledger for Mozia quota source accounting.
-// It intentionally does not replace logs; logs stay user-facing, this is audit data.
+// It does not replace usage logs. Customer history exposes only a safe projection.
 type MoziaWalletTransaction struct {
 	Id            int    `json:"id"`
 	UserId        int    `json:"user_id" gorm:"index;not null"`
@@ -122,6 +123,7 @@ type MoziaWalletAdjustInput struct {
 	Delta         *int
 	TargetBalance *int
 	Reason        string
+	PublicNote    string
 }
 
 type MoziaWalletView struct {
@@ -493,6 +495,10 @@ func AdjustMoziaWalletBalance(input MoziaWalletAdjustInput) (*MoziaWalletView, e
 	if input.UserId == 0 {
 		return nil, errors.New("user id is empty")
 	}
+	input.PublicNote = strings.TrimSpace(input.PublicNote)
+	if utf8.RuneCountInString(input.PublicNote) > 500 {
+		return nil, errors.New("public_note must not exceed 500 characters")
+	}
 	source, err := normalizeMoziaWalletSource(input.Source)
 	if err != nil {
 		return nil, err
@@ -566,7 +572,8 @@ func AdjustMoziaWalletBalance(input MoziaWalletAdjustInput) (*MoziaWalletView, e
 			ReferenceType: "admin_adjust",
 			ReferenceId:   strings.TrimSpace(input.Reason),
 			Metadata: map[string]interface{}{
-				"reason": strings.TrimSpace(input.Reason),
+				"reason":      strings.TrimSpace(input.Reason),
+				"public_note": input.PublicNote,
 			},
 		}, delta, balanceAfter)
 	})
