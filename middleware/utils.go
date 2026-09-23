@@ -15,6 +15,8 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 		codeStr = string(code[0])
 	}
 	userId := c.GetInt("id")
+	c.Set("call_analytics_error_status", statusCode)
+	c.Set("call_analytics_error_code", codeStr)
 	c.JSON(statusCode, gin.H{
 		"error": gin.H{
 			"message": common.MessageWithRequestId(message, c.GetString(common.RequestIdKey)),

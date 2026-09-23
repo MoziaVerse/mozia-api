@@ -41,6 +41,7 @@ func Distribute() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
+		c.Set("call_analytics_requested_model", modelRequest.Model)
 		// Check the requested public ID before redirects and specific-channel routing.
 		// Task fetches remain available after authorization is revoked; submissions
 		// whose model is resolved later (such as remix) are checked at submission.
@@ -72,6 +73,7 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusBadRequest, err.Error())
 				return
 			}
+			c.Set("call_analytics_effective_model", modelRequest.Model)
 			if common.GetContextKeyString(c, constant.ContextKeyRequestedModel) != "" {
 				if common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled) {
 					allowed, _ := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)

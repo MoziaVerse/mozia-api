@@ -178,6 +178,15 @@ export function useSidebarData(): SidebarData {
             activeUrls: ['/system-settings'],
             icon: Settings,
           },
+          ...(hasPermission(user, 'general_admin', 'access')
+            ? [
+                {
+                  title: t('Call Analytics'),
+                  url: '/call-analytics',
+                  icon: Activity,
+                },
+              ]
+            : []),
           {
             title: t('Mozia Settings'),
             url: '/mozia-settings/model-quota-policies',

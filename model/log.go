@@ -139,7 +139,7 @@ func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("")
 	}
-	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
+	err = LOG_DB.Model(&Log{}).Where("token_id = ? AND type <> ?", tokenId, LogTypeRequestOutcome).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
 }
@@ -346,6 +346,7 @@ type RecordConsumeLogParams struct {
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
+	ObserveCallConsumption(c, params)
 	if !common.LogConsumeEnabled {
 		return
 	}
@@ -503,7 +504,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, startIdx int, num int, channel int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
-		tx = LOG_DB
+		tx = LOG_DB.Where("logs.type <> ?", LogTypeRequestOutcome)
 	} else {
 		tx = LOG_DB.Where("logs.type = ?", logType)
 	}
@@ -603,6 +604,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	} else {
 		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
 	}
+	tx = tx.Where("logs.type <> ?", LogTypeRequestOutcome)
 
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
 		return nil, 0, err
