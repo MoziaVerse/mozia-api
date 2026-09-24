@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
-import type { AnalyticsFilters } from './api'
+import type { AnalyticsFilters, AnalyticsRequestsPage } from './api'
 
 const optionalID = z
   .string()
@@ -77,4 +77,17 @@ export function requestLogTimeRange(
     startTimestamp
   )
   return { startTime: earliestAttempt * 1000, endTime: endTimestamp * 1000 }
+}
+
+export function requestPageNavigation(
+  rows: AnalyticsRequestsPage,
+  total: number | null
+): { totalPages: number | null; hasNext: boolean } {
+  const totalPages =
+    total == null ? null : Math.max(1, Math.ceil(total / rows.page_size))
+  const hasNext =
+    totalPages == null
+      ? (rows.has_more ?? rows.items.length === rows.page_size)
+      : rows.p < totalPages
+  return { totalPages, hasNext }
 }

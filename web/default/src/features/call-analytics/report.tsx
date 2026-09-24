@@ -60,6 +60,19 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
     value == null ? '—' : `${number(value * 100)}%`
   const milliseconds = (value: number | null) =>
     value == null ? '—' : `${number(value)} ms`
+  const quantile = (
+    value: number | null,
+    format: (value: number | null) => string,
+    approximate?: boolean
+  ) =>
+    value != null && approximate
+      ? `${t('Approx.')} ${format(value)}`
+      : format(value)
+  const hasApproximatePercentiles =
+    summary.duration_approximate ||
+    Object.values(props.data.distributions).some(
+      (distribution) => distribution.approximate
+    )
   const cards = [
     [
       t('Total Requests'),
@@ -88,7 +101,14 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
     [t('Cache Read Tokens'), number(summary.cache_read_tokens)],
     [t('Cache Write Tokens'), number(summary.cache_write_tokens)],
     [t('Average Duration'), milliseconds(summary.avg_duration_ms)],
-    [t('Duration P95'), milliseconds(summary.p95_duration_ms)],
+    [
+      t('Duration P95'),
+      quantile(
+        summary.p95_duration_ms,
+        milliseconds,
+        summary.duration_approximate
+      ),
+    ],
     [t('Retried requests'), number(summary.retried_requests)],
     [t('Recovered requests'), number(summary.recovered_requests)],
   ]
@@ -237,6 +257,13 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
       <Card>
         <CardHeader>
           <CardTitle>{t('Performance distributions')}</CardTitle>
+          {hasApproximatePercentiles && (
+            <p className='text-muted-foreground text-xs'>
+              {t(
+                'Sample counts include all eligible requests or active minutes. Approx. marks percentiles estimated after the sampling limit is exceeded.'
+              )}
+            </p>
+          )}
           <p className='text-muted-foreground text-xs'>
             {t(
               'P50 is the median. P95 and P99 show the upper tail. Missing samples display —.'
@@ -254,13 +281,17 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
                     {row.description}
                   </p>
                   <dl className='mt-3 grid grid-cols-3 gap-2'>
-                    {(['p50', 'p95', 'p99'] as const).map((quantile) => (
-                      <div key={quantile}>
+                    {(['p50', 'p95', 'p99'] as const).map((percentile) => (
+                      <div key={percentile}>
                         <dt className='text-muted-foreground text-xs'>
-                          {quantile.toUpperCase()}
+                          {percentile.toUpperCase()}
                         </dt>
                         <dd className='font-medium tabular-nums'>
-                          {row.format(distribution[quantile])}
+                          {quantile(
+                            distribution[percentile],
+                            row.format,
+                            distribution.approximate
+                          )}
                         </dd>
                       </div>
                     ))}
@@ -295,13 +326,25 @@ export function AnalyticsReport(props: { data: CallAnalytics }) {
                         </p>
                       </TableCell>
                       <TableCell className='text-right tabular-nums'>
-                        {row.format(distribution.p50)}
+                        {quantile(
+                          distribution.p50,
+                          row.format,
+                          distribution.approximate
+                        )}
                       </TableCell>
                       <TableCell className='text-right tabular-nums'>
-                        {row.format(distribution.p95)}
+                        {quantile(
+                          distribution.p95,
+                          row.format,
+                          distribution.approximate
+                        )}
                       </TableCell>
                       <TableCell className='text-right tabular-nums'>
-                        {row.format(distribution.p99)}
+                        {quantile(
+                          distribution.p99,
+                          row.format,
+                          distribution.approximate
+                        )}
                       </TableCell>
                       <TableCell className='text-right tabular-nums'>
                         {number(distribution.samples)}{' '}

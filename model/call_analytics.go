@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,9 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const CallAnalyticsMaxLogs = 50000
-
-var ErrCallAnalyticsLimit = errors.New("too many matching logs; narrow the time range or select a user/model (maximum 50000 logs)")
+const CallAnalyticsMaxPage = 50000
 
 type CallAnalyticsFilter struct {
 	StartTimestamp int64  `json:"start_timestamp" form:"start_timestamp"`
@@ -60,7 +59,7 @@ func (f *CallAnalyticsFilter) Normalize(now time.Time) error {
 	if f.PageSize == 0 {
 		f.PageSize = 20
 	}
-	if f.Page < 1 || f.Page > CallAnalyticsMaxLogs || f.PageSize < 1 || f.PageSize > 100 {
+	if f.Page < 1 || f.Page > CallAnalyticsMaxPage || f.PageSize < 1 || f.PageSize > 100 {
 		return errors.New("invalid pagination")
 	}
 	return nil
@@ -78,36 +77,39 @@ func IsCallAnalyticsPath(path string) bool {
 }
 
 type CallAnalyticsSummary struct {
-	Requests          int      `json:"requests"`
-	Success           int      `json:"success"`
-	Errors            int      `json:"errors"`
-	Cancelled         int      `json:"cancelled"`
-	Unknown           int      `json:"unknown"`
-	SuccessRate       *float64 `json:"success_rate"`
-	ErrorRate         *float64 `json:"error_rate"`
-	Quota             int64    `json:"quota"`
-	InputTokens       int64    `json:"input_tokens"`
-	OutputTokens      int64    `json:"output_tokens"`
-	CacheReadTokens   int64    `json:"cache_read_tokens"`
-	CacheWriteTokens  int64    `json:"cache_write_tokens"`
-	CacheHitRate      *float64 `json:"cache_hit_rate"`
-	AvgRPM            float64  `json:"avg_rpm"`
-	RecentRPM         *int     `json:"recent_rpm"`
-	PeakRPM           int      `json:"peak_rpm"`
-	AvgTPM            float64  `json:"avg_tpm"`
-	RecentTPM         *int64   `json:"recent_tpm"`
-	PeakTPM           int64    `json:"peak_tpm"`
-	AvgDurationMs     *float64 `json:"avg_duration_ms"`
-	P95DurationMs     *float64 `json:"p95_duration_ms"`
-	RetriedRequests   int      `json:"retried_requests"`
-	RecoveredRequests int      `json:"recovered_requests"`
+	Requests            int      `json:"requests"`
+	Success             int      `json:"success"`
+	Errors              int      `json:"errors"`
+	Cancelled           int      `json:"cancelled"`
+	Unknown             int      `json:"unknown"`
+	SuccessRate         *float64 `json:"success_rate"`
+	ErrorRate           *float64 `json:"error_rate"`
+	Quota               int64    `json:"quota"`
+	InputTokens         int64    `json:"input_tokens"`
+	OutputTokens        int64    `json:"output_tokens"`
+	CacheReadTokens     int64    `json:"cache_read_tokens"`
+	CacheWriteTokens    int64    `json:"cache_write_tokens"`
+	CacheHitRate        *float64 `json:"cache_hit_rate"`
+	AvgRPM              float64  `json:"avg_rpm"`
+	RecentRPM           *int     `json:"recent_rpm"`
+	PeakRPM             int      `json:"peak_rpm"`
+	AvgTPM              float64  `json:"avg_tpm"`
+	RecentTPM           *int64   `json:"recent_tpm"`
+	PeakTPM             int64    `json:"peak_tpm"`
+	AvgDurationMs       *float64 `json:"avg_duration_ms"`
+	P95DurationMs       *float64 `json:"p95_duration_ms"`
+	DurationApproximate bool     `json:"duration_approximate"`
+	RetriedRequests     int      `json:"retried_requests"`
+	RecoveredRequests   int      `json:"recovered_requests"`
 }
 
 type CallAnalyticsQuantiles struct {
-	P50     *float64 `json:"p50"`
-	P95     *float64 `json:"p95"`
-	P99     *float64 `json:"p99"`
-	Samples int      `json:"samples"`
+	P50         *float64 `json:"p50"`
+	P95         *float64 `json:"p95"`
+	P99         *float64 `json:"p99"`
+	Samples     int      `json:"samples"`
+	Sampled     int      `json:"sampled"`
+	Approximate bool     `json:"approximate"`
 }
 
 type CallAnalyticsDistributions struct {
@@ -207,6 +209,13 @@ type CallAnalyticsReport struct {
 	Warnings []string              `json:"warnings"`
 }
 
+type CallAnalyticsRequestPage struct {
+	Items    []CallAnalyticsRequest `json:"items"`
+	Page     int                    `json:"p"`
+	PageSize int                    `json:"page_size"`
+	HasMore  bool                   `json:"has_more"`
+}
+
 // Only these usage/result fields leave the log database; request bodies, prompts,
 // token names, IPs, and free-form upstream error text are deliberately not read.
 var callAnalyticsMetadataPaths = []string{
@@ -256,225 +265,418 @@ func callAnalyticsProjection(dialect common.DatabaseType) string {
 	}
 }
 
-func GetCallAnalytics(ctx context.Context, filter CallAnalyticsFilter) (*CallAnalyticsReport, error) {
-	if err := filter.Normalize(time.Now()); err != nil {
-		return nil, err
+type callAnalyticsRequestKey struct {
+	UserID    int
+	RequestID string
+}
+
+type callAnalyticsCandidate struct {
+	UserID      int
+	RequestID   string
+	CompletedAt int64
+}
+
+func resolveCallAnalyticsUser(ctx context.Context, filter *CallAnalyticsFilter) (bool, error) {
+	if filter.User == "" {
+		return true, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	if filter.User != "" {
-		if id, err := strconv.Atoi(filter.User); err == nil && id > 0 {
-			filter.UserID = id
-		} else {
-			var user User
-			err := DB.WithContext(ctx).Unscoped().Model(&User{}).Select("id").Where("username = ?", filter.User).First(&user).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return buildCallAnalytics(nil, filter), nil
-			}
-			if err != nil {
-				return nil, err
-			}
-			filter.UserID = user.Id
-		}
+	if id, err := strconv.Atoi(filter.User); err == nil && id > 0 {
+		filter.UserID = id
+		return true, nil
 	}
-	dialect := common.LogDatabaseType()
+	var user User
+	err := DB.WithContext(ctx).Unscoped().Model(&User{}).Select("id").Where("username = ?", filter.User).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	filter.UserID = user.Id
+	return true, nil
+}
+
+func callAnalyticsQueries(ctx context.Context, filter CallAnalyticsFilter) (*gorm.DB, *gorm.DB) {
 	base := LOG_DB.WithContext(ctx).Model(&Log{}).Where("type IN ?", []int{LogTypeConsume, LogTypeError, LogTypeRequestOutcome})
 	if filter.UserID != 0 {
 		base = base.Where("user_id = ?", filter.UserID)
 	}
 	seeds := base.Session(&gorm.Session{}).Where("created_at >= ? AND created_at < ?", filter.StartTimestamp, filter.EndTimestamp)
-	if filter.ModelName != "" {
-		// Include redirects whose effective model differs from the requested model.
-		var expr string
-		switch dialect {
-		case common.DatabaseTypePostgreSQL:
-			expr = callAnalyticsJSONValue("requested_model", dialect) + " #>> '{}' = ? OR " + callAnalyticsJSONValue("admin_info.requested_model", dialect) + " #>> '{}' = ?"
-		case common.DatabaseTypeClickHouse:
-			expr = "JSONExtractString(other, 'requested_model') = ? OR JSONExtractString(other, 'admin_info', 'requested_model') = ?"
-		case common.DatabaseTypeMySQL:
-			expr = "JSON_UNQUOTE(" + callAnalyticsJSONValue("requested_model", dialect) + ") = ? OR JSON_UNQUOTE(" + callAnalyticsJSONValue("admin_info.requested_model", dialect) + ") = ?"
-		default:
-			expr = callAnalyticsJSONValue("requested_model", dialect) + " = ? OR " + callAnalyticsJSONValue("admin_info.requested_model", dialect) + " = ?"
+	return base, seeds
+}
+
+func callAnalyticsColumns() string {
+	return "id, user_id, username, created_at, type, model_name, quota, prompt_tokens, completion_tokens, use_time, is_stream, channel_id, request_id, " + callAnalyticsProjection(common.LogDatabaseType())
+}
+
+func callAnalyticsModelSeedCondition(dialect common.DatabaseType) string {
+	var requested string
+	switch dialect {
+	case common.DatabaseTypePostgreSQL:
+		requested = "(" + callAnalyticsJSONValue("requested_model", dialect) + " #>> '{}') = ? OR (" + callAnalyticsJSONValue("admin_info.requested_model", dialect) + " #>> '{}') = ?"
+	case common.DatabaseTypeClickHouse:
+		requested = "JSONExtractString(other, 'requested_model') = ? OR JSONExtractString(other, 'admin_info', 'requested_model') = ?"
+	case common.DatabaseTypeMySQL:
+		requested = "JSON_UNQUOTE(" + callAnalyticsJSONValue("requested_model", dialect) + ") = ? OR JSON_UNQUOTE(" + callAnalyticsJSONValue("admin_info.requested_model", dialect) + ") = ?"
+	default:
+		requested = callAnalyticsJSONValue("requested_model", dialect) + " = ? OR " + callAnalyticsJSONValue("admin_info.requested_model", dialect) + " = ?"
+	}
+	return "(model_name = ? OR " + requested + ")"
+}
+
+func scanCallAnalyticsKeys(seeds *gorm.DB, batchSize int, visit func([]callAnalyticsRequestKey) error) error {
+	idSelect, idOrder, idAfter := "request_id", "request_id", "request_id > ?"
+	if common.UsingLogDatabase(common.DatabaseTypeMySQL) {
+		// MySQL's default case-insensitive collation can collapse distinct IDs.
+		idSelect, idOrder, idAfter = "BINARY request_id AS request_id", "BINARY request_id", "BINARY request_id > BINARY ?"
+	}
+	query := seeds.Session(&gorm.Session{}).Where("request_id <> ''").
+		Distinct("user_id", idSelect).Order("user_id ASC, " + idOrder + " ASC")
+	// An open cursor and a batch lookup need two connections. SQLite may use
+	// one connection, so it uses short keyset queries instead.
+	if db, err := seeds.DB(); err == nil && !common.UsingLogDatabase(common.DatabaseTypeSQLite) && db.Stats().MaxOpenConnections != 1 {
+		rows, err := query.Rows()
+		if err != nil {
+			return err
 		}
-		seeds = seeds.Where("(model_name = ? OR "+expr+")", filter.ModelName, filter.ModelName, filter.ModelName)
+		defer rows.Close()
+		keys := make([]callAnalyticsRequestKey, 0, batchSize)
+		for rows.Next() {
+			var key callAnalyticsRequestKey
+			if err := rows.Scan(&key.UserID, &key.RequestID); err != nil {
+				return err
+			}
+			keys = append(keys, key)
+			if len(keys) == batchSize {
+				if err := visit(keys); err != nil {
+					return err
+				}
+				keys = make([]callAnalyticsRequestKey, 0, batchSize)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if len(keys) > 0 {
+			return visit(keys)
+		}
+		return nil
 	}
-	var seedRows []struct {
-		RequestID string `gorm:"column:request_id"`
+	var last callAnalyticsRequestKey
+	hasLast := false
+	for {
+		page := query.Session(&gorm.Session{}).Limit(batchSize)
+		if hasLast {
+			page = page.Where("(user_id > ? OR (user_id = ? AND "+idAfter+"))", last.UserID, last.UserID, last.RequestID)
+		}
+		var keys []callAnalyticsRequestKey
+		if err := page.Find(&keys).Error; err != nil {
+			return err
+		}
+		if len(keys) == 0 {
+			return nil
+		}
+		if err := visit(keys); err != nil {
+			return err
+		}
+		last, hasLast = keys[len(keys)-1], true
+		if len(keys) < batchSize {
+			return nil
+		}
 	}
-	if err := seeds.Select("request_id").Limit(CallAnalyticsMaxLogs + 1).Find(&seedRows).Error; err != nil {
+}
+
+func loadCallAnalyticsGroups(base *gorm.DB, keys []callAnalyticsRequestKey) (map[callAnalyticsRequestKey][]Log, error) {
+	groups := make(map[callAnalyticsRequestKey][]Log, len(keys))
+	ids := make([]string, 0, len(keys))
+	seenIDs := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		groups[key] = nil
+		if !seenIDs[key.RequestID] {
+			seenIDs[key.RequestID] = true
+			ids = append(ids, key.RequestID)
+		}
+	}
+	if len(ids) == 0 {
+		return groups, nil
+	}
+	var logs []Log
+	if err := base.Session(&gorm.Session{}).Select(callAnalyticsColumns()).Where("request_id IN ?", ids).Find(&logs).Error; err != nil {
 		return nil, err
 	}
-	if len(seedRows) > CallAnalyticsMaxLogs {
-		return nil, ErrCallAnalyticsLimit
+	for _, log := range logs {
+		key := callAnalyticsRequestKey{UserID: log.UserId, RequestID: log.RequestId}
+		if _, wanted := groups[key]; wanted {
+			groups[key] = append(groups[key], log)
+		}
 	}
-	ids := make([]string, 0, len(seedRows))
-	seen := make(map[string]bool)
-	hasEmpty := false
-	for _, row := range seedRows {
-		if row.RequestID == "" {
-			hasEmpty = true
+	return groups, nil
+}
+
+func callAnalyticsMatches(request CallAnalyticsRequest, filter CallAnalyticsFilter) bool {
+	return request.CompletedAt >= filter.StartTimestamp && request.CompletedAt < filter.EndTimestamp &&
+		(filter.ModelName == "" || request.ModelName == filter.ModelName) &&
+		(filter.Channel == 0 || request.ChannelID == filter.Channel) &&
+		(filter.Outcome == "" || request.Outcome == filter.Outcome)
+}
+
+func callAnalyticsHasModelSeed(logs []Log, filter CallAnalyticsFilter) bool {
+	if filter.ModelName == "" {
+		return true
+	}
+	for _, log := range logs {
+		if log.CreatedAt < filter.StartTimestamp || log.CreatedAt >= filter.EndTimestamp {
 			continue
 		}
-		if !seen[row.RequestID] {
-			seen[row.RequestID] = true
-			ids = append(ids, row.RequestID)
+		meta := gjson.Parse(log.Other)
+		if log.ModelName == filter.ModelName || meta.Get("requested_model").String() == filter.ModelName ||
+			meta.Get("admin_info_requested_model").String() == filter.ModelName {
+			return true
 		}
 	}
-	columns := "user_id, username, created_at, type, model_name, quota, prompt_tokens, completion_tokens, use_time, is_stream, channel_id, request_id, " + callAnalyticsProjection(dialect)
-	logs := make([]Log, 0, len(seedRows))
-	for i := 0; i < len(ids); i += 200 {
-		end := min(i+200, len(ids))
-		var batch []Log
-		// Fetch the entire request, not just attempts inside the time window. Its
-		// final completion decides the bucket, even when a retry crosses midnight.
-		err := base.Session(&gorm.Session{}).Select(columns).Where("request_id IN ?", ids[i:end]).Limit(CallAnalyticsMaxLogs - len(logs) + 1).Find(&batch).Error
+	return false
+}
+
+func GetCallAnalytics(ctx context.Context, filter CallAnalyticsFilter) (*CallAnalyticsReport, error) {
+	if err := filter.Normalize(time.Now()); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	found, err := resolveCallAnalyticsUser(ctx, &filter)
+	if err != nil {
+		return nil, err
+	}
+	aggregate := newCallAnalyticsAggregate(filter)
+	if !found {
+		return aggregate.finish(), nil
+	}
+
+	base, seeds := callAnalyticsQueries(ctx, filter)
+	if filter.ModelName != "" {
+		seeds = seeds.Where(callAnalyticsModelSeedCondition(common.LogDatabaseType()), filter.ModelName, filter.ModelName, filter.ModelName)
+	}
+
+	// SQLite uses short keyset pages; databases with spare connections stream
+	// keys through one cursor while each batch's attempts are reduced.
+	err = scanCallAnalyticsKeys(seeds, 200, func(keys []callAnalyticsRequestKey) error {
+		groups, err := loadCallAnalyticsGroups(base, keys)
+		if err != nil {
+			return err
+		}
+		for _, key := range keys {
+			request, ok := summarizeCallRequest(groups[key])
+			if ok && callAnalyticsMatches(request, filter) {
+				aggregate.add(request)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Historical rows without request IDs cannot safely be grouped. Scan them
+	// once as separate requests; no candidate IDs or complete logs are retained.
+	rows, err := seeds.Session(&gorm.Session{}).Where("request_id = ''").Select(callAnalyticsColumns()).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var log Log
+		if err := LOG_DB.ScanRows(rows, &log); err != nil {
+			return nil, err
+		}
+		request, ok := summarizeCallRequest([]Log{log})
+		if ok && callAnalyticsMatches(request, filter) {
+			aggregate.add(request)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return aggregate.finish(), nil
+}
+
+func GetCallAnalyticsRequestPage(ctx context.Context, filter CallAnalyticsFilter) (*CallAnalyticsRequestPage, error) {
+	if err := filter.Normalize(time.Now()); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	page := &CallAnalyticsRequestPage{Items: []CallAnalyticsRequest{}, Page: filter.Page, PageSize: filter.PageSize}
+	found, err := resolveCallAnalyticsUser(ctx, &filter)
+	if err != nil || !found {
+		return page, err
+	}
+
+	base, seeds := callAnalyticsQueries(ctx, filter)
+	if filter.ModelName == "" && filter.Page == 1 {
+		return getCallAnalyticsRecentPage(base, seeds, filter, page)
+	}
+	// Nonempty request IDs are grouped before LIMIT/OFFSET, so retries never
+	// split across pages. Model/channel/outcome are checked after hydration.
+	const batchSize = 100
+	idSelect, idGroup := "request_id", "request_id"
+	if common.UsingLogDatabase(common.DatabaseTypeMySQL) {
+		idSelect, idGroup = "BINARY request_id AS request_id", "BINARY request_id"
+	}
+	var candidates []callAnalyticsCandidate
+	var candidateGroups map[callAnalyticsRequestKey][]Log
+	var legacy []Log
+	candidateOffset, candidatePos, legacyOffset, legacyPos := 0, 0, 0, 0
+	candidateDone, legacyDone := false, false
+	skip := (filter.Page - 1) * filter.PageSize
+	matched := 0
+	for !page.HasMore {
+		if candidatePos >= len(candidates) && !candidateDone {
+			candidates = nil
+			query := seeds.Session(&gorm.Session{}).
+				Select("user_id, " + idSelect + ", MAX(created_at) AS completed_at").
+				Where("request_id <> ''").
+				Group("user_id, " + idGroup).
+				Order("completed_at DESC, request_id DESC, user_id ASC").
+				Limit(batchSize).Offset(candidateOffset)
+			if filter.ModelName != "" {
+				// HAVING preserves the final in-window completion time when
+				// only an earlier retry row carries the requested model.
+				query = query.Having("MAX(CASE WHEN "+callAnalyticsModelSeedCondition(common.LogDatabaseType())+" THEN 1 ELSE 0 END) > 0", filter.ModelName, filter.ModelName, filter.ModelName)
+			}
+			err := query.Scan(&candidates).Error
+			if err != nil {
+				return nil, err
+			}
+			candidateOffset += len(candidates)
+			candidatePos = 0
+			candidateDone = len(candidates) < batchSize
+			keys := make([]callAnalyticsRequestKey, 0, len(candidates))
+			for _, candidate := range candidates {
+				keys = append(keys, callAnalyticsRequestKey{UserID: candidate.UserID, RequestID: candidate.RequestID})
+			}
+			candidateGroups, err = loadCallAnalyticsGroups(base, keys)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if legacyPos >= len(legacy) && !legacyDone {
+			legacy = nil
+			// ClickHouse stores old rows with id=0. Identical empty-ID rows
+			// therefore have no stable cross-page tie breaker.
+			query := seeds.Session(&gorm.Session{}).Select(callAnalyticsColumns()).
+				Where("request_id = ''").
+				Order("created_at DESC, user_id ASC, id DESC").
+				Limit(batchSize).Offset(legacyOffset)
+			if filter.ModelName != "" {
+				query = query.Where(callAnalyticsModelSeedCondition(common.LogDatabaseType()), filter.ModelName, filter.ModelName, filter.ModelName)
+			}
+			err := query.Find(&legacy).Error
+			if err != nil {
+				return nil, err
+			}
+			legacyOffset += len(legacy)
+			legacyPos = 0
+			legacyDone = len(legacy) < batchSize
+		}
+
+		hasCandidate, hasLegacy := candidatePos < len(candidates), legacyPos < len(legacy)
+		if !hasCandidate && !hasLegacy {
+			break
+		}
+		var group []Log
+		if hasCandidate && (!hasLegacy ||
+			candidates[candidatePos].CompletedAt > legacy[legacyPos].CreatedAt ||
+			candidates[candidatePos].CompletedAt == legacy[legacyPos].CreatedAt &&
+				(candidates[candidatePos].RequestID > "" || candidates[candidatePos].UserID < legacy[legacyPos].UserId)) {
+			candidate := candidates[candidatePos]
+			candidatePos++
+			group = candidateGroups[callAnalyticsRequestKey{UserID: candidate.UserID, RequestID: candidate.RequestID}]
+		} else {
+			group = []Log{legacy[legacyPos]}
+			legacyPos++
+		}
+		if !callAnalyticsHasModelSeed(group, filter) {
+			continue
+		}
+		request, ok := summarizeCallRequest(group)
+		if !ok || !callAnalyticsMatches(request, filter) {
+			continue
+		}
+		if matched >= skip {
+			if len(page.Items) == filter.PageSize {
+				page.HasMore = true
+				break
+			}
+			page.Items = append(page.Items, request)
+		}
+		matched++
+	}
+	return page, nil
+}
+
+// The common first page follows the time-leading log index and stops after
+// one extra matching request. Its first row for an ID is the in-window anchor;
+// full attempts are still fetched before the result is accepted.
+func getCallAnalyticsRecentPage(base, seeds *gorm.DB, filter CallAnalyticsFilter, page *CallAnalyticsRequestPage) (*CallAnalyticsRequestPage, error) {
+	batchSize := max(16, min(100, filter.PageSize+1))
+	requestIDOrder := "request_id"
+	if common.UsingLogDatabase(common.DatabaseTypeMySQL) {
+		requestIDOrder = "BINARY request_id"
+	}
+	seen := make(map[callAnalyticsRequestKey]bool)
+	offset := 0
+	for !page.HasMore {
+		var rows []Log
+		err := seeds.Session(&gorm.Session{}).Select(callAnalyticsColumns()).
+			Order("created_at DESC, " + requestIDOrder + " DESC, user_id ASC, id DESC").
+			Limit(batchSize).Offset(offset).Find(&rows).Error
 		if err != nil {
 			return nil, err
 		}
-		logs = append(logs, batch...)
-		if len(logs) > CallAnalyticsMaxLogs {
-			return nil, ErrCallAnalyticsLimit
+		if len(rows) == 0 {
+			break
 		}
-	}
-	if hasEmpty {
-		var batch []Log
-		if err := seeds.Session(&gorm.Session{}).Select(columns).Where("request_id = ''").Limit(CallAnalyticsMaxLogs - len(logs) + 1).Find(&batch).Error; err != nil {
+		offset += len(rows)
+		keys := make([]callAnalyticsRequestKey, 0, len(rows))
+		for _, row := range rows {
+			if row.RequestId == "" {
+				continue
+			}
+			key := callAnalyticsRequestKey{UserID: row.UserId, RequestID: row.RequestId}
+			if !seen[key] {
+				seen[key] = true
+				keys = append(keys, key)
+			}
+		}
+		groups, err := loadCallAnalyticsGroups(base, keys)
+		if err != nil {
 			return nil, err
 		}
-		logs = append(logs, batch...)
-		if len(logs) > CallAnalyticsMaxLogs {
-			return nil, ErrCallAnalyticsLimit
+		for _, row := range rows {
+			group := []Log{row}
+			if row.RequestId != "" {
+				key := callAnalyticsRequestKey{UserID: row.UserId, RequestID: row.RequestId}
+				if _, ok := groups[key]; !ok {
+					continue
+				}
+				group = groups[key]
+				delete(groups, key)
+			}
+			request, ok := summarizeCallRequest(group)
+			if !ok || !callAnalyticsMatches(request, filter) {
+				continue
+			}
+			if len(page.Items) == filter.PageSize {
+				page.HasMore = true
+				break
+			}
+			page.Items = append(page.Items, request)
+		}
+		if len(rows) < batchSize {
+			break
 		}
 	}
-	return buildCallAnalytics(logs, filter), nil
-}
-
-func buildCallAnalytics(logs []Log, filter CallAnalyticsFilter) *CallAnalyticsReport {
-	groups := make(map[string][]Log)
-	for i, log := range logs {
-		key := fmt.Sprintf("%d:%s", log.UserId, log.RequestId)
-		if log.RequestId == "" {
-			key = fmt.Sprintf("missing:%d", i)
-		}
-		groups[key] = append(groups[key], log)
-	}
-	report := &CallAnalyticsReport{StartTimestamp: filter.StartTimestamp, EndTimestamp: filter.EndTimestamp, TrendIntervalSeconds: 60, Trend: []CallAnalyticsTrend{}, Users: []CallAnalyticsUser{}, Channels: []CallAnalyticsChannel{}, Errors: []CallAnalyticsError{}, Warnings: []string{"completion_time_basis"}}
-	report.Requests.Items = []CallAnalyticsRequest{}
-	report.Requests.Page, report.Requests.PageSize = filter.Page, filter.PageSize
-	requests := make([]CallAnalyticsRequest, 0, len(groups))
-	missingIDs := false
-	for _, group := range groups {
-		request, ok := summarizeCallRequest(group)
-		if !ok || request.CompletedAt < filter.StartTimestamp || request.CompletedAt >= filter.EndTimestamp {
-			continue
-		}
-		if filter.ModelName != "" && request.ModelName != filter.ModelName {
-			continue
-		}
-		if filter.Channel != 0 && request.ChannelID != filter.Channel {
-			continue
-		}
-		if filter.Outcome != "" && request.Outcome != filter.Outcome {
-			continue
-		}
-		requests = append(requests, request)
-		if request.RequestID == "" {
-			missingIDs = true
-		}
-		if request.ModelName == "" {
-			report.Coverage.UnknownModelRequests++
-		}
-		if request.FinalRecorded {
-			report.Coverage.FinalRecordedRequests++
-		} else {
-			report.Coverage.InferredRequests++
-		}
-	}
-	sort.Slice(requests, func(i, j int) bool {
-		if requests[i].CompletedAt != requests[j].CompletedAt {
-			return requests[i].CompletedAt > requests[j].CompletedAt
-		}
-		if requests[i].RequestID != requests[j].RequestID {
-			return requests[i].RequestID > requests[j].RequestID
-		}
-		return requests[i].UserID < requests[j].UserID
-	})
-	report.Summary = summarizeCallMetrics(requests, filter)
-	report.Distributions = summarizeCallDistributions(requests)
-	if report.Coverage.InferredRequests > 0 {
-		report.Warnings = append(report.Warnings, "historical_outcomes_incomplete")
-	}
-	if report.Distributions.CacheShare.Samples < len(requests) {
-		report.Warnings = append(report.Warnings, "cache_usage_incomplete")
-	}
-	if missingIDs {
-		report.Warnings = append(report.Warnings, "legacy_missing_request_ids")
-	}
-	if !common.LogConsumeEnabled || !constant.ErrorLogEnabled {
-		report.Warnings = append(report.Warnings, "logging_disabled")
-	}
-	if report.Coverage.UnknownModelRequests > 0 {
-		report.Warnings = append(report.Warnings, "unknown_request_models")
-	}
-	userGroups := make(map[int][]CallAnalyticsRequest)
-	channelGroups := make(map[int][]CallAnalyticsRequest)
-	errorGroups := make(map[string]CallAnalyticsError)
-	for _, request := range requests {
-		userGroups[request.UserID] = append(userGroups[request.UserID], request)
-		channelGroups[request.ChannelID] = append(channelGroups[request.ChannelID], request)
-		if request.Outcome == "error" {
-			key := fmt.Sprintf("%d:%s", request.StatusCode, request.ErrorCode)
-			entry := errorGroups[key]
-			entry.StatusCode = request.StatusCode
-			entry.ErrorCode = request.ErrorCode
-			entry.Count++
-			errorGroups[key] = entry
-		}
-	}
-	for id, group := range userGroups {
-		report.Users = append(report.Users, CallAnalyticsUser{UserID: id, Username: group[0].Username, CallAnalyticsSummary: summarizeCallMetrics(group, filter)})
-	}
-	for id, group := range channelGroups {
-		report.Channels = append(report.Channels, CallAnalyticsChannel{ChannelID: id, CallAnalyticsSummary: summarizeCallMetrics(group, filter)})
-	}
-	for _, entry := range errorGroups {
-		report.Errors = append(report.Errors, entry)
-	}
-	sort.Slice(report.Users, func(i, j int) bool { return report.Users[i].UserID < report.Users[j].UserID })
-	sort.Slice(report.Channels, func(i, j int) bool { return report.Channels[i].ChannelID < report.Channels[j].ChannelID })
-	sort.Slice(report.Errors, func(i, j int) bool {
-		if report.Errors[i].Count != report.Errors[j].Count {
-			return report.Errors[i].Count > report.Errors[j].Count
-		}
-		if report.Errors[i].StatusCode != report.Errors[j].StatusCode {
-			return report.Errors[i].StatusCode < report.Errors[j].StatusCode
-		}
-		return report.Errors[i].ErrorCode < report.Errors[j].ErrorCode
-	})
-	for (filter.EndTimestamp-filter.StartTimestamp)/report.TrendIntervalSeconds > 1000 {
-		report.TrendIntervalSeconds *= 2
-	}
-	for bucket := filter.StartTimestamp; bucket < filter.EndTimestamp; bucket += report.TrendIntervalSeconds {
-		report.Trend = append(report.Trend, CallAnalyticsTrend{Timestamp: bucket})
-	}
-	for _, request := range requests {
-		entry := &report.Trend[(request.CompletedAt-filter.StartTimestamp)/report.TrendIntervalSeconds]
-		entry.Requests++
-		entry.Tokens += request.InputTokens + request.OutputTokens
-		entry.Quota += request.Quota
-		if request.Outcome == "success" {
-			entry.Success++
-		}
-		if request.Outcome == "error" {
-			entry.Errors++
-		}
-	}
-	report.Requests.Total = len(requests)
-	start := (filter.Page - 1) * filter.PageSize
-	if start < len(requests) {
-		report.Requests.Items = requests[start:min(start+filter.PageSize, len(requests))]
-	}
-	return report
+	return page, nil
 }
 
 func summarizeCallRequest(logs []Log) (CallAnalyticsRequest, bool) {
@@ -651,127 +853,304 @@ func summarizeCallRequest(logs []Log) (CallAnalyticsRequest, bool) {
 	return r, true
 }
 
-func summarizeCallMetrics(requests []CallAnalyticsRequest, filter CallAnalyticsFilter) CallAnalyticsSummary {
-	s := CallAnalyticsSummary{Requests: len(requests)}
-	var durations []float64
-	var cacheInput, cacheRead int64
-	minutes := make(map[int64]*CallAnalyticsTrend)
-	for _, r := range requests {
-		switch r.Outcome {
-		case "success":
-			s.Success++
-		case "error":
-			s.Errors++
-		case "cancelled":
-			s.Cancelled++
-		default:
-			s.Unknown++
-		}
-		s.Quota += r.Quota
-		s.InputTokens += r.InputTokens
-		s.OutputTokens += r.OutputTokens
-		s.CacheReadTokens += r.CacheReadTokens
-		s.CacheWriteTokens += r.CacheWriteTokens
-		cacheInput += r.cacheInput
-		cacheRead += r.cacheRead
-		if r.DurationMs != nil {
-			durations = append(durations, *r.DurationMs)
-		}
-		if r.Attempts > 1 {
-			s.RetriedRequests++
-			if r.Outcome == "success" && r.hasError {
-				s.RecoveredRequests++
-			}
-		}
-		bucket := r.CompletedAt / 60
-		if minutes[bucket] == nil {
-			minutes[bucket] = &CallAnalyticsTrend{}
-		}
-		minutes[bucket].Requests++
-		minutes[bucket].Tokens += r.InputTokens + r.OutputTokens
+const (
+	callAnalyticsSampleLimit          = 100000
+	callAnalyticsBreakdownSampleLimit = 2048
+)
+
+// Keep exact nearest-rank values for ordinary reports and bounded, clearly
+// marked estimates for very large windows. Samples counts every observation.
+type callAnalyticsSample struct {
+	values []float64
+	count  int
+	limit  int
+	rng    *rand.Rand
+}
+
+func (s *callAnalyticsSample) add(value float64) {
+	s.count++
+	if len(s.values) < s.limit {
+		s.values = append(s.values, value)
+		return
 	}
+	if s.rng == nil {
+		s.rng = rand.New(rand.NewSource(1))
+	}
+	if i := s.rng.Intn(s.count); i < s.limit {
+		s.values[i] = value
+	}
+}
+
+func (s *callAnalyticsSample) quantiles() CallAnalyticsQuantiles {
+	q := callAnalyticsQuantiles(s.values)
+	q.Samples = s.count
+	q.Approximate = s.count > len(s.values)
+	return q
+}
+
+type callAnalyticsMetrics struct {
+	summary     CallAnalyticsSummary
+	cacheInput  int64
+	cacheRead   int64
+	durations   callAnalyticsSample
+	durationSum float64
+	minutes     map[int64]CallAnalyticsTrend
+	recentRPM   int
+	recentTPM   int64
+}
+
+func (m *callAnalyticsMetrics) add(request CallAnalyticsRequest, filter CallAnalyticsFilter) {
+	s := &m.summary
+	s.Requests++
+	switch request.Outcome {
+	case "success":
+		s.Success++
+	case "error":
+		s.Errors++
+	case "cancelled":
+		s.Cancelled++
+	default:
+		s.Unknown++
+	}
+	s.Quota += request.Quota
+	s.InputTokens += request.InputTokens
+	s.OutputTokens += request.OutputTokens
+	s.CacheReadTokens += request.CacheReadTokens
+	s.CacheWriteTokens += request.CacheWriteTokens
+	m.cacheInput += request.cacheInput
+	m.cacheRead += request.cacheRead
+	if request.DurationMs != nil {
+		m.durationSum += *request.DurationMs
+		m.durations.add(*request.DurationMs)
+	}
+	if request.Attempts > 1 {
+		s.RetriedRequests++
+		if request.Outcome == "success" && request.hasError {
+			s.RecoveredRequests++
+		}
+	}
+	if m.minutes == nil {
+		m.minutes = make(map[int64]CallAnalyticsTrend)
+	}
+	bucket := request.CompletedAt / 60
+	minute := m.minutes[bucket]
+	minute.Requests++
+	minute.Tokens += request.InputTokens + request.OutputTokens
+	m.minutes[bucket] = minute
+	if request.CompletedAt >= filter.EndTimestamp-60 && request.CompletedAt < filter.EndTimestamp {
+		m.recentRPM++
+		m.recentTPM += request.InputTokens + request.OutputTokens
+	}
+}
+
+func (m *callAnalyticsMetrics) finish(filter CallAnalyticsFilter) CallAnalyticsSummary {
+	s := m.summary
 	if s.Requests > 0 {
 		success, failure := float64(s.Success)/float64(s.Requests), float64(s.Errors)/float64(s.Requests)
-		s.SuccessRate = &success
-		s.ErrorRate = &failure
+		s.SuccessRate, s.ErrorRate = &success, &failure
 	}
-	if cacheInput > 0 {
-		ratio := float64(cacheRead) / float64(cacheInput)
+	if m.cacheInput > 0 {
+		ratio := float64(m.cacheRead) / float64(m.cacheInput)
 		s.CacheHitRate = &ratio
 	}
 	windowMinutes := float64(filter.EndTimestamp-filter.StartTimestamp) / 60
-	if windowMinutes > 0 {
-		s.AvgRPM = float64(s.Requests) / windowMinutes
-		s.AvgTPM = float64(s.InputTokens+s.OutputTokens) / windowMinutes
-	}
+	s.AvgRPM = float64(s.Requests) / windowMinutes
+	s.AvgTPM = float64(s.InputTokens+s.OutputTokens) / windowMinutes
 	if filter.EndTimestamp-filter.StartTimestamp >= 60 {
-		recentRPM, recentTPM := 0, int64(0)
-		for _, r := range requests {
-			if r.CompletedAt >= filter.EndTimestamp-60 && r.CompletedAt < filter.EndTimestamp {
-				recentRPM++
-				recentTPM += r.InputTokens + r.OutputTokens
-			}
-		}
-		s.RecentRPM, s.RecentTPM = &recentRPM, &recentTPM
+		s.RecentRPM, s.RecentTPM = &m.recentRPM, &m.recentTPM
 	}
-	for _, bucket := range minutes {
-		s.PeakRPM = max(s.PeakRPM, bucket.Requests)
-		s.PeakTPM = max(s.PeakTPM, bucket.Tokens)
+	for _, minute := range m.minutes {
+		s.PeakRPM = max(s.PeakRPM, minute.Requests)
+		s.PeakTPM = max(s.PeakTPM, minute.Tokens)
 	}
-	if len(durations) > 0 {
-		sort.Float64s(durations)
-		sum := 0.0
-		for _, value := range durations {
-			sum += value
-		}
-		avg := sum / float64(len(durations))
-		p95 := durations[int(math.Ceil(float64(len(durations))*0.95))-1]
-		s.AvgDurationMs = &avg
-		s.P95DurationMs = &p95
+	if m.durations.count > 0 {
+		sort.Float64s(m.durations.values)
+		avg := m.durationSum / float64(m.durations.count)
+		p95 := m.durations.values[int(math.Ceil(float64(len(m.durations.values))*0.95))-1]
+		s.AvgDurationMs, s.P95DurationMs = &avg, &p95
+		s.DurationApproximate = m.durations.count > len(m.durations.values)
 	}
 	return s
 }
 
-// Rate distributions describe active calendar minutes; they exclude idle minutes
-// and retain partial boundary buckets. First response and TPS use successful streams.
-func summarizeCallDistributions(requests []CallAnalyticsRequest) CallAnalyticsDistributions {
-	var firstResponses, outputTPS, cacheShares []float64
-	minutes := make(map[int64]struct {
-		requests int
-		tokens   int64
-	})
-	for _, request := range requests {
-		if request.Outcome == "success" && request.FRTMs != nil {
-			firstResponses = append(firstResponses, *request.FRTMs)
-		}
-		if request.Outcome == "success" && request.OutputTPS != nil {
-			outputTPS = append(outputTPS, *request.OutputTPS)
-		}
-		if request.CacheUsageReported && request.cacheInput > 0 {
-			cacheShares = append(cacheShares, float64(request.cacheRead)/float64(request.cacheInput))
-		}
-		minute := request.CompletedAt / 60
-		value := minutes[minute]
-		value.requests++
-		value.tokens += request.InputTokens + request.OutputTokens
-		minutes[minute] = value
+type callAnalyticsUserMetrics struct {
+	username    string
+	completedAt int64
+	requestID   string
+	metrics     callAnalyticsMetrics
+}
+
+type callAnalyticsAggregate struct {
+	filter         CallAnalyticsFilter
+	report         *CallAnalyticsReport
+	summary        callAnalyticsMetrics
+	users          map[int]*callAnalyticsUserMetrics
+	channels       map[int]*callAnalyticsMetrics
+	errors         map[string]CallAnalyticsError
+	trend          map[int64]CallAnalyticsTrend
+	firstResponses callAnalyticsSample
+	outputTPS      callAnalyticsSample
+	cacheShares    callAnalyticsSample
+	missingIDs     bool
+}
+
+func newCallAnalyticsAggregate(filter CallAnalyticsFilter) *callAnalyticsAggregate {
+	report := &CallAnalyticsReport{
+		StartTimestamp:       filter.StartTimestamp,
+		EndTimestamp:         filter.EndTimestamp,
+		TrendIntervalSeconds: 60,
+		Trend:                []CallAnalyticsTrend{},
+		Users:                []CallAnalyticsUser{},
+		Channels:             []CallAnalyticsChannel{},
+		Errors:               []CallAnalyticsError{},
+		Warnings:             []string{"completion_time_basis"},
 	}
-	rpms, tpms := make([]float64, 0, len(minutes)), make([]float64, 0, len(minutes))
-	for _, minute := range minutes {
-		rpms = append(rpms, float64(minute.requests))
-		tpms = append(tpms, float64(minute.tokens))
+	for (filter.EndTimestamp-filter.StartTimestamp)/report.TrendIntervalSeconds > 1000 {
+		report.TrendIntervalSeconds *= 2
 	}
-	return CallAnalyticsDistributions{
-		FirstResponseMs: callAnalyticsQuantiles(firstResponses),
-		OutputTPS:       callAnalyticsQuantiles(outputTPS),
-		RPM:             callAnalyticsQuantiles(rpms),
-		TPM:             callAnalyticsQuantiles(tpms),
-		CacheShare:      callAnalyticsQuantiles(cacheShares),
+	report.Requests.Items = []CallAnalyticsRequest{}
+	report.Requests.Page, report.Requests.PageSize = filter.Page, filter.PageSize
+	return &callAnalyticsAggregate{
+		filter: filter, report: report,
+		summary:        callAnalyticsMetrics{durations: callAnalyticsSample{limit: callAnalyticsSampleLimit}},
+		users:          make(map[int]*callAnalyticsUserMetrics),
+		channels:       make(map[int]*callAnalyticsMetrics),
+		errors:         make(map[string]CallAnalyticsError),
+		trend:          make(map[int64]CallAnalyticsTrend),
+		firstResponses: callAnalyticsSample{limit: callAnalyticsSampleLimit},
+		outputTPS:      callAnalyticsSample{limit: callAnalyticsSampleLimit},
+		cacheShares:    callAnalyticsSample{limit: callAnalyticsSampleLimit},
 	}
 }
 
+func (a *callAnalyticsAggregate) add(request CallAnalyticsRequest) {
+	a.summary.add(request, a.filter)
+	user := a.users[request.UserID]
+	if user == nil {
+		user = &callAnalyticsUserMetrics{metrics: callAnalyticsMetrics{durations: callAnalyticsSample{limit: callAnalyticsBreakdownSampleLimit}}}
+		a.users[request.UserID] = user
+	}
+	if request.CompletedAt > user.completedAt ||
+		request.CompletedAt == user.completedAt && request.RequestID > user.requestID {
+		user.username = request.Username
+		user.completedAt = request.CompletedAt
+		user.requestID = request.RequestID
+	}
+	user.metrics.add(request, a.filter)
+	channel := a.channels[request.ChannelID]
+	if channel == nil {
+		channel = &callAnalyticsMetrics{durations: callAnalyticsSample{limit: callAnalyticsBreakdownSampleLimit}}
+		a.channels[request.ChannelID] = channel
+	}
+	channel.add(request, a.filter)
+	if request.Outcome == "error" {
+		key := fmt.Sprintf("%d:%s", request.StatusCode, request.ErrorCode)
+		entry := a.errors[key]
+		entry.StatusCode, entry.ErrorCode = request.StatusCode, request.ErrorCode
+		entry.Count++
+		a.errors[key] = entry
+	}
+	if request.RequestID == "" {
+		a.missingIDs = true
+	}
+	if request.ModelName == "" {
+		a.report.Coverage.UnknownModelRequests++
+	}
+	if request.FinalRecorded {
+		a.report.Coverage.FinalRecordedRequests++
+	} else {
+		a.report.Coverage.InferredRequests++
+	}
+	if request.Outcome == "success" && request.FRTMs != nil {
+		a.firstResponses.add(*request.FRTMs)
+	}
+	if request.Outcome == "success" && request.OutputTPS != nil {
+		a.outputTPS.add(*request.OutputTPS)
+	}
+	if request.CacheUsageReported && request.cacheInput > 0 {
+		a.cacheShares.add(float64(request.cacheRead) / float64(request.cacheInput))
+	}
+	bucket := a.filter.StartTimestamp +
+		(request.CompletedAt-a.filter.StartTimestamp)/a.report.TrendIntervalSeconds*a.report.TrendIntervalSeconds
+	entry := a.trend[bucket]
+	entry.Requests++
+	entry.Tokens += request.InputTokens + request.OutputTokens
+	entry.Quota += request.Quota
+	if request.Outcome == "success" {
+		entry.Success++
+	}
+	if request.Outcome == "error" {
+		entry.Errors++
+	}
+	a.trend[bucket] = entry
+}
+
+func (a *callAnalyticsAggregate) finish() *CallAnalyticsReport {
+	report := a.report
+	report.Summary = a.summary.finish(a.filter)
+	report.Requests.Total = report.Summary.Requests
+	rpms, tpms := make([]float64, 0, len(a.summary.minutes)), make([]float64, 0, len(a.summary.minutes))
+	for _, minute := range a.summary.minutes {
+		rpms = append(rpms, float64(minute.Requests))
+		tpms = append(tpms, float64(minute.Tokens))
+	}
+	report.Distributions = CallAnalyticsDistributions{
+		FirstResponseMs: a.firstResponses.quantiles(),
+		OutputTPS:       a.outputTPS.quantiles(),
+		RPM:             callAnalyticsQuantiles(rpms),
+		TPM:             callAnalyticsQuantiles(tpms),
+		CacheShare:      a.cacheShares.quantiles(),
+	}
+	for id, user := range a.users {
+		report.Users = append(report.Users, CallAnalyticsUser{
+			UserID: id, Username: user.username,
+			CallAnalyticsSummary: user.metrics.finish(a.filter),
+		})
+	}
+	for id, channel := range a.channels {
+		report.Channels = append(report.Channels, CallAnalyticsChannel{
+			ChannelID: id, CallAnalyticsSummary: channel.finish(a.filter),
+		})
+	}
+	for _, entry := range a.errors {
+		report.Errors = append(report.Errors, entry)
+	}
+	sort.Slice(report.Users, func(i, j int) bool { return report.Users[i].UserID < report.Users[j].UserID })
+	sort.Slice(report.Channels, func(i, j int) bool { return report.Channels[i].ChannelID < report.Channels[j].ChannelID })
+	sort.Slice(report.Errors, func(i, j int) bool {
+		if report.Errors[i].Count != report.Errors[j].Count {
+			return report.Errors[i].Count > report.Errors[j].Count
+		}
+		if report.Errors[i].StatusCode != report.Errors[j].StatusCode {
+			return report.Errors[i].StatusCode < report.Errors[j].StatusCode
+		}
+		return report.Errors[i].ErrorCode < report.Errors[j].ErrorCode
+	})
+	for bucket := a.filter.StartTimestamp; bucket < a.filter.EndTimestamp; bucket += report.TrendIntervalSeconds {
+		entry := a.trend[bucket]
+		entry.Timestamp = bucket
+		report.Trend = append(report.Trend, entry)
+	}
+	if report.Coverage.InferredRequests > 0 {
+		report.Warnings = append(report.Warnings, "historical_outcomes_incomplete")
+	}
+	if report.Distributions.CacheShare.Samples < report.Summary.Requests {
+		report.Warnings = append(report.Warnings, "cache_usage_incomplete")
+	}
+	if a.missingIDs {
+		report.Warnings = append(report.Warnings, "legacy_missing_request_ids")
+	}
+	if !common.LogConsumeEnabled || !constant.ErrorLogEnabled {
+		report.Warnings = append(report.Warnings, "logging_disabled")
+	}
+	if report.Coverage.UnknownModelRequests > 0 {
+		report.Warnings = append(report.Warnings, "unknown_request_models")
+	}
+	return report
+}
+
 func callAnalyticsQuantiles(values []float64) CallAnalyticsQuantiles {
-	q := CallAnalyticsQuantiles{Samples: len(values)}
+	q := CallAnalyticsQuantiles{Samples: len(values), Sampled: len(values)}
 	if len(values) == 0 {
 		return q
 	}

@@ -33,30 +33,37 @@ import {
 import dayjs from '@/lib/dayjs'
 import { formatQuota } from '@/lib/format'
 
-import type { CallAnalytics } from './api'
-import { requestLogTimeRange } from './filters'
+import type { AnalyticsRequestsPage } from './api'
+import { requestLogTimeRange, requestPageNavigation } from './filters'
 
 export function AnalyticsRequests(props: {
-  data: CallAnalytics
+  data: AnalyticsRequestsPage
+  total: number | null
+  startTimestamp: number
+  endTimestamp: number
   loading: boolean
   onPageChange: (page: number) => void
 }) {
   const { t } = useTranslation()
-  const rows = props.data.requests
+  const rows = props.data
   const outcomes = {
     success: t('Success'),
     error: t('Failed'),
     cancelled: t('Cancelled'),
     unknown: t('Unknown'),
   }
-  const totalPages = Math.max(1, Math.ceil(rows.total / rows.page_size))
+  const { totalPages, hasNext } = requestPageNavigation(rows, props.total)
   return (
     <Card>
       <CardHeader>
         <CardTitle>
           {t('Filtered requests')}{' '}
           <span className='text-muted-foreground font-normal'>
-            ({rows.total.toLocaleString()})
+            (
+            {props.total == null
+              ? t('Total unavailable')
+              : props.total.toLocaleString()}
+            )
           </span>
         </CardTitle>
       </CardHeader>
@@ -149,8 +156,8 @@ export function AnalyticsRequests(props: {
                             search={{
                               requestId: row.request_id,
                               ...requestLogTimeRange(
-                                props.data.start_timestamp,
-                                props.data.end_timestamp,
+                                props.startTimestamp,
+                                props.endTimestamp,
                                 row.attempt_logs
                               ),
                             }}
@@ -218,10 +225,12 @@ export function AnalyticsRequests(props: {
         </Table>
         <div className='mt-4 flex items-center justify-end gap-3'>
           <span className='text-muted-foreground text-sm'>
-            {t('Page {{page}} of {{total}}', {
-              page: rows.p,
-              total: totalPages,
-            })}
+            {totalPages == null
+              ? `${t('Page')} ${rows.p}`
+              : t('Page {{page}} of {{total}}', {
+                  page: rows.p,
+                  total: totalPages,
+                })}
           </span>
           <Button
             variant='outline'
@@ -232,7 +241,7 @@ export function AnalyticsRequests(props: {
           </Button>
           <Button
             variant='outline'
-            disabled={props.loading || rows.p >= totalPages}
+            disabled={props.loading || !hasNext}
             onClick={() => props.onPageChange(rows.p + 1)}
           >
             {t('Next')}

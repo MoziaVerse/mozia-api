@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -76,7 +77,9 @@ func TestCallAnalyticsRequestResultsAndCrossWindowRetries(t *testing.T) {
 	assert.Equal(t, 50.0, *report.Distributions.FirstResponseMs.P95)
 	assert.InDelta(t, 0.1, report.Summary.AvgRPM, 0.00001)
 	assert.Equal(t, 5, report.Summary.PeakRPM)
-	assert.Len(t, report.Requests.Items, 2)
+	page, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	assert.Len(t, page.Items, 2)
 	assert.Equal(t, 6, report.Requests.Total)
 	assert.Contains(t, report.Warnings, "historical_outcomes_incomplete")
 	assert.Contains(t, report.Warnings, "cache_usage_incomplete")
@@ -84,17 +87,118 @@ func TestCallAnalyticsRequestResultsAndCrossWindowRetries(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(serialized), "SECRET_PROMPT")
 	assert.NotContains(t, string(serialized), "request_body")
+	serialized, err = common.Marshal(page)
+	require.NoError(t, err)
+	assert.NotContains(t, string(serialized), "SECRET_PROMPT")
+	assert.NotContains(t, string(serialized), "request_body")
 	filter.Page = 2
 	next, err := GetCallAnalytics(context.Background(), filter)
 	require.NoError(t, err)
 	assert.Equal(t, report.Summary, next.Summary)
-	assert.NotEqual(t, report.Requests.Items[0].RequestID, next.Requests.Items[0].RequestID)
+	nextPage, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	require.NotEmpty(t, nextPage.Items)
+	assert.NotEqual(t, page.Items[0].RequestID, nextPage.Items[0].RequestID)
 	filter.Outcome, filter.Page = "error", 1
 	failures, err := GetCallAnalytics(context.Background(), filter)
 	require.NoError(t, err)
 	assert.Equal(t, 1, failures.Summary.Requests)
 	assert.Equal(t, 503, failures.Errors[0].StatusCode)
-	assert.Equal(t, "failure", failures.Requests.Items[0].RequestID)
+	failurePage, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	require.Len(t, failurePage.Items, 1)
+	assert.Equal(t, "failure", failurePage.Items[0].RequestID)
+}
+
+func TestCallAnalyticsIndependentPagesKeepLogicalRequestOrder(t *testing.T) {
+	db := callAnalyticsTestDB(t)
+	start := int64(1800000000)
+	logs := []Log{
+		{UserId: 7, RequestId: "b", Type: LogTypeError, CreatedAt: start - 1, ModelName: "public", ChannelId: 1, Other: `{"request_path":"/v1/chat/completions","status_code":502}`},
+		{UserId: 7, RequestId: "b", Type: LogTypeConsume, CreatedAt: start + 10, ModelName: "effective", ChannelId: 2, Quota: 9, Other: `{"request_path":"/v1/chat/completions","admin_info":{"requested_model":"public"}}`},
+		{UserId: 8, RequestId: "b", Type: LogTypeConsume, CreatedAt: start + 10, ModelName: "public", ChannelId: 3, Quota: 8, Other: `{"request_path":"/v1/chat/completions"}`},
+		{UserId: 7, RequestId: "a", Type: LogTypeConsume, CreatedAt: start + 10, ModelName: "public", ChannelId: 2, Quota: 7, Other: `{"request_path":"/v1/chat/completions"}`},
+		{UserId: 7, RequestId: "", Type: LogTypeConsume, CreatedAt: start + 10, ModelName: "public", ChannelId: 2, Quota: 6, Other: `{"request_path":"/v1/chat/completions"}`},
+		{UserId: 7, RequestId: "later", Type: LogTypeError, CreatedAt: start + 11, ModelName: "public", ChannelId: 2, Other: `{"request_path":"/v1/chat/completions","status_code":500}`},
+		{UserId: 7, RequestId: "later", Type: LogTypeConsume, CreatedAt: start + 61, ModelName: "public", ChannelId: 2, Other: `{"request_path":"/v1/chat/completions"}`},
+	}
+	require.NoError(t, db.Create(&logs).Error)
+	filter := CallAnalyticsFilter{StartTimestamp: start, EndTimestamp: start + 60, PageSize: 2}
+	_, seeds := callAnalyticsQueries(context.Background(), filter)
+	var batches [][]callAnalyticsRequestKey
+	require.NoError(t, scanCallAnalyticsKeys(seeds, 2, func(keys []callAnalyticsRequestKey) error {
+		batches = append(batches, append([]callAnalyticsRequestKey(nil), keys...))
+		return nil
+	}))
+	assert.Equal(t, [][]callAnalyticsRequestKey{
+		{{UserID: 7, RequestID: "a"}, {UserID: 7, RequestID: "b"}},
+		{{UserID: 7, RequestID: "later"}, {UserID: 8, RequestID: "b"}},
+	}, batches)
+	report, err := GetCallAnalytics(context.Background(), filter)
+	require.NoError(t, err)
+	assert.Equal(t, 4, report.Summary.Requests)
+	assert.Equal(t, report.Summary.Requests, report.Requests.Total)
+	assert.Empty(t, report.Requests.Items)
+	assert.Equal(t, 1, report.Summary.RetriedRequests)
+	first, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	filter.Page = 2
+	second, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	require.Len(t, first.Items, 2)
+	require.Len(t, second.Items, 2)
+	assert.True(t, first.HasMore)
+	assert.False(t, second.HasMore)
+	assert.Equal(t, []string{"b", "b", "a", ""}, []string{
+		first.Items[0].RequestID, first.Items[1].RequestID, second.Items[0].RequestID, second.Items[1].RequestID,
+	})
+	assert.Equal(t, []int{7, 8, 7, 7}, []int{
+		first.Items[0].UserID, first.Items[1].UserID, second.Items[0].UserID, second.Items[1].UserID,
+	})
+	assert.Equal(t, 2, first.Items[0].Attempts)
+	filter.ModelName, filter.Channel, filter.Outcome, filter.Page = "public", 2, "success", 1
+	filtered, err := GetCallAnalytics(context.Background(), filter)
+	require.NoError(t, err)
+	assert.Equal(t, 2, filtered.Summary.Requests)
+	filteredFirst, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	filter.Page = 2
+	filteredSecond, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	assert.Equal(t, filtered.Summary.Requests, len(filteredFirst.Items)+len(filteredSecond.Items))
+	assert.False(t, filteredFirst.HasMore)
+	assert.Equal(t, "b", filteredFirst.Items[0].RequestID)
+	assert.Empty(t, filteredSecond.Items)
+}
+
+func TestCallAnalyticsRecentPageContinuesPastUnrelatedLogs(t *testing.T) {
+	db := callAnalyticsTestDB(t)
+	start := int64(1800000000)
+	logs := make([]Log, 0, 18)
+	for i := 0; i < 16; i++ {
+		logs = append(logs, Log{UserId: 7, RequestId: fmt.Sprintf("video-%02d", i), Type: LogTypeConsume,
+			CreatedAt: start + 59 - int64(i), Other: `{"request_path":"/v1/video/generations","task_id":"task"}`})
+	}
+	logs = append(logs,
+		Log{UserId: 7, RequestId: "text-newer", Type: LogTypeConsume, CreatedAt: start + 10, Other: `{"request_path":"/v1/chat/completions"}`},
+		Log{UserId: 7, RequestId: "text-older", Type: LogTypeConsume, CreatedAt: start + 9, Other: `{"request_path":"/v1/chat/completions"}`},
+	)
+	require.NoError(t, db.Create(&logs).Error)
+	filter := CallAnalyticsFilter{StartTimestamp: start, EndTimestamp: start + 60, PageSize: 1}
+	report, err := GetCallAnalytics(context.Background(), filter)
+	require.NoError(t, err)
+	assert.Equal(t, 2, report.Summary.Requests)
+	first, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	require.Len(t, first.Items, 1)
+	assert.Equal(t, "text-newer", first.Items[0].RequestID)
+	assert.True(t, first.HasMore)
+	filter.Page = 2
+	second, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	require.Len(t, second.Items, 1)
+	assert.Equal(t, "text-older", second.Items[0].RequestID)
+	assert.False(t, second.HasMore)
 }
 
 func TestCallAnalyticsTrendPreservesEmptyBucketsAndTimeBoundaries(t *testing.T) {
@@ -139,11 +243,14 @@ func TestCallAnalyticsRedirectCacheNormalizationAndStreamFailures(t *testing.T) 
 	require.NotNil(t, report.Summary.CacheHitRate)
 	assert.Equal(t, 0.75, *report.Summary.CacheHitRate)
 	assert.Equal(t, 1, report.Distributions.FirstResponseMs.Samples)
-	redirect := report.Requests.Items[3]
+	page, err := GetCallAnalyticsRequestPage(context.Background(), CallAnalyticsFilter{StartTimestamp: start, EndTimestamp: start + 60, UserID: 7, ModelName: "public-model"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 4)
+	redirect := page.Items[3]
 	assert.Equal(t, "public-model", redirect.ModelName)
 	assert.Equal(t, "actual-model", redirect.EffectiveModel)
 	assert.Equal(t, "route-1", redirect.RoutingRuleID)
-	assert.Nil(t, report.Requests.Items[2].FRTMs) // Missing first packet is not a 0ms sample.
+	assert.Nil(t, page.Items[2].FRTMs) // Missing first packet is not a 0ms sample.
 }
 
 func TestCallAnalyticsTimeRangeAndPathValidation(t *testing.T) {
@@ -178,7 +285,10 @@ func TestCallAnalyticsUserFilterResolvesExactUsernameOrID(t *testing.T) {
 	report, err := GetCallAnalytics(context.Background(), filter)
 	require.NoError(t, err)
 	assert.Equal(t, 1, report.Summary.Requests)
-	assert.Equal(t, 70, report.Requests.Items[0].UserID)
+	page, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, 70, page.Items[0].UserID)
 	filter.User = "70"
 	report, err = GetCallAnalytics(context.Background(), filter)
 	require.NoError(t, err)
@@ -225,11 +335,13 @@ func TestCallAnalyticsUnknownStreamsAndUnavailableRouteTargets(t *testing.T) {
 	filter.Channel = 419
 	report, err = GetCallAnalytics(context.Background(), filter)
 	require.NoError(t, err)
-	require.Len(t, report.Requests.Items, 1)
-	assert.Equal(t, 0, report.Requests.Items[0].Attempts)
-	assert.Equal(t, "error", report.Requests.Items[0].Outcome)
-	assert.Equal(t, 419, report.Requests.Items[0].ChannelID)
-	assert.False(t, report.Requests.Items[0].CacheUsageReported)
+	page, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, 0, page.Items[0].Attempts)
+	assert.Equal(t, "error", page.Items[0].Outcome)
+	assert.Equal(t, 419, page.Items[0].ChannelID)
+	assert.False(t, page.Items[0].CacheUsageReported)
 }
 
 func TestCallAnalyticsRecentMinuteAndDistributionsUseSelectedInterval(t *testing.T) {
@@ -285,7 +397,9 @@ func TestCallAnalyticsPerformanceDistributionsExcludeIncompleteStreams(t *testin
 	assert.Equal(t, 1500.0, *report.Distributions.FirstResponseMs.P95)
 	assert.Equal(t, 1, report.Distributions.OutputTPS.Samples)
 	assert.Equal(t, 40.0, *report.Distributions.OutputTPS.P50)
-	for _, request := range report.Requests.Items {
+	page, err := GetCallAnalyticsRequestPage(context.Background(), CallAnalyticsFilter{StartTimestamp: start, EndTimestamp: start + 60, UserID: 7})
+	require.NoError(t, err)
+	for _, request := range page.Items {
 		if request.RequestID != "measured" {
 			assert.Nil(t, request.OutputTPS, request.RequestID)
 		}
@@ -307,4 +421,21 @@ func TestCallAnalyticsQuantilesNearestRankAndEmptySamples(t *testing.T) {
 	assert.Nil(t, empty.P50)
 	assert.Nil(t, empty.P95)
 	assert.Nil(t, empty.P99)
+}
+
+func TestCallAnalyticsQuantilesMarkBoundedEstimates(t *testing.T) {
+	sample := callAnalyticsSample{limit: 2}
+	sample.add(10)
+	sample.add(20)
+	exact := sample.quantiles()
+	assert.Equal(t, 2, exact.Samples)
+	assert.Equal(t, 2, exact.Sampled)
+	assert.False(t, exact.Approximate)
+	assert.Equal(t, 20.0, *exact.P95)
+
+	sample.add(30)
+	approximate := sample.quantiles()
+	assert.Equal(t, 3, approximate.Samples)
+	assert.Equal(t, 2, approximate.Sampled)
+	assert.True(t, approximate.Approximate)
 }

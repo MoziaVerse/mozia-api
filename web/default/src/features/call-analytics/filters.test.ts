@@ -19,10 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+import type { AnalyticsRequestsPage } from './api'
 import {
   analyticsFilterSchema,
   analyticsQueryFilters,
   requestLogTimeRange,
+  requestPageNavigation,
 } from './filters'
 
 const input = {
@@ -107,4 +109,33 @@ test('usage log links use milliseconds and include retries before the analysis w
       endTime: Date.parse('2026-09-24T00:00:00Z'),
     }
   )
+})
+
+test('request pages can navigate without summary totals and adopt totals once available', () => {
+  const rows: AnalyticsRequestsPage = {
+    items: [],
+    p: 1,
+    page_size: 20,
+    has_more: false,
+  }
+  assert.deepEqual(requestPageNavigation(rows, null), {
+    totalPages: null,
+    hasNext: false,
+  })
+  assert.deepEqual(requestPageNavigation({ ...rows, has_more: true }, null), {
+    totalPages: null,
+    hasNext: true,
+  })
+  assert.deepEqual(requestPageNavigation(rows, 21), {
+    totalPages: 2,
+    hasNext: true,
+  })
+  assert.deepEqual(requestPageNavigation({ ...rows, p: 2 }, 21), {
+    totalPages: 2,
+    hasNext: false,
+  })
+  assert.deepEqual(requestPageNavigation(rows, 0), {
+    totalPages: 1,
+    hasNext: false,
+  })
 })

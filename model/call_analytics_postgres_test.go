@@ -46,9 +46,9 @@ func TestCallAnalyticsPostgresUnicode(t *testing.T) {
 			other := fmt.Sprintf(`{"request_path":"/v1/messages","cache_tokens":2,"cache_usage_reported":true,%s}`, tc.metadata)
 			// Every query, including GetCallAnalytics' seed/model filter and retry
 			// lookup, reads this synthetic VALUES table. No real logs or schema writes.
-			LOG_DB = pg.Table(`(VALUES (7, 'synthetic', 1800000010::bigint, ?::integer,
+			LOG_DB = pg.Table(`(VALUES (0::bigint, 7, 'synthetic', 1800000010::bigint, ?::integer,
 				'effective-model', 11, 5, 3, 1, false, 2, 'unicode-request', ?::text))
-				AS logs(user_id, username, created_at, type, model_name, quota, prompt_tokens,
+				AS logs(id, user_id, username, created_at, type, model_name, quota, prompt_tokens,
 				completion_tokens, use_time, is_stream, channel_id, request_id, other)`, LogTypeConsume, other)
 			var projected struct{ Other string }
 			require.NoError(t, LOG_DB.Select(callAnalyticsProjection(common.DatabaseTypePostgreSQL)).Scan(&projected).Error)
@@ -65,14 +65,46 @@ func TestCallAnalyticsPostgresUnicode(t *testing.T) {
 					assert.Zero(t, report.Summary.Requests)
 					continue
 				}
-				require.Len(t, report.Requests.Items, 1)
+				page, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+				require.NoError(t, err)
+				require.Len(t, page.Items, 1)
 				assert.Equal(t, 1, report.Summary.Success)
 				assert.Equal(t, int64(11), report.Summary.Quota)
 				assert.Equal(t, int64(5), report.Summary.InputTokens)
 				assert.Equal(t, int64(2), report.Summary.CacheReadTokens)
-				assert.Equal(t, tc.requested, report.Requests.Items[0].ModelName)
-				assert.Equal(t, "effective-model", report.Requests.Items[0].EffectiveModel)
+				assert.Equal(t, tc.requested, page.Items[0].ModelName)
+				assert.Equal(t, "effective-model", page.Items[0].EffectiveModel)
 			}
 		})
 	}
+
+	t.Run("streamed keys preserve the log model for legacy rows", func(t *testing.T) {
+		// A transaction-local table shadows real logs without touching business
+		// data. Unlike VALUES with an explicit Table, this exercises Model(&Log{}).
+		tx := pg.Begin()
+		require.NoError(t, tx.Error)
+		t.Cleanup(func() { require.NoError(t, tx.Rollback().Error) })
+		require.NoError(t, tx.Exec(`CREATE TEMP TABLE logs ON COMMIT DROP AS
+			SELECT 1::bigint AS id, 7 AS user_id, 'synthetic'::text AS username,
+			1800000010::bigint AS created_at, ?::integer AS type,
+			'public-model'::text AS model_name, 11 AS quota, 5 AS prompt_tokens,
+			3 AS completion_tokens, 1 AS use_time, false AS is_stream, 2 AS channel_id,
+			'streamed-request'::text AS request_id,
+			'{"request_path":"/v1/messages"}'::text AS other`, LogTypeConsume).Error)
+		require.NoError(t, tx.Exec(`INSERT INTO pg_temp.logs
+			SELECT 2, user_id, username, created_at, type, model_name, quota,
+			prompt_tokens, completion_tokens, use_time, is_stream, channel_id, '', other
+			FROM pg_temp.logs WHERE id = 1`).Error)
+		LOG_DB = tx
+		filter := CallAnalyticsFilter{StartTimestamp: 1800000000, EndTimestamp: 1800000060}
+		report, err := GetCallAnalytics(context.Background(), filter)
+		require.NoError(t, err)
+		assert.Equal(t, 2, report.Summary.Requests)
+		assert.Equal(t, 1, report.Summary.Success)
+		assert.Equal(t, 1, report.Summary.Unknown)
+		assert.Equal(t, int64(22), report.Summary.Quota)
+		page, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+		require.NoError(t, err)
+		assert.Len(t, page.Items, 2)
+	})
 }

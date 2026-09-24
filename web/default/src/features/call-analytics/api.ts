@@ -51,6 +51,7 @@ export interface AnalyticsSummary {
   peak_tpm: number | null
   avg_duration_ms: number | null
   p95_duration_ms: number | null
+  duration_approximate?: boolean
   retried_requests: number
   recovered_requests: number
 }
@@ -86,6 +87,13 @@ export interface AnalyticsRequest {
   }[]
 }
 
+export interface AnalyticsRequestsPage {
+  items: AnalyticsRequest[]
+  p: number
+  page_size: number
+  has_more?: boolean
+}
+
 export interface CallAnalytics {
   start_timestamp: number
   end_timestamp: number
@@ -97,6 +105,7 @@ export interface CallAnalytics {
       p95: number | null
       p99: number | null
       samples: number
+      approximate?: boolean
     }
   >
   trend_interval_seconds: number
@@ -111,12 +120,7 @@ export interface CallAnalytics {
   users: (AnalyticsSummary & { user_id: number; username: string })[]
   channels: (AnalyticsSummary & { channel_id: number })[]
   errors: { status_code: number; error_code: string; count: number }[]
-  requests: {
-    items: AnalyticsRequest[]
-    total: number
-    p: number
-    page_size: number
-  }
+  requests: AnalyticsRequestsPage & { total: number }
   coverage: {
     final_recorded_requests: number
     inferred_requests: number
@@ -126,7 +130,6 @@ export interface CallAnalytics {
 
 export async function getCallAnalytics(
   filters: AnalyticsFilters,
-  page: number,
   signal?: AbortSignal
 ): Promise<CallAnalytics> {
   const response = await api.get<{
@@ -134,6 +137,25 @@ export async function getCallAnalytics(
     message?: string
     data: CallAnalytics
   }>('/api/log/call-report', {
+    params: filters,
+    signal,
+  })
+  if (!response.data.success) {
+    throw new Error(response.data.message || 'Failed to load call analytics')
+  }
+  return response.data.data
+}
+
+export async function getCallAnalyticsRequests(
+  filters: AnalyticsFilters,
+  page: number,
+  signal?: AbortSignal
+): Promise<AnalyticsRequestsPage> {
+  const response = await api.get<{
+    success: boolean
+    message?: string
+    data: AnalyticsRequestsPage
+  }>('/api/log/call-report/requests', {
     params: { ...filters, p: page, page_size: 20 },
     signal,
   })
