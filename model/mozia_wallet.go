@@ -593,8 +593,12 @@ func AdjustMoziaUserQuota(userId int, mode string, value int) (before int, after
 	if value < 0 || (mode != "override" && value == 0) {
 		return 0, 0, errors.New("quota adjustment must be positive or a non-negative override")
 	}
+	var oldUserQuota int
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		if err := syncMoziaLegacyBalanceForUserTx(tx, userId); err != nil {
+			return err
+		}
+		if err := tx.Model(&User{}).Where("id = ?", userId).Select("quota").Scan(&oldUserQuota).Error; err != nil {
 			return err
 		}
 		var balances []MoziaWalletBalance
@@ -650,9 +654,9 @@ func AdjustMoziaUserQuota(userId int, mode string, value int) (before int, after
 		return nil
 	})
 	if err == nil {
-		if cacheErr := InvalidateUserCache(userId); cacheErr != nil {
-			common.SysLog(fmt.Sprintf("failed to invalidate user quota cache for user %d: %s", userId, cacheErr))
-		}
+		// Keep pending consumption/refund increments commutative; deleting the cache
+		// could rebuild from the committed balance before those increments arrive.
+		updateMoziaUserQuotaCache(userId, after-oldUserQuota)
 	}
 	return before, after, err
 }
