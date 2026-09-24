@@ -222,7 +222,11 @@ func callAnalyticsJSONValue(path string, dialect common.DatabaseType) string {
 	case common.DatabaseTypeClickHouse:
 		return "JSONExtractRaw(other, '" + strings.Join(parts, "', '") + "')"
 	case common.DatabaseTypePostgreSQL:
-		return "(COALESCE(NULLIF(other, ''), '{}')::jsonb #> '{" + strings.Join(parts, ",") + "}')"
+		// PostgreSQL rejects JSON NUL escapes even in fields excluded from the
+		// projection. Drop only real NUL escapes, preserving paired backslashes
+		// (literal \u0000) and valid Unicode; the pattern has no GORM placeholders.
+		other := `regexp_replace(COALESCE(NULLIF(other, ''), '{}'), '(\\\\)|\\u0000', '\1', 'g')`
+		return "(" + other + "::jsonb #> '{" + strings.Join(parts, ",") + "}')"
 	case common.DatabaseTypeMySQL:
 		return "JSON_EXTRACT(IF(JSON_VALID(other), other, '{}'), '$." + path + "')"
 	default:
@@ -284,7 +288,7 @@ func GetCallAnalytics(ctx context.Context, filter CallAnalyticsFilter) (*CallAna
 		var expr string
 		switch dialect {
 		case common.DatabaseTypePostgreSQL:
-			expr = "COALESCE(NULLIF(other, ''), '{}')::jsonb #>> '{requested_model}' = ? OR COALESCE(NULLIF(other, ''), '{}')::jsonb #>> '{admin_info,requested_model}' = ?"
+			expr = callAnalyticsJSONValue("requested_model", dialect) + " #>> '{}' = ? OR " + callAnalyticsJSONValue("admin_info.requested_model", dialect) + " #>> '{}' = ?"
 		case common.DatabaseTypeClickHouse:
 			expr = "JSONExtractString(other, 'requested_model') = ? OR JSONExtractString(other, 'admin_info', 'requested_model') = ?"
 		case common.DatabaseTypeMySQL:
