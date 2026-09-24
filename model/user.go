@@ -576,7 +576,8 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 	}
 	newUser := *user
 	tx.First(&user, user.Id)
-	if err = tx.Model(user).Updates(newUser).Error; err != nil {
+	// Profile/status writes must not restore a stale balance read before a wallet change.
+	if err = tx.Model(user).Omit("quota").Updates(newUser).Error; err != nil {
 		return err
 	}
 	return nil
