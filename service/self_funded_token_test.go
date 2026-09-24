@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -185,4 +186,23 @@ func TestSelfFundedToken_PostConsumeQuotaSkipsWallet(t *testing.T) {
 	require.NoError(t, PostConsumeQuota(info, 400, 0, false))
 	assert.Equal(t, 600, getTokenRemainQuota(t, 9007))
 	assert.Equal(t, 0, getUserQuota(t, 907), "钱包不动")
+}
+
+// 验收 ISSUE-BENEFIT-01：模型配了「只允许 gift/paid 钱包来源」的配额策略，钱包为 0 的用户
+// 拿足额权益包 key 调该模型被 403。策略约束的是钱包来源，自带资金的 key 不该被它拦。
+func TestSelfFundedToken_BypassesWalletSourcePolicy(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+	seedUser(t, 909, 0)
+	require.NoError(t, model.CreateMoziaModelQuotaPolicy(&model.MoziaModelQuotaPolicy{
+		ModelPattern: "paid-only-model", MatchType: model.MoziaQuotaPolicyMatchExact,
+		AllowedSources: "gift,paid", ConsumeOrder: model.MoziaQuotaPolicyConsumePaidFirst, Enabled: true,
+	}))
+
+	plain := testGinContext()
+	require.NotNil(t, EnforceMoziaQuotaPolicy(plain, 909, "paid-only-model"), "普通 key 钱包为 0 仍被策略拦")
+
+	funded := testGinContext()
+	funded.Set(string(constant.ContextKeyTokenSelfFunded), true)
+	assert.Nil(t, EnforceMoziaQuotaPolicy(funded, 909, "paid-only-model"), "自带资金的 key 不受钱包来源策略约束")
 }

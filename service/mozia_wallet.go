@@ -3,6 +3,8 @@ package service
 import (
 	"errors"
 	"fmt"
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/model"
@@ -12,6 +14,11 @@ import (
 
 func EnforceMoziaQuotaPolicy(c *gin.Context, userId int, modelName string) *types.NewAPIError {
 	if userId == 0 || modelName == "" {
+		return nil
+	}
+	// 模型配额策略约束的是「钱包里哪种来源的额度能用这个模型」。自带资金的 key 不走钱包，
+	// 钱包为 0 是它的常态；它能用哪些模型由 key 自身的 model_limits 决定，这里直接放行。
+	if common.GetContextKeyBool(c, constant.ContextKeyTokenSelfFunded) {
 		return nil
 	}
 	err := model.CheckMoziaQuotaPolicyAccess(userId, modelName)
