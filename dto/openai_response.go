@@ -227,6 +227,7 @@ type Usage struct {
 	PromptCacheHitTokens int    `json:"prompt_cache_hit_tokens,omitempty"`
 	UsageSemantic        string `json:"usage_semantic,omitempty"`
 	UsageSource          string `json:"usage_source,omitempty"`
+	CacheUsageReported   bool   `json:"-"`
 
 	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details"`
 	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details"`
@@ -338,16 +339,17 @@ type IncompleteDetails struct {
 }
 
 type ResponsesOutput struct {
-	Type      string                   `json:"type"`
-	ID        string                   `json:"id"`
-	Status    string                   `json:"status"`
-	Role      string                   `json:"role"`
-	Content   []ResponsesOutputContent `json:"content"`
-	Quality   string                   `json:"quality"`
-	Size      string                   `json:"size"`
-	CallId    string                   `json:"call_id,omitempty"`
-	Name      string                   `json:"name,omitempty"`
-	Arguments json.RawMessage          `json:"arguments,omitempty"`
+	Type      string                          `json:"type"`
+	ID        string                          `json:"id"`
+	Status    string                          `json:"status"`
+	Role      string                          `json:"role"`
+	Content   []ResponsesOutputContent        `json:"content"`
+	Summary   []ResponsesReasoningSummaryPart `json:"summary,omitempty"`
+	Quality   string                          `json:"quality"`
+	Size      string                          `json:"size"`
+	CallId    string                          `json:"call_id,omitempty"`
+	Name      string                          `json:"name,omitempty"`
+	Arguments json.RawMessage                 `json:"arguments,omitempty"`
 }
 
 // ArgumentsString returns function call arguments in the string form expected by Chat Completions.
@@ -390,17 +392,21 @@ const (
 
 // ResponsesStreamResponse 用于处理 /v1/responses 流式响应
 type ResponsesStreamResponse struct {
-	Type     string                   `json:"type"`
-	Response *OpenAIResponsesResponse `json:"response,omitempty"`
-	Delta    string                   `json:"delta,omitempty"`
-	Item     *ResponsesOutput         `json:"item,omitempty"`
+	Text           *string                  `json:"text,omitempty"`
+	Arguments      *string                  `json:"arguments,omitempty"`
+	Name           string                   `json:"name,omitempty"`
+	SequenceNumber *int                     `json:"sequence_number,omitempty"`
+	Type           string                   `json:"type"`
+	Response       *OpenAIResponsesResponse `json:"response,omitempty"`
+	Delta          string                   `json:"delta,omitempty"`
+	Item           *ResponsesOutput         `json:"item,omitempty"`
 	// - response.function_call_arguments.delta
 	// - response.function_call_arguments.done
-	OutputIndex  *int                           `json:"output_index,omitempty"`
-	ContentIndex *int                           `json:"content_index,omitempty"`
-	SummaryIndex *int                           `json:"summary_index,omitempty"`
-	ItemID       string                         `json:"item_id,omitempty"`
-	Part         *ResponsesReasoningSummaryPart `json:"part,omitempty"`
+	OutputIndex  *int   `json:"output_index,omitempty"`
+	ContentIndex *int   `json:"content_index,omitempty"`
+	SummaryIndex *int   `json:"summary_index,omitempty"`
+	ItemID       string `json:"item_id,omitempty"`
+	Part         any    `json:"part,omitempty"`
 }
 
 // GetOpenAIError 从动态错误类型中提取OpenAIError结构

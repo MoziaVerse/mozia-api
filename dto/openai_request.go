@@ -141,9 +141,16 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		tokenCountMeta.MaxTokens = int(maxTokens)
 	}
 
+	var dynamicTools []ToolCallRequest
 	for _, message := range r.Messages {
 		tokenCountMeta.MessagesCount++
 		texts = append(texts, message.Role)
+		if len(message.Tools) > 0 {
+			var messageTools []ToolCallRequest
+			if err := common.Unmarshal(message.Tools, &messageTools); err == nil {
+				dynamicTools = append(dynamicTools, messageTools...)
+			}
+		}
 		if message.Content != nil {
 			if message.Name != nil {
 				tokenCountMeta.NameCount++
@@ -175,8 +182,8 @@ func (r *GeneralOpenAIRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		}
 	}
 
-	if r.Tools != nil {
-		openaiTools := r.Tools
+	if len(r.Tools) > 0 || len(dynamicTools) > 0 {
+		openaiTools := append(dynamicTools, r.Tools...)
 		for _, tool := range openaiTools {
 			tokenCountMeta.ToolsCount++
 			texts = append(texts, tool.Function.Name)
@@ -244,6 +251,7 @@ type ToolCallRequest struct {
 }
 
 type FunctionRequest struct {
+	Strict      *bool  `json:"strict,omitempty"`
 	Description string `json:"description,omitempty"`
 	Name        string `json:"name"`
 	Parameters  any    `json:"parameters,omitempty"`
@@ -293,8 +301,44 @@ type Message struct {
 	Reasoning        *string         `json:"reasoning,omitempty"`
 	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
 	ToolCallId       string          `json:"tool_call_id,omitempty"`
-	parsedContent    []MediaContent
+	// Kimi K3 can declare tools on a system message during a conversation.
+	Tools         json.RawMessage `json:"tools,omitempty"`
+	parsedContent []MediaContent
 	//parsedStringContent *string
+}
+
+func (r GeneralOpenAIRequest) MarshalJSON() ([]byte, error) {
+	type Alias GeneralOpenAIRequest
+	hasToolLoadingMessage := false
+	for _, message := range r.Messages {
+		if len(message.Tools) > 0 && message.Content == nil {
+			hasToolLoadingMessage = true
+			break
+		}
+	}
+	if !hasToolLoadingMessage {
+		return common.Marshal((*Alias)(&r))
+	}
+
+	// Kimi K3 dynamic tool loading: a system message that carries tools must not
+	// carry a content key at all, otherwise the upstream rejects it. Only those
+	// messages drop the key; every other message keeps emitting "content": null.
+	type toolLoadingMessage struct {
+		Message
+		Content any `json:"content,omitempty"`
+	}
+	messages := make([]any, len(r.Messages))
+	for i, message := range r.Messages {
+		if len(message.Tools) > 0 && message.Content == nil {
+			messages[i] = toolLoadingMessage{Message: message}
+		} else {
+			messages[i] = message
+		}
+	}
+	return common.Marshal(struct {
+		*Alias
+		Messages []any `json:"messages,omitempty"`
+	}{Alias: (*Alias)(&r), Messages: messages})
 }
 
 type MediaContent struct {
@@ -571,6 +615,9 @@ func (m *Message) ParseContent() []MediaContent {
 	// 尝试解析为数组
 	//var arrayContent []map[string]interface{}
 
+	if content, ok := m.Content.([]MediaContent); ok {
+		return content
+	}
 	arrayContent, ok := m.Content.([]any)
 	if !ok {
 		return contentList
@@ -592,6 +639,7 @@ func (m *Message) ParseContent() []MediaContent {
 			continue
 		}
 
+		previousLen := len(contentList)
 		switch contentType {
 		case ContentTypeText:
 			if text, ok := contentItem["text"].(string); ok {
@@ -675,6 +723,9 @@ func (m *Message) ParseContent() []MediaContent {
 				Type:     ContentTypeVideoUrl,
 				VideoUrl: &MessageVideoUrl{Url: url},
 			})
+		}
+		if len(contentList) > previousLen && contentItem["cache_control"] != nil {
+			contentList[len(contentList)-1].CacheControl, _ = common.Marshal(contentItem["cache_control"])
 		}
 	}
 

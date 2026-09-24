@@ -13,23 +13,26 @@ import (
 )
 
 type Token struct {
-	Id                 int            `json:"id"`
-	UserId             int            `json:"user_id" gorm:"index"`
-	Key                string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
-	Status             int            `json:"status" gorm:"default:1"`
-	Name               string         `json:"name" gorm:"index" `
-	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
-	AccessedTime       int64          `json:"accessed_time" gorm:"bigint"`
-	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
-	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
-	UnlimitedQuota     bool           `json:"unlimited_quota"`
-	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
-	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
-	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
-	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
-	Group              string         `json:"group" gorm:"default:''"`
-	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	Id                 int     `json:"id"`
+	UserId             int     `json:"user_id" gorm:"index"`
+	Key                string  `json:"key" gorm:"type:varchar(128);uniqueIndex"`
+	Status             int     `json:"status" gorm:"default:1"`
+	Name               string  `json:"name" gorm:"index" `
+	CreatedTime        int64   `json:"created_time" gorm:"bigint"`
+	AccessedTime       int64   `json:"accessed_time" gorm:"bigint"`
+	ExpiredTime        int64   `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
+	RemainQuota        int     `json:"remain_quota" gorm:"default:0"`
+	UnlimitedQuota     bool    `json:"unlimited_quota"`
+	ModelLimitsEnabled bool    `json:"model_limits_enabled"`
+	ModelLimits        string  `json:"model_limits" gorm:"type:text"`
+	AllowIps           *string `json:"allow_ips" gorm:"default:''"`
+	UsedQuota          int     `json:"used_quota" gorm:"default:0"` // used quota
+	Group              string  `json:"group" gorm:"default:''"`
+	CrossGroupRetry    bool    `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	// SelfFunded：key 自带资金。remain_quota 即余额，扣费只减 key、不动钱包/订阅，用完即止。
+	// 权益包 / 兑换码类商品的承载方式。只能由管理端（SSO 桥）签发，用户侧不能创建或改额度。
+	SelfFunded bool           `json:"self_funded" gorm:"default:false"`
+	DeletedAt  gorm.DeletedAt `gorm:"index"`
 }
 
 func (token *Token) Clean() {
@@ -307,6 +310,32 @@ func (token *Token) Update() (err error) {
 	return err
 }
 
+// UpdateColumns 只写明确指定的列，写完用数据库最新行回填自身并刷新缓存。
+// 改名 / 启停 / 权益调整必须走这里：Update() 会把读取时的 remain_quota 整行回写，
+// 覆盖两次读写之间发生的原子扣减（已消费的余额被恢复）。
+func (token *Token) UpdateColumns(columns ...string) error {
+	if len(columns) == 0 {
+		return errors.New("no columns to update")
+	}
+	if err := DB.Model(&Token{}).Where("id = ?", token.Id).Select(columns).Updates(token).Error; err != nil {
+		return err
+	}
+	fresh, err := GetTokenById(token.Id)
+	if err != nil {
+		return err
+	}
+	*token = *fresh
+	if common.RedisEnabled {
+		snapshot := *fresh
+		gopool.Go(func() {
+			if err := cacheSetToken(snapshot); err != nil {
+				common.SysLog("failed to update token cache: " + err.Error())
+			}
+		})
+	}
+	return nil
+}
+
 // UpdateGroup preserves quota and all other token settings, including concurrent usage.
 func (token *Token) UpdateGroup(group string) (cacheInvalidated bool, err error) {
 	if token.Group != group {
@@ -404,6 +433,20 @@ func DeleteTokenById(id int, userId int) (err error) {
 	return token.Delete()
 }
 
+// RevokeSelfFundedToken acknowledges retries for the same owner's soft-deleted
+// funded token, so callers can finish their local revocation after a lost response.
+func RevokeSelfFundedToken(id int, userId int) error {
+	if id <= 0 || userId <= 0 {
+		return errors.New("id 或 userId 无效")
+	}
+	var token Token
+	if err := DB.Unscoped().Where("id = ? AND user_id = ? AND self_funded = ?", id, userId, true).
+		First(&token).Error; err != nil {
+		return err
+	}
+	return token.Delete()
+}
+
 func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
@@ -451,6 +494,39 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 		return nil
 	}
 	return decreaseTokenQuota(id, quota)
+}
+
+// ErrTokenQuotaInsufficient 表示条件扣减未命中：余额不足（或令牌不是自带资金）。
+var ErrTokenQuotaInsufficient = errors.New("token quota is not enough")
+
+// DecreaseSelfFundedTokenQuota 对自带资金的令牌做原子条件扣减：
+// UPDATE ... WHERE remain_quota >= quota，两笔并发请求只能有一笔成功，余额不会被扣成负数。
+// 不走批量延迟更新（那会让"余额足够"的判断与真正扣减分离，正是并发超扣的根源）。
+func DecreaseSelfFundedTokenQuota(id int, key string, quota int) error {
+	if quota < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	res := DB.Model(&Token{}).
+		Where("id = ? AND self_funded = ? AND remain_quota >= ?", id, true, quota).
+		Updates(map[string]interface{}{
+			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+			"used_quota":    gorm.Expr("used_quota + ?", quota),
+			"accessed_time": common.GetTimestamp(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrTokenQuotaInsufficient
+	}
+	if common.RedisEnabled {
+		gopool.Go(func() {
+			if err := cacheDecrTokenQuota(key, int64(quota)); err != nil {
+				common.SysLog("failed to decrease token quota: " + err.Error())
+			}
+		})
+	}
+	return nil
 }
 
 func decreaseTokenQuota(id int, quota int) (err error) {

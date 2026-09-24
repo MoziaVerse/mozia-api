@@ -266,8 +266,17 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		}
 	}
 	info.PriceData = priceData
-	if apiErr := service.EnforceMoziaQuotaPolicy(info.UserId, info.OriginModelName); apiErr != nil {
+	if apiErr := service.EnforceMoziaQuotaPolicy(c, info.UserId, info.OriginModelName); apiErr != nil {
 		return nil, service.TaskErrorFromAPIError(apiErr)
+	}
+	// 4.5 并发 / 排队 / 频率限制：在预扣费与创建上游任务之前，被拦的请求不产生上游成本。
+	if info.Billing == nil { // 仅首次尝试；重试时上游任务已在创建中
+		if limitErr := service.CheckTaskSubmitLimit(c, info.UserId, info.UserGroup, info.TokenGroup, info.OriginModelName); limitErr != nil {
+			if d, ok := limitErr.Data.(*service.TaskLimitDecision); ok && d.RetryAfter > 0 {
+				c.Header("Retry-After", strconv.Itoa(d.RetryAfter))
+			}
+			return nil, limitErr
+		}
 	}
 
 	// 5. 显式固定任务计费优先；未配置时保持 adaptor 的既有估算语义。

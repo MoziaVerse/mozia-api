@@ -233,5 +233,6 @@ func TaskErrorFromAPIError(apiErr *types.NewAPIError) *dto.TaskError {
 		Message:    apiErr.Err.Error(),
 		StatusCode: apiErr.StatusCode,
 		Error:      apiErr.Err,
+		LocalError: types.IsLocalQuotaError(apiErr),
 	}
 }

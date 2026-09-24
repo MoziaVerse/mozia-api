@@ -1008,7 +1008,7 @@ type ManageRequest struct {
 // ManageUser Only admin user can do this
 func ManageUser(c *gin.Context) {
 	var req ManageRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&req)
+	err := common.DecodeJson(c.Request.Body, &req)
 
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
@@ -1083,45 +1083,23 @@ func ManageUser(c *gin.Context) {
 		}
 		user.Role = common.RoleCommonUser
 	case "add_quota":
-		switch req.Mode {
-		case "add":
-			if req.Value <= 0 {
-				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
-				return
-			}
-			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
-				common.ApiError(c, err)
-				return
-			}
-			recordManageAuditFor(c, user.Id, "user.quota_add", map[string]interface{}{
-				"quota": logger.LogQuota(req.Value),
-			})
-		case "subtract":
-			if req.Value <= 0 {
-				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
-				return
-			}
-			if err := model.DecreaseUserQuota(user.Id, req.Value, true); err != nil {
-				common.ApiError(c, err)
-				return
-			}
-			recordManageAuditFor(c, user.Id, "user.quota_subtract", map[string]interface{}{
-				"quota": logger.LogQuota(req.Value),
-			})
-		case "override":
-			oldQuota := user.Quota
-			if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
-				common.ApiError(c, err)
-				return
-			}
-			recordManageAuditFor(c, user.Id, "user.quota_override", map[string]interface{}{
-				"from": logger.LogQuota(oldQuota),
-				"to":   logger.LogQuota(req.Value),
-			})
-		default:
-			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		if (req.Mode == "add" || req.Mode == "subtract") && req.Value <= 0 {
+			common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 			return
 		}
+		before, after, err := model.AdjustMoziaUserQuota(user.Id, req.Mode, req.Value)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		params := map[string]interface{}{"quota": logger.LogQuota(req.Value)}
+		if req.Mode == "override" {
+			params = map[string]interface{}{
+				"from": logger.LogQuota(before),
+				"to":   logger.LogQuota(after),
+			}
+		}
+		recordManageAuditFor(c, user.Id, "user.quota_"+req.Mode, params)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",

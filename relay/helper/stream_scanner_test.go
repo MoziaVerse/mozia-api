@@ -321,6 +321,7 @@ func TestStreamScannerHandler_StreamStatus_DoneReason(t *testing.T) {
 	assert.Nil(t, info.StreamStatus.EndError)
 	assert.True(t, info.StreamStatus.IsNormalEnd())
 	assert.False(t, info.StreamStatus.HasErrors())
+	assert.False(t, info.StreamEndTime.IsZero(), "completed scanner must publish timing for usage logs")
 }
 
 func TestStreamScannerHandler_StreamStatus_EOFWithoutDone(t *testing.T) {

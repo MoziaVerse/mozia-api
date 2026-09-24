@@ -48,6 +48,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	// 无条件新建 StreamStatus
 	info.StreamStatus = relaycommon.NewStreamStatus()
+	info.StreamEndTime = time.Time{}
 
 	// 确保响应体总是被关闭
 	defer func() {
@@ -59,12 +60,13 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
 
 	var (
-		stopChan   = make(chan bool, 3) // 增加缓冲区避免阻塞
-		scanner    = NewStreamScanner(resp.Body)
-		ticker     = time.NewTicker(streamingTimeout)
-		pingTicker *time.Ticker
-		writeMutex sync.Mutex     // Mutex to protect concurrent writes
-		wg         sync.WaitGroup // 用于等待所有 goroutine 退出
+		streamEndTime time.Time            // Published only after the scanner goroutine has exited.
+		stopChan      = make(chan bool, 3) // 增加缓冲区避免阻塞
+		scanner       = NewStreamScanner(resp.Body)
+		ticker        = time.NewTicker(streamingTimeout)
+		pingTicker    *time.Ticker
+		writeMutex    sync.Mutex     // Mutex to protect concurrent writes
+		wg            sync.WaitGroup // 用于等待所有 goroutine 退出
 	)
 
 	generalSettings := operation_setting.GetGeneralSetting()
@@ -103,6 +105,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 		select {
 		case <-done:
+			info.StreamEndTime = streamEndTime
 			if info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
 				logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
 			} else {
@@ -214,6 +217,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	wg.Add(1)
 	common.RelayCtxGo(ctx, func() {
 		defer func() {
+			streamEndTime = time.Now()
 			close(dataChan)
 			defer wg.Done()
 			if r := recover(); r != nil {

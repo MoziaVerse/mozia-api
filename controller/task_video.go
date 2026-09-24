@@ -34,15 +34,10 @@ func updateVideoTaskAll(ctx context.Context, platform constant.TaskPlatform, cha
 	}
 	cacheGetChannel, err := model.CacheGetChannel(channelId)
 	if err != nil {
-		errUpdate := model.TaskBulkUpdate(taskIds, map[string]any{
-			"fail_reason": fmt.Sprintf("Failed to get channel info, channel ID: %d", channelId),
-			"status":      "FAILURE",
-			"progress":    "100%",
-		})
-		if errUpdate != nil {
-			common.SysLog(fmt.Sprintf("UpdateVideoTask error: %v", errUpdate))
-		}
-		return fmt.Errorf("CacheGetChannel failed: %w", err)
+		// 查不到 channel 多半是瞬时故障（DB 抖动、缓存刷新失败），不能据此判任务失败——
+		// 这条路径不走退款，2026-09-19 pg 崩 3 分钟就把 104 个任务标成 FAILURE 且没退钱。
+		// 跳过本轮，任务留在 pending，下一轮再查；真的拿不到结果由任务超时兜底（超时会退款）。
+		return fmt.Errorf("CacheGetChannel failed, skip this round: %w", err)
 	}
 	adaptor := relay.GetTaskAdaptor(platform)
 	if adaptor == nil {

@@ -3,6 +3,7 @@ package relayconvert
 import (
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -113,6 +114,36 @@ func TestResponsesResponseToChatCompletionsPreservesReasoningSummary(t *testing.
 	require.NoError(t, err)
 	assert.Equal(t, "first summary\n\nsecond summary", chat.Choices[0].Message.GetReasoningContent())
 	assert.Equal(t, "final", chat.Choices[0].Message.StringContent())
+
+	// Current Responses uses summary; retain the legacy content read above.
+	resp.Output[0].Summary = []dto.ResponsesReasoningSummaryPart{{Type: "summary_text", Text: "current summary"}}
+	chat, _, err = ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_1")
+	require.NoError(t, err)
+	assert.Equal(t, "current summary", chat.Choices[0].Message.GetReasoningContent())
+	roundTrip, _, err := ChatCompletionsResponseToResponsesResponse(chat, "resp_roundtrip")
+	require.NoError(t, err)
+	body, err := common.Marshal(roundTrip)
+	require.NoError(t, err)
+	assert.Equal(t, "current summary", gjson.GetBytes(body, "output.0.summary.0.text").String())
+	assert.Equal(t, "final", gjson.GetBytes(body, "output.1.content.0.text").String())
+}
+
+func TestChatResponsesToolStrictRoundTrip(t *testing.T) {
+	for _, strict := range []*bool{nil, lo.ToPtr(false), lo.ToPtr(true)} {
+		request := &dto.GeneralOpenAIRequest{
+			Model: "model", Messages: []dto.Message{{Role: "user", Content: "read"}},
+			Tools: []dto.ToolCallRequest{{Type: "function", Function: dto.FunctionRequest{Name: "read", Parameters: map[string]any{"type": "object"}, Strict: strict}}},
+		}
+		responses, err := ChatCompletionsRequestToResponsesRequest(request)
+		require.NoError(t, err)
+		body, err := common.Marshal(responses)
+		require.NoError(t, err)
+		assert.Equal(t, strict != nil, gjson.GetBytes(body, "tools.0.strict").Exists())
+		converted, err := ResponsesRequestToChatCompletionsRequest(responses)
+		require.NoError(t, err)
+		require.Len(t, converted.Tools, 1)
+		assert.Equal(t, strict, converted.Tools[0].Function.Strict)
+	}
 }
 
 func TestResponsesFinishReasonFromIncompleteStatus(t *testing.T) {
@@ -522,18 +553,31 @@ func TestChatCompletionsStreamToResponsesEventsAggregatesUsageAndToolArgs(t *tes
 	})...)
 	events = append(events, FinalizeChatCompletionsStreamToResponses(state)...)
 
-	require.Len(t, events, 10)
-	assert.Equal(t, responsesEventCreated, events[0].Type)
-	assert.Equal(t, responsesEventOutputTextDelta, events[2].Type)
-	assert.Equal(t, "hello", events[2].Payload.Delta)
-	assert.Equal(t, responsesEventFunctionArgsDelta, events[4].Type)
-	assert.Equal(t, `{"q":"x"}`, events[4].Payload.Delta)
-	assert.Equal(t, responsesEventCompleted, events[9].Type)
-	require.NotNil(t, events[9].Payload.Response)
-	assert.Equal(t, 6, events[9].Payload.Response.Usage.TotalTokens)
-	require.Len(t, events[9].Payload.Response.Output, 2)
-	assert.Equal(t, "hello", events[9].Payload.Response.Output[0].Content[0].Text)
-	assert.Equal(t, `"{\"q\":\"x\"}"`, string(events[9].Payload.Response.Output[1].Arguments))
+	wantTypes := []string{
+		responsesEventCreated, responsesEventOutputItemAdded, "response.content_part.added",
+		responsesEventOutputTextDelta, responsesEventOutputItemAdded, responsesEventFunctionArgsDelta,
+		"response.output_text.done", "response.content_part.done", responsesEventOutputItemDone,
+		responsesEventFunctionArgsDone, responsesEventOutputItemDone, responsesEventCompleted,
+	}
+	require.Len(t, events, len(wantTypes))
+	for i, event := range events {
+		assert.Equal(t, wantTypes[i], event.Type)
+		require.NotNil(t, event.Payload.SequenceNumber)
+		assert.Equal(t, i, *event.Payload.SequenceNumber)
+	}
+	assert.Equal(t, "hello", events[3].Payload.Delta)
+	assert.Equal(t, `{"q":"x"}`, events[5].Payload.Delta)
+	require.NotNil(t, events[6].Payload.Text)
+	assert.Equal(t, "hello", *events[6].Payload.Text)
+	require.NotNil(t, events[9].Payload.Arguments)
+	assert.Equal(t, `{"q":"x"}`, *events[9].Payload.Arguments)
+	assert.Equal(t, "lookup", events[9].Payload.Name)
+	final := events[len(events)-1].Payload.Response
+	require.NotNil(t, final)
+	assert.Equal(t, 6, final.Usage.TotalTokens)
+	require.Len(t, final.Output, 2)
+	assert.Equal(t, "hello", final.Output[0].Content[0].Text)
+	assert.Equal(t, `{"q":"x"}`, final.Output[1].ArgumentsString())
 }
 
 func assistantMessageWithTool(content string, id string, name string, args string) dto.Message {

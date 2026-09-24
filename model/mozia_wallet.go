@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -59,7 +60,7 @@ type MoziaWalletBalance struct {
 }
 
 // MoziaWalletTransaction is a sidecar ledger for Mozia quota source accounting.
-// It intentionally does not replace logs; logs stay user-facing, this is audit data.
+// It does not replace usage logs. Customer history exposes only a safe projection.
 type MoziaWalletTransaction struct {
 	Id            int    `json:"id"`
 	UserId        int    `json:"user_id" gorm:"index;not null"`
@@ -122,6 +123,7 @@ type MoziaWalletAdjustInput struct {
 	Delta         *int
 	TargetBalance *int
 	Reason        string
+	PublicNote    string
 }
 
 type MoziaWalletView struct {
@@ -493,82 +495,22 @@ func AdjustMoziaWalletBalance(input MoziaWalletAdjustInput) (*MoziaWalletView, e
 	if input.UserId == 0 {
 		return nil, errors.New("user id is empty")
 	}
+	input.PublicNote = strings.TrimSpace(input.PublicNote)
+	if utf8.RuneCountInString(input.PublicNote) > 500 {
+		return nil, errors.New("public_note must not exceed 500 characters")
+	}
 	source, err := normalizeMoziaWalletSource(input.Source)
 	if err != nil {
 		return nil, err
 	}
+	input.Source = source
 	var delta int
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		var user User
-		if err := tx.Select("id").Where("id = ?", input.UserId).First(&user).Error; err != nil {
-			return err
-		}
 		if err := syncMoziaLegacyBalanceForUserTx(tx, input.UserId); err != nil {
 			return err
 		}
-		if err := ensureMoziaWalletBalanceTx(tx, input.UserId, source); err != nil {
-			return err
-		}
-		currentBalance, err := getMoziaWalletBalanceTx(tx, input.UserId, source)
-		if err != nil {
-			return err
-		}
-		if input.TargetBalance != nil {
-			if *input.TargetBalance < 0 {
-				return errors.New("target balance must be non-negative")
-			}
-			delta = *input.TargetBalance - currentBalance
-		} else if input.Delta != nil {
-			delta = *input.Delta
-		} else {
-			return errors.New("delta or target_balance is required")
-		}
-		if delta == 0 {
-			return nil
-		}
-		now := common.GetTimestamp()
-		query := tx.Model(&MoziaWalletBalance{}).
-			Where("user_id = ? AND source = ?", input.UserId, source)
-		if delta < 0 {
-			query = query.Where("balance >= ?", -delta)
-		}
-		res := query.Updates(map[string]interface{}{
-			"balance":      gorm.Expr("balance + ?", delta),
-			"updated_time": now,
-		})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return ErrMoziaWalletInsufficient
-		}
-		userQuery := tx.Model(&User{}).Where("id = ?", input.UserId)
-		if delta < 0 {
-			userQuery = userQuery.Where("quota >= ?", -delta)
-		}
-		res = userQuery.Update("quota", gorm.Expr("quota + ?", delta))
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return ErrMoziaWalletInsufficient
-		}
-		balanceAfter := currentBalance + delta
-		amount := delta
-		if amount < 0 {
-			amount = -amount
-		}
-		return createMoziaWalletTransactionTx(tx, MoziaWalletGrantInput{
-			UserId:        input.UserId,
-			Source:        source,
-			Amount:        amount,
-			EventType:     MoziaWalletEventAdjust,
-			ReferenceType: "admin_adjust",
-			ReferenceId:   strings.TrimSpace(input.Reason),
-			Metadata: map[string]interface{}{
-				"reason": strings.TrimSpace(input.Reason),
-			},
-		}, delta, balanceAfter)
+		delta, err = adjustMoziaWalletBalanceTx(tx, input)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -577,6 +519,146 @@ func AdjustMoziaWalletBalance(input MoziaWalletAdjustInput) (*MoziaWalletView, e
 		updateMoziaUserQuotaCache(input.UserId, delta)
 	}
 	return GetMoziaWalletView(input.UserId)
+}
+
+// adjustMoziaWalletBalanceTx requires the user's wallet lock and a synchronized quota mirror.
+func adjustMoziaWalletBalanceTx(tx *gorm.DB, input MoziaWalletAdjustInput) (int, error) {
+	if err := ensureMoziaWalletBalanceTx(tx, input.UserId, input.Source); err != nil {
+		return 0, err
+	}
+	currentBalance, err := getMoziaWalletBalanceTx(tx, input.UserId, input.Source)
+	if err != nil {
+		return 0, err
+	}
+	var delta int
+	if input.TargetBalance != nil {
+		if *input.TargetBalance < 0 {
+			return 0, errors.New("target balance must be non-negative")
+		}
+		delta = *input.TargetBalance - currentBalance
+	} else if input.Delta != nil {
+		delta = *input.Delta
+	} else {
+		return 0, errors.New("delta or target_balance is required")
+	}
+	if delta == 0 {
+		return 0, nil
+	}
+	query := tx.Model(&MoziaWalletBalance{}).
+		Where("user_id = ? AND source = ?", input.UserId, input.Source)
+	if delta < 0 {
+		query = query.Where("balance >= ?", -delta)
+	}
+	res := query.Updates(map[string]interface{}{
+		"balance":      gorm.Expr("balance + ?", delta),
+		"updated_time": common.GetTimestamp(),
+	})
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return 0, ErrMoziaWalletInsufficient
+	}
+	userQuery := tx.Model(&User{}).Where("id = ?", input.UserId)
+	if delta < 0 {
+		userQuery = userQuery.Where("quota >= ?", -delta)
+	}
+	res = userQuery.Update("quota", gorm.Expr("quota + ?", delta))
+	if res.Error != nil {
+		return 0, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return 0, ErrMoziaWalletInsufficient
+	}
+	err = createMoziaWalletTransactionTx(tx, MoziaWalletGrantInput{
+		UserId:        input.UserId,
+		Source:        input.Source,
+		EventType:     MoziaWalletEventAdjust,
+		ReferenceType: "admin_adjust",
+		ReferenceId:   strings.TrimSpace(input.Reason),
+		Metadata: map[string]interface{}{
+			"reason":      strings.TrimSpace(input.Reason),
+			"public_note": input.PublicNote,
+		},
+	}, delta, currentBalance+delta)
+	return delta, err
+}
+
+// AdjustMoziaUserQuota keeps the generic admin quota control on the source ledger.
+// Unclassified credits retain legacy semantics; debits use the default gift-first order.
+func AdjustMoziaUserQuota(userId int, mode string, value int) (before int, after int, err error) {
+	if mode != "add" && mode != "subtract" && mode != "override" {
+		return 0, 0, errors.New("invalid quota adjustment mode")
+	}
+	if value < 0 || (mode != "override" && value == 0) {
+		return 0, 0, errors.New("quota adjustment must be positive or a non-negative override")
+	}
+	var oldUserQuota int
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := syncMoziaLegacyBalanceForUserTx(tx, userId); err != nil {
+			return err
+		}
+		if err := tx.Model(&User{}).Where("id = ?", userId).Select("quota").Scan(&oldUserQuota).Error; err != nil {
+			return err
+		}
+		var balances []MoziaWalletBalance
+		if err := tx.Where("user_id = ?", userId).Find(&balances).Error; err != nil {
+			return err
+		}
+		sources := make(map[string]int, len(balances))
+		for _, balance := range balances {
+			before += balance.Balance
+			sources[balance.Source] = balance.Balance
+		}
+		after = value
+		switch mode {
+		case "add":
+			after = before + value
+			if after < before {
+				return errors.New("quota adjustment overflow")
+			}
+		case "subtract":
+			after = before - value
+		}
+		if after < 0 {
+			return ErrMoziaWalletInsufficient
+		}
+		// Repair an old aggregate-only decrease in this explicit admin transaction.
+		// Never reclassify existing source balances or silently repair them on reads.
+		if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", before).Error; err != nil {
+			return err
+		}
+		delta := after - before
+		input := MoziaWalletAdjustInput{UserId: userId, Reason: "user.quota_" + mode}
+		if delta > 0 {
+			input.Source, input.Delta = MoziaWalletSourceLegacy, &delta
+			_, err := adjustMoziaWalletBalanceTx(tx, input)
+			return err
+		}
+		remaining := -delta
+		for _, source := range orderedMoziaSources(moziaDefaultPolicyDecision()) {
+			debit := min(remaining, sources[source])
+			if debit <= 0 {
+				continue
+			}
+			change := -debit
+			input.Source, input.Delta = source, &change
+			if _, err := adjustMoziaWalletBalanceTx(tx, input); err != nil {
+				return err
+			}
+			remaining -= debit
+		}
+		if remaining != 0 {
+			return ErrMoziaWalletInsufficient
+		}
+		return nil
+	})
+	if err == nil {
+		// Keep pending consumption/refund increments commutative; deleting the cache
+		// could rebuild from the committed balance before those increments arrive.
+		updateMoziaUserQuotaCache(userId, after-oldUserQuota)
+	}
+	return before, after, err
 }
 
 func CreateMoziaModelQuotaPolicy(policy *MoziaModelQuotaPolicy) error {

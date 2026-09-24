@@ -277,6 +277,9 @@ func SetApiRouter(router *gin.Engine) {
 		// TODO: remove once the classic frontend is removed; the default frontend uses /system-task/log-cleanup.
 		logRoute.DELETE("/", middleware.RootAuth(), controller.DeleteHistoryLogs)
 		logRoute.GET("/stat", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetLogsStat)
+		logRoute.GET("/analytics", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetCallAnalytics)
+		// Use business report paths so tracking filters do not block the dashboard.
+		logRoute.GET("/call-report", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetCallAnalytics)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.GetChannelAffinityUsageCacheStats)
 		logRoute.GET("/search", middleware.AdminAuth(), middleware.RequirePermission(authz.GeneralAdminAccess), controller.SearchAllLogs)
@@ -395,6 +398,7 @@ func SetSSOApiRouter(router *gin.Engine) {
 	{
 		ssoRouter.GET("/user/self", controller.GetSelf)
 		ssoRouter.GET("/user/wallet", controller.GetSSOMoziaWallet)
+		ssoRouter.GET("/user/wallet/history", controller.GetSSOMoziaWalletHistory)
 		ssoRouter.GET("/user/consumption", controller.GetSSOMoziaConsumption)
 		ssoRouter.POST("/user/topup", controller.SSOTopUp)
 		ssoRouter.POST("/user/redeem", middleware.SSOCriticalRateLimit(), controller.SSORedeem)
@@ -418,6 +422,14 @@ func SetSSOApiRouter(router *gin.Engine) {
 			ssoLogRoute.GET("/self", controller.GetUserLogs)
 			ssoLogRoute.GET("/self/search", middleware.SearchRateLimit(), controller.SearchUserLogs)
 			ssoLogRoute.GET("/self/stat", controller.GetLogsSelfStat)
+		}
+
+		// 自带资金令牌（权益包）的发放 / 调整 / 撤销：SSO 身份之外再过独立密钥
+		fundedTokenRoute := ssoRouter.Group("/funded-token", middleware.SSOFundingAuth())
+		{
+			fundedTokenRoute.POST("/", controller.IssueSelfFundedToken)
+			fundedTokenRoute.PUT("/:id", controller.AdjustSelfFundedToken)
+			fundedTokenRoute.DELETE("/:id", controller.RevokeSelfFundedToken)
 		}
 
 		ssoDataRoute := ssoRouter.Group("/data")
@@ -468,6 +480,18 @@ func SetMoziaManagerRouter(router *gin.Engine) {
 		quotaPolicyRoute.POST("/", middleware.RequirePermission(authz.QuotaPolicyWrite), controller.CreateMoziaQuotaPolicy)
 		quotaPolicyRoute.PUT("/:id", middleware.RequirePermission(authz.QuotaPolicyWrite), controller.UpdateMoziaQuotaPolicy)
 		quotaPolicyRoute.DELETE("/:id", middleware.RequirePermission(authz.QuotaPolicyWrite), controller.DeleteMoziaQuotaPolicy)
+	}
+
+	taskLimitRoute := moziaRouter.Group("/task-limit")
+	taskLimitRoute.Use(middleware.AdminAuth())
+	{
+		taskLimitRoute.GET("/workers", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitWorkers)
+		taskLimitRoute.GET("/overrides", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitOverrides)
+		taskLimitRoute.POST("/overrides", middleware.RequirePermission(authz.TaskLimitWrite), controller.UpsertMoziaTaskLimitOverride)
+		taskLimitRoute.DELETE("/overrides/:user_id", middleware.RequirePermission(authz.TaskLimitWrite), controller.DeleteMoziaTaskLimitOverride)
+		taskLimitRoute.GET("/users/:user_id", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitUserUsage)
+		taskLimitRoute.GET("/sync-clusters", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaTaskLimitSyncClusters)
+		taskLimitRoute.GET("/catalog", middleware.RequirePermission(authz.TaskLimitRead), controller.GetMoziaEntitlementCatalog)
 	}
 
 	userModelRatioRoute := moziaRouter.Group("/user-model-ratio")

@@ -567,3 +567,39 @@ func (t *Task) ToOpenAIVideo() *dto.OpenAIVideo {
 	openAIVideo.SetMetadata("url", t.GetResultURL())
 	return openAIVideo
 }
+
+// GetUnfinishedTasksByChannel returns the non-terminal tasks routed to one
+// channel. Used by the H3 worker probe to reconcile gateway task state with
+// what the worker's audit trail says.
+func GetUnfinishedTasksByChannel(channelId int, limit int) []*Task {
+	var tasks []*Task
+	err := DB.Where("channel_id = ?", channelId).
+		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+		Order("id").
+		Limit(limit).
+		Find(&tasks).Error
+	if err != nil {
+		return nil
+	}
+	return tasks
+}
+
+// MarkTaskStartedByID records the moment a worker actually dequeued the task.
+// It is a guarded UPDATE: only tasks still waiting (SUBMITTED / QUEUED) move to
+// IN_PROGRESS, so it never races a terminal settlement done by the poller.
+// Returns true when this call performed the transition.
+func MarkTaskStartedByID(id int64, startTime int64) (bool, error) {
+	result := DB.Model(&Task{}).
+		Where("id = ?", id).
+		Where("status IN ?", []string{TaskStatusSubmitted, TaskStatusQueued}).
+		Updates(map[string]any{
+			"status":     TaskStatusInProgress,
+			"start_time": startTime,
+			"progress":   "30%",
+			"updated_at": GetDBTimestamp(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}

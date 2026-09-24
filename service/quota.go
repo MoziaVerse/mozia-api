@@ -127,7 +127,8 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return err
 	}
 
-	if userQuota < customerQuota {
+	// 自带资金的 key 钱包可以是 0，资金全在 key 里；真正的扣减在 Billing.Reserve 里原子完成
+	if !relayInfo.TokenSelfFunded && userQuota < customerQuota {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(customerQuota))
 	}
 
@@ -395,6 +396,14 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	//if relayInfo.TokenUnlimited {
 	//	return nil
 	//}
+	if relayInfo.TokenSelfFunded {
+		// 自带资金的令牌余量就是钱：必须数据库原子条件扣减，先读后写会被并发请求同时通过检查
+		err := model.DecreaseSelfFundedTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+		if errors.Is(err, model.ErrTokenQuotaInsufficient) {
+			return fmt.Errorf("token quota is not enough, need quota: %s", logger.FormatQuota(quota))
+		}
+		return err
+	}
 	token, err := model.GetTokenByIds(relayInfo.TokenId, relayInfo.UserId)
 	if err != nil {
 		return err
@@ -412,7 +421,9 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (err error) {
 
 	// 1) Consume from wallet quota OR subscription item
-	if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {
+	if relayInfo != nil && relayInfo.BillingSource == BillingSourceToken {
+		// 自带资金的 key：资金就是令牌额度，下面第 2 步增减令牌即完成结算，不碰钱包 / 订阅
+	} else if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {
 		if relayInfo.SubscriptionId == 0 {
 			return errors.New("subscription id is missing")
 		}

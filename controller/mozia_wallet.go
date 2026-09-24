@@ -25,6 +25,7 @@ type moziaWalletAdjustRequest struct {
 	Delta         *int   `json:"delta"`
 	TargetBalance *int   `json:"target_balance"`
 	Reason        string `json:"reason"`
+	PublicNote    string `json:"public_note" binding:"max=500"`
 }
 
 func (req moziaQuotaPolicyRequest) toModel(id int) model.MoziaModelQuotaPolicy {
@@ -55,6 +56,30 @@ func GetSSOMoziaWallet(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, wallet)
+}
+
+func GetSSOMoziaWalletHistory(c *gin.Context) {
+	userId := c.GetInt("id")
+	if userId <= 0 {
+		common.ApiErrorMsg(c, "SSO 用户未解析")
+		return
+	}
+	beforeId, err := strconv.Atoi(c.DefaultQuery("before", "0"))
+	if err != nil || beforeId < 0 {
+		common.ApiErrorMsg(c, "无效的分页游标")
+		return
+	}
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit < 1 || limit > 50 {
+		common.ApiErrorMsg(c, "limit 必须为 1 到 50 的整数")
+		return
+	}
+	history, err := model.GetMoziaWalletHistory(userId, beforeId, limit)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, history)
 }
 
 // parseMoziaConsumptionRange 解析可选的时间范围(unix 秒)。缺省或非法时按不限处理。
@@ -156,6 +181,7 @@ func AdjustMoziaUserWallet(c *gin.Context) {
 		Delta:         req.Delta,
 		TargetBalance: req.TargetBalance,
 		Reason:        reason,
+		PublicNote:    req.PublicNote,
 	})
 	if err != nil {
 		common.ApiError(c, err)
@@ -176,6 +202,7 @@ func AdjustMoziaUserWallet(c *gin.Context) {
 		"balance_after":         balanceAfter,
 		"balance_after_display": logger.LogQuota(balanceAfter),
 		"reason":                reason,
+		"public_note":           strings.TrimSpace(req.PublicNote),
 	}
 	action := "mozia.wallet_balance_set"
 	if req.Delta != nil {

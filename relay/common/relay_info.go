@@ -93,15 +93,18 @@ type TokenCountMeta struct {
 type RelayInfo struct {
 	SupplierPriceFrozen bool
 
-	TokenId           int
-	TokenKey          string
-	TokenGroup        string
-	UserId            int
-	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
-	UserGroup         string // 用户所在分组
-	TokenUnlimited    bool
+	TokenId        int
+	TokenKey       string
+	TokenGroup     string
+	UserId         int
+	UsingGroup     string // 使用的分组，当auto跨分组重试时，会变动
+	UserGroup      string // 用户所在分组
+	TokenUnlimited bool
+	// key 自带资金：扣费只减 key 余量，不走钱包/订阅
+	TokenSelfFunded   bool
 	StartTime         time.Time
 	FirstResponseTime time.Time
+	StreamEndTime     time.Time
 	isFirstResponse   bool
 	//SendLastReasoningResponse bool
 	IsStream               bool
@@ -490,10 +493,11 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 
-		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),
-		TokenUnlimited: common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
-		TokenGroup:     tokenGroup,
+		TokenId:         common.GetContextKeyInt(c, constant.ContextKeyTokenId),
+		TokenKey:        common.GetContextKeyString(c, constant.ContextKeyTokenKey),
+		TokenUnlimited:  common.GetContextKeyBool(c, constant.ContextKeyTokenUnlimited),
+		TokenSelfFunded: common.GetContextKeyBool(c, constant.ContextKeyTokenSelfFunded),
+		TokenGroup:      tokenGroup,
 
 		isFirstResponse: true,
 		RelayMode:       relayconstant.Path2RelayMode(c.Request.URL.Path),

@@ -118,6 +118,7 @@ const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
   '/users': { section: 'admin', module: 'user' },
   '/redemption-codes': { section: 'admin', module: 'redemption' },
   '/subscriptions': { section: 'admin', module: 'subscription' },
+  '/call-analytics': { section: 'admin', module: 'mozia' },
   '/mozia-settings': { section: 'admin', module: 'mozia' },
   '/mozia-settings/model-quota-policies': {
     section: 'admin',

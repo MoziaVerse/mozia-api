@@ -201,6 +201,9 @@ func AddToken(c *gin.Context) {
 		})
 		return
 	}
+	// self_funded 等于发钱。普通建 key 接口（含 SSO 桥上的用户操作）一律忽略该字段：
+	// SSO 上下文只证明调用链身份，证明不了这是运营发放；发放走 IssueSelfFundedToken。
+	token.SelfFunded = false
 	key, err := common.GenerateKey()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgTokenGenerateFailed)
@@ -221,6 +224,7 @@ func AddToken(c *gin.Context) {
 		AllowIps:           token.AllowIps,
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
+		SelfFunded:         token.SelfFunded,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -233,9 +237,31 @@ func AddToken(c *gin.Context) {
 	})
 }
 
+// tokenUpdateTestHook 在「读取 token 之后、写回之前」被调用，仅测试用来固定并发扣款的交错顺序。
+var tokenUpdateTestHook func()
+
+// selfFundedDeleteGuard：自带资金的 key 是用户买到的商品，普通删除接口一律拒绝
+// （删了余额就没了），不论是否经 SSO 桥；撤销走 RevokeSelfFundedToken。
+func selfFundedDeleteGuard(ids []int, userId int) error {
+	for _, id := range ids {
+		tk, err := model.GetTokenByIds(id, userId)
+		if err != nil {
+			continue
+		}
+		if tk.SelfFunded {
+			return fmt.Errorf("「%s」是权益包专用令牌，余额随令牌保存，不能删除；如不再使用请停用", tk.Name)
+		}
+	}
+	return nil
+}
+
 func DeleteToken(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")
+	if err := selfFundedDeleteGuard([]int{id}, userId); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	err := model.DeleteTokenById(id, userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -276,6 +302,9 @@ func UpdateToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if tokenUpdateTestHook != nil {
+		tokenUpdateTestHook()
+	}
 	if token.Status == common.TokenStatusEnabled {
 		if cleanToken.Status == common.TokenStatusExpired && cleanToken.ExpiredTime <= common.GetTimestamp() && cleanToken.ExpiredTime != -1 {
 			common.ApiErrorI18n(c, i18n.MsgTokenExpiredCannotEnable)
@@ -286,8 +315,18 @@ func UpdateToken(c *gin.Context) {
 			return
 		}
 	}
+	// 启停与自带资金 key 的改名只写涉及的列：整行回写会把读取时的余额覆盖掉并发扣减
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
+		err = cleanToken.UpdateColumns("status")
+	} else if cleanToken.SelfFunded {
+		// 自带资金的 key 余额 / 模型 / 有效期是商品内容，普通更新接口只能改名（及 IP / 分组
+		// 这类不涉及资金的字段），不论是否经 SSO 桥；调整权益走 AdjustSelfFundedToken。
+		cleanToken.Name = token.Name
+		cleanToken.AllowIps = token.AllowIps
+		cleanToken.Group = token.Group
+		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		err = cleanToken.UpdateColumns("name", "allow_ips", "group", "cross_group_retry")
 	} else {
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
@@ -299,8 +338,8 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		err = cleanToken.Update()
 	}
-	err = cleanToken.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -323,6 +362,10 @@ func DeleteTokenBatch(c *gin.Context) {
 		return
 	}
 	userId := c.GetInt("id")
+	if err := selfFundedDeleteGuard(tokenBatch.Ids, userId); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	count, err := model.BatchDeleteTokens(tokenBatch.Ids, userId)
 	if err != nil {
 		common.ApiError(c, err)

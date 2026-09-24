@@ -89,6 +89,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
+			c.Set("call_analytics_error_status", newAPIError.StatusCode)
+			c.Set("call_analytics_error_code", string(newAPIError.GetErrorCode()))
 			if c.Writer.Written() {
 				return
 			}
@@ -171,7 +173,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if newAPIError = service.EnforceResellerModelAccess(relayInfo.UserId, relayInfo.OriginModelName); newAPIError != nil {
 		return
 	}
-	if newAPIError = service.EnforceMoziaQuotaPolicy(relayInfo.UserId, relayInfo.OriginModelName); newAPIError != nil {
+	if newAPIError = service.EnforceMoziaQuotaPolicy(c, relayInfo.UserId, relayInfo.OriginModelName); newAPIError != nil {
 		return
 	}
 
@@ -417,6 +419,10 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
+	if types.IsLocalQuotaError(err) {
+		service.RecordQuotaErrorLog(c, c.GetInt("id"), c.GetString("original_model"), err)
+		return
+	}
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
@@ -705,7 +711,7 @@ func respondTaskError(c *gin.Context, taskErr *dto.TaskError) {
 		}
 		return
 	}
-	if taskErr.StatusCode == http.StatusTooManyRequests {
+	if taskErr.StatusCode == http.StatusTooManyRequests && taskErr.Code != service.TaskLimitErrorCode {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}
 	if taskErr.Type == "" {
@@ -740,6 +746,10 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 		return false
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
+		return false
+	}
+	if taskErr.Code == service.TaskLimitErrorCode {
+		// 用户维度的并发 / 排队限制，换渠道重试结果相同，直接终止
 		return false
 	}
 	if c.GetInt("channel_type") == constant.ChannelTypeMoziaH3VDN {
