@@ -343,7 +343,7 @@ func scanCallAnalyticsKeys(seeds *gorm.DB, batchSize int, visit func([]callAnaly
 		keys := make([]callAnalyticsRequestKey, 0, batchSize)
 		for rows.Next() {
 			var key callAnalyticsRequestKey
-			if err := seeds.ScanRows(rows, &key); err != nil {
+			if err := rows.Scan(&key.UserID, &key.RequestID); err != nil {
 				return err
 			}
 			keys = append(keys, key)
