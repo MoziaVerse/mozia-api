@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -32,7 +32,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import dayjs from '@/lib/dayjs'
 import { formatTimestampForInput } from '@/lib/format'
 
-import { getCallAnalytics } from './api'
+import { getCallAnalytics, getCallAnalyticsRequests } from './api'
 import {
   analyticsFilterSchema,
   analyticsQueryFilters,
@@ -43,6 +43,7 @@ import { AnalyticsRequests } from './requests'
 
 export function CallAnalyticsPage() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const [initial] = useState(() => {
     const end = Math.floor(Date.now() / 60000) * 60
     return {
@@ -60,22 +61,35 @@ export function CallAnalyticsPage() {
   })
   const [filters, setFilters] = useState(() => analyticsQueryFilters(initial))
   const [page, setPage] = useState(1)
-  const query = useQuery({
-    queryKey: ['call-analytics', filters, page],
-    queryFn: ({ signal }) => getCallAnalytics(filters, page, signal),
-    placeholderData: (previousData, previousQuery) =>
-      previousQuery?.queryKey[1] === filters ? previousData : undefined,
+  const summaryQuery = useQuery({
+    queryKey: ['call-analytics-summary', filters],
+    queryFn: ({ signal }) => getCallAnalytics(filters, signal),
     refetchOnWindowFocus: false,
     staleTime: 60000,
+    retry: false,
   })
+  const requestsQuery = useQuery({
+    queryKey: ['call-analytics-requests', filters, page],
+    queryFn: ({ signal }) => getCallAnalyticsRequests(filters, page, signal),
+    refetchOnWindowFocus: false,
+    staleTime: 60000,
+    retry: false,
+  })
+  const isFetching = summaryQuery.isFetching || requestsQuery.isFetching
   const submit = (value: AnalyticsFilterForm) => {
     const next = analyticsQueryFilters(value)
-    if (page === 1 && JSON.stringify(filters) === JSON.stringify(next)) {
-      void query.refetch()
-    } else {
+    if (JSON.stringify(filters) === JSON.stringify(next)) {
+      void summaryQuery.refetch()
+      void queryClient.invalidateQueries({
+        queryKey: ['call-analytics-requests', filters],
+        refetchType: 'none',
+      })
       setPage(1)
-      setFilters(next)
+      if (page === 1) void requestsQuery.refetch()
+      return
     }
+    setPage(1)
+    setFilters(next)
   }
   const warnings: Record<string, string> = {
     logging_disabled: t(
@@ -195,8 +209,8 @@ export function CallAnalyticsPage() {
                       'Maximum range: 31 days. Model names match the customer request exactly. End time is exclusive.'
                     )}
                   </p>
-                  <Button type='submit' disabled={query.isFetching}>
-                    {query.isFetching ? t('Loading...') : t('Analyze')}
+                  <Button type='submit' disabled={isFetching}>
+                    {isFetching ? t('Loading...') : t('Analyze')}
                   </Button>
                 </div>
                 {Object.entries(form.formState.errors).map(([key, error]) => (
@@ -212,32 +226,40 @@ export function CallAnalyticsPage() {
               </form>
             </CardContent>
           </Card>
-          {query.error && (
+          {summaryQuery.error && (
             <Alert variant='destructive'>
               <AlertDescription>
-                {t('Failed to load call analytics')}: {query.error.message}
+                {t('Failed to load call analytics')}:{' '}
+                {summaryQuery.error.message}
               </AlertDescription>
             </Alert>
           )}
-          <div aria-busy={query.isFetching} className='space-y-5'>
-            {query.isFetching && (
+          {requestsQuery.error && (
+            <Alert variant='destructive'>
+              <AlertDescription>
+                {t('Filtered requests')}: {requestsQuery.error.message}
+              </AlertDescription>
+            </Alert>
+          )}
+          <div aria-busy={summaryQuery.isFetching} className='space-y-5'>
+            {summaryQuery.isFetching && (
               <p role='status' className='text-muted-foreground text-sm'>
-                {t('Loading...')}
+                {t('Loading summary...')}
               </p>
             )}
-            {query.data && (
+            {summaryQuery.data && !summaryQuery.error && (
               <>
                 <p className='text-muted-foreground text-sm'>
                   {t('Results for')}:{' '}
                   {dayjs
-                    .unix(query.data.start_timestamp)
+                    .unix(summaryQuery.data.start_timestamp)
                     .format('YYYY-MM-DD HH:mm')}{' '}
                   —{' '}
                   {dayjs
-                    .unix(query.data.end_timestamp)
+                    .unix(summaryQuery.data.end_timestamp)
                     .format('YYYY-MM-DD HH:mm')}
                 </p>
-                {query.data.warnings.includes('logging_disabled') && (
+                {summaryQuery.data.warnings.includes('logging_disabled') && (
                   <Alert variant='destructive'>
                     <AlertDescription>
                       {warnings.logging_disabled}
@@ -250,28 +272,44 @@ export function CallAnalyticsPage() {
                     {' · '}
                     <span className='text-muted-foreground font-normal'>
                       {t('Final outcomes recorded')}:{' '}
-                      {query.data.coverage.final_recorded_requests.toLocaleString()}{' '}
+                      {summaryQuery.data.coverage.final_recorded_requests.toLocaleString()}{' '}
                       · {t('Inferred')}:{' '}
-                      {query.data.coverage.inferred_requests.toLocaleString()} ·{' '}
+                      {summaryQuery.data.coverage.inferred_requests.toLocaleString()}{' '}
                       {t('Unknown')}:{' '}
-                      {query.data.summary.unknown.toLocaleString()}
+                      {summaryQuery.data.summary.unknown.toLocaleString()}
                     </span>
                   </summary>
                   <div className='text-muted-foreground mt-3 space-y-1 text-xs'>
-                    {query.data.warnings
+                    {summaryQuery.data.warnings
                       .filter((warning) => warning !== 'logging_disabled')
                       .map((warning) => (
                         <p key={warning}>{warnings[warning] ?? warning}</p>
                       ))}
                   </div>
                 </details>
-                <AnalyticsReport data={query.data} />
-                <AnalyticsRequests
-                  data={query.data}
-                  loading={query.isFetching}
-                  onPageChange={setPage}
-                />
+                <AnalyticsReport data={summaryQuery.data} />
               </>
+            )}
+          </div>
+          <div aria-busy={requestsQuery.isFetching} className='space-y-3'>
+            {requestsQuery.isFetching && (
+              <p role='status' className='text-muted-foreground text-sm'>
+                {t('Loading requests...')}
+              </p>
+            )}
+            {requestsQuery.data && (
+              <AnalyticsRequests
+                data={requestsQuery.data}
+                total={
+                  summaryQuery.isSuccess
+                    ? summaryQuery.data.summary.requests
+                    : null
+                }
+                startTimestamp={filters.start_timestamp}
+                endTimestamp={filters.end_timestamp}
+                loading={requestsQuery.isFetching}
+                onPageChange={setPage}
+              />
             )}
           </div>
         </div>

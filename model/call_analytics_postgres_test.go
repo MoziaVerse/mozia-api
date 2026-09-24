@@ -46,9 +46,9 @@ func TestCallAnalyticsPostgresUnicode(t *testing.T) {
 			other := fmt.Sprintf(`{"request_path":"/v1/messages","cache_tokens":2,"cache_usage_reported":true,%s}`, tc.metadata)
 			// Every query, including GetCallAnalytics' seed/model filter and retry
 			// lookup, reads this synthetic VALUES table. No real logs or schema writes.
-			LOG_DB = pg.Table(`(VALUES (7, 'synthetic', 1800000010::bigint, ?::integer,
+			LOG_DB = pg.Table(`(VALUES (0::bigint, 7, 'synthetic', 1800000010::bigint, ?::integer,
 				'effective-model', 11, 5, 3, 1, false, 2, 'unicode-request', ?::text))
-				AS logs(user_id, username, created_at, type, model_name, quota, prompt_tokens,
+				AS logs(id, user_id, username, created_at, type, model_name, quota, prompt_tokens,
 				completion_tokens, use_time, is_stream, channel_id, request_id, other)`, LogTypeConsume, other)
 			var projected struct{ Other string }
 			require.NoError(t, LOG_DB.Select(callAnalyticsProjection(common.DatabaseTypePostgreSQL)).Scan(&projected).Error)
@@ -65,13 +65,15 @@ func TestCallAnalyticsPostgresUnicode(t *testing.T) {
 					assert.Zero(t, report.Summary.Requests)
 					continue
 				}
-				require.Len(t, report.Requests.Items, 1)
+				page, err := GetCallAnalyticsRequestPage(context.Background(), filter)
+				require.NoError(t, err)
+				require.Len(t, page.Items, 1)
 				assert.Equal(t, 1, report.Summary.Success)
 				assert.Equal(t, int64(11), report.Summary.Quota)
 				assert.Equal(t, int64(5), report.Summary.InputTokens)
 				assert.Equal(t, int64(2), report.Summary.CacheReadTokens)
-				assert.Equal(t, tc.requested, report.Requests.Items[0].ModelName)
-				assert.Equal(t, "effective-model", report.Requests.Items[0].EffectiveModel)
+				assert.Equal(t, tc.requested, page.Items[0].ModelName)
+				assert.Equal(t, "effective-model", page.Items[0].EffectiveModel)
 			}
 		})
 	}

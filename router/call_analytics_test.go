@@ -69,7 +69,12 @@ func TestCallAnalyticsRoutesEnforceGeneralAdminWithoutUserManagement(t *testing.
 		engine.ServeHTTP(response, req)
 		return response
 	}
-	paths := []string{"/api/log/analytics?page_size=101", "/api/log/call-report?page_size=101"}
+	paths := []string{
+		"/api/log/analytics?page_size=101",
+		"/api/log/analytics/requests?page_size=101",
+		"/api/log/call-report?page_size=101",
+		"/api/log/call-report/requests?page_size=101",
+	}
 	for _, path := range paths {
 		anonymous := request(path, 0)
 		assert.Equal(t, http.StatusUnauthorized, anonymous.Code)
