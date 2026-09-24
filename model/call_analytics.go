@@ -231,7 +231,11 @@ func callAnalyticsJSONValue(path string, dialect common.DatabaseType) string {
 	case common.DatabaseTypeClickHouse:
 		return "JSONExtractRaw(other, '" + strings.Join(parts, "', '") + "')"
 	case common.DatabaseTypePostgreSQL:
-		return "(COALESCE(NULLIF(other, ''), '{}')::jsonb #> '{" + strings.Join(parts, ",") + "}')"
+		// PostgreSQL rejects JSON NUL escapes even in fields excluded from the
+		// projection. Drop only real NUL escapes, preserving paired backslashes
+		// (literal \u0000) and valid Unicode; the pattern has no GORM placeholders.
+		other := `regexp_replace(COALESCE(NULLIF(other, ''), '{}'), '(\\\\)|\\u0000', '\1', 'g')`
+		return "(" + other + "::jsonb #> '{" + strings.Join(parts, ",") + "}')"
 	case common.DatabaseTypeMySQL:
 		return "JSON_EXTRACT(IF(JSON_VALID(other), other, '{}'), '$." + path + "')"
 	default:
