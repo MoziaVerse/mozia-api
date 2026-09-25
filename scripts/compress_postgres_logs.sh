@@ -16,7 +16,12 @@ for path in "$log_dir"/postgresql-*.log; do
     [ -f "$path" ] || continue
     name=${path##*/}
     # Consult the collector's authoritative list, including absolute paths.
-    if awk '{sub(/^.*\//, "", $2); print $2}' "$current_logs" | grep -Fxq "$name"; then
+    active=$(awk '{sub(/^.*\//, "", $2); print $2}' "$current_logs")
+    if [ -z "$active" ]; then
+        echo 'ERROR: current log manifest is empty; compression stopped' >&2
+        exit 1
+    fi
+    if printf '%s\n' "$active" | grep -Fxq "$name"; then
         continue
     fi
     modified=$(stat -c %Y "$path")

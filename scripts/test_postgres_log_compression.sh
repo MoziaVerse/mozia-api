@@ -28,4 +28,11 @@ if sh "$compressor" "$fixture" "$fixture/current_logfiles" 3600; then
 fi
 [ "$(cat "$fixture/postgresql-conflict.log")" = 'original evidence' ]
 [ "$(cat "$fixture/postgresql-conflict.log.gz")" = 'existing archive' ]
-echo 'PASS: active/young files, archive integrity, timestamps, repeat runs and conflicts'
+rm "$fixture/postgresql-conflict.log" "$fixture/postgresql-conflict.log.gz"
+: > "$fixture/current_logfiles"
+if sh "$compressor" "$fixture" "$fixture/current_logfiles" 3600; then
+    echo 'ERROR: compression continued without an active-log manifest' >&2
+    exit 1
+fi
+[ -f "$fixture/postgresql-active.log" ]
+echo 'PASS: active/young files, archive integrity, timestamps, repeat runs, conflicts and missing manifest'
