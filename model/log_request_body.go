@@ -3,24 +3,29 @@ package model
 import (
 	"fmt"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/mozia_setting"
 	"github.com/gin-gonic/gin"
 )
 
 const (
 	requestBodyLogContextKey = "request_body_log_snapshot"
-	requestBodyLogLimit      = int64(1536 * 1024)
+	requestSummaryContextKey = "request_body_log_summary"
+	requestBodyLogLimit      = int64(16 * 1024)
 )
 
-// CaptureRequestBodyLog captures the original client JSON before relay
-// conversion. It is best-effort and must never change request handling.
+// CaptureRequestBodyLog keeps a bounded summary by default. Body capture requires
+// a specific user and an unexpired diagnostic window; it never changes relay data.
 func CaptureRequestBodyLog(c *gin.Context) {
 	if c == nil || c.Request == nil {
 		return
 	}
-	if _, exists := c.Get(requestBodyLogContextKey); exists {
+	if _, exists := c.Get(requestSummaryContextKey); exists {
 		return
 	}
 	if !strings.HasPrefix(strings.ToLower(c.GetHeader("Content-Type")), "application/json") {
@@ -35,11 +40,22 @@ func CaptureRequestBodyLog(c *gin.Context) {
 	if size == 0 {
 		return
 	}
+	summary := map[string]any{"_omitted": "request body logging disabled", "_size_bytes": size}
+	c.Set(requestSummaryContextKey, summary)
+	// Reuse routing's media detection within the existing inspection size bound.
+	// Larger bodies retain their size; absence of _has_video means not inspected.
+	if size <= 1536*1024 {
+		if body, err := storage.Bytes(); err == nil {
+			summary["_has_video"] = mozia_setting.HasVideoInput(body)
+		}
+	}
+	userID, err := strconv.Atoi(os.Getenv("REQUEST_BODY_LOG_USER_ID"))
+	until, timeErr := time.Parse(time.RFC3339, os.Getenv("REQUEST_BODY_LOG_UNTIL"))
+	if err != nil || userID <= 0 || c.GetInt("id") != userID || timeErr != nil || !time.Now().Before(until) {
+		return
+	}
 	if size > requestBodyLogLimit {
-		c.Set(requestBodyLogContextKey, map[string]any{
-			"_omitted":    fmt.Sprintf("request body exceeds %d byte log limit", requestBodyLogLimit),
-			"_size_bytes": size,
-		})
+		summary["_omitted"] = fmt.Sprintf("request body exceeds %d byte diagnostic limit", requestBodyLogLimit)
 		return
 	}
 
@@ -51,12 +67,22 @@ func CaptureRequestBodyLog(c *gin.Context) {
 	if err := common.Unmarshal(body, &value); err != nil {
 		return
 	}
-	c.Set(requestBodyLogContextKey, redactRequestLogValue(value))
+	value = redactRequestLogValue(value)
+	encoded, err := common.Marshal(value)
+	if err != nil || int64(len(encoded)) > requestBodyLogLimit {
+		summary["_omitted"] = "redacted request body exceeds diagnostic limit"
+		return
+	}
+	delete(summary, "_omitted")
+	c.Set(requestBodyLogContextKey, value)
 }
 
 func attachRequestBodyLog(c *gin.Context, other map[string]interface{}) {
 	if c == nil || other == nil {
 		return
+	}
+	if summary, exists := c.Get(requestSummaryContextKey); exists {
+		other["request_summary"] = summary
 	}
 	body, exists := c.Get(requestBodyLogContextKey)
 	if !exists {

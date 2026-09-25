@@ -12,6 +12,12 @@ x-mozia-api-service: &mozia-api-service
   image: mozia-api
   build: .
   restart: always
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+      compress: "true"
   command: --log-dir /app/logs
   env_file:
     - .env
