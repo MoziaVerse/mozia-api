@@ -36,8 +36,9 @@ func GetMoziaConsumptionReport(start, end int64) ([]MoziaConsumptionReportRow, e
 	if err := LOG_DB.Model(&Log{}).
 		Select("user_id, model_name, SUM(CASE WHEN type = 2 THEN quota ELSE -quota END) AS quota").
 		Where("created_at >= ? AND created_at < ?", start, end).
-		Where("type IN ?", []int{LogTypeConsume, LogTypeRefund}).
-		Where("other LIKE ?", `%"billing_source":"subscription"%`).
+		// Fixed predicates let PostgreSQL use the optional partial index even
+		// with a generic prepared plan; only the date bounds are parameters.
+		Where(`type IN (2, 6) AND other LIKE '%"billing_source":"subscription"%'`).
 		Group("user_id, model_name").Scan(&subscriptions).Error; err != nil {
 		return nil, err
 	}
