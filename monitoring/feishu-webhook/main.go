@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
@@ -29,6 +30,8 @@ type Config struct {
 	CriticalWebhookURL string
 	CriticalSecret     string
 	GrafanaURL         string
+	AlertmanagerURL    string
+	UptimeKumaURL      string
 	EnvLabel           string
 	AtAllOnCritical    bool
 	HTTPTimeout        time.Duration
@@ -119,6 +122,8 @@ func loadConfigFromEnv() Config {
 		CriticalWebhookURL: strings.TrimSpace(os.Getenv("FEISHU_CRITICAL_WEBHOOK_URL")),
 		CriticalSecret:     strings.TrimSpace(os.Getenv("FEISHU_CRITICAL_SECRET")),
 		GrafanaURL:         strings.TrimRight(strings.TrimSpace(os.Getenv("GRAFANA_EXTERNAL_URL")), "/"),
+		AlertmanagerURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("ALERTMANAGER_EXTERNAL_URL")), "/"),
+		UptimeKumaURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("UPTIME_KUMA_EXTERNAL_URL")), "/"),
 		EnvLabel:           envLabel,
 		AtAllOnCritical:    strings.EqualFold(strings.TrimSpace(os.Getenv("FEISHU_AT_ALL_ON_CRITICAL")), "true"),
 		HTTPTimeout:        10 * time.Second,
@@ -294,11 +299,18 @@ func (s *RelayServer) BuildCard(payload AlertmanagerPayload) FeishuCard {
 	}
 
 	var links []string
-	if s.cfg.GrafanaURL != "" {
-		links = append(links, fmt.Sprintf("[打开 Grafana 大盘](%s)", s.cfg.GrafanaURL))
+	if u := strings.TrimRight(strings.TrimSpace(s.cfg.GrafanaURL), "/"); u != "" {
+		links = append(links, fmt.Sprintf("[打开 Grafana 大盘](%s)", u))
 	}
-	if payload.ExternalURL != "" {
-		links = append(links, fmt.Sprintf("[打开 Alertmanager](%s)", payload.ExternalURL))
+	if u := strings.TrimRight(strings.TrimSpace(s.cfg.UptimeKumaURL), "/"); u != "" {
+		links = append(links, fmt.Sprintf("[打开 Uptime Kuma](%s)", u))
+	}
+	amURL := strings.TrimRight(strings.TrimSpace(s.cfg.AlertmanagerURL), "/")
+	if amURL == "" && isRoutableExternalURL(payload.ExternalURL) {
+		amURL = strings.TrimRight(strings.TrimSpace(payload.ExternalURL), "/")
+	}
+	if amURL != "" {
+		links = append(links, fmt.Sprintf("[打开 Alertmanager](%s)", amURL))
 	}
 	if len(links) > 0 {
 		sort.Strings(links)
@@ -367,6 +379,19 @@ func (s *RelayServer) SendCard(ctx context.Context, webhookURL, secret string, c
 		}
 	}
 	return nil
+}
+
+func isRoutableExternalURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return false
+	}
+	// Reject bare Docker container hostnames/IDs such as "c4aa4e26fefe" or "alertmanager".
+	return strings.Contains(host, ".")
 }
 
 func firstNonEmpty(values ...string) string {

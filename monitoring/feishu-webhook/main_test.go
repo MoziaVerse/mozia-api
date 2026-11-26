@@ -154,3 +154,41 @@ func TestWebhookReturns502WhenFeishuRejects(t *testing.T) {
 		t.Fatalf("expected 502 on Feishu rejection, got %d", rec.Code)
 	}
 }
+
+func TestBuildCardFiltersUnroutableAlertmanagerContainerURL(t *testing.T) {
+	relay := NewRelayServer(Config{
+		GrafanaURL:    "https://grafana.mzsjai.com",
+		UptimeKumaURL: "https://kuma.mzsjai.com",
+		EnvLabel:      "prod",
+	})
+
+	card := relay.BuildCard(AlertmanagerPayload{
+		Status:      "firing",
+		ExternalURL: "http://c4aa4e26fefe:9093",
+		CommonLabels: map[string]string{
+			"alertname": "MoziaHighGateway5xxRate",
+			"severity":  "critical",
+		},
+	})
+	raw, _ := json.Marshal(card)
+	body := string(raw)
+	if strings.Contains(body, "c4aa4e26fefe") || strings.Contains(body, "Alertmanager") {
+		t.Fatalf("expected internal container URL to be omitted, got: %s", body)
+	}
+	if !strings.Contains(body, "https://grafana.mzsjai.com") || !strings.Contains(body, "https://kuma.mzsjai.com") {
+		t.Fatalf("expected Grafana and Uptime Kuma links, got: %s", body)
+	}
+
+	relayWithAM := NewRelayServer(Config{
+		AlertmanagerURL: "https://alerts.mzsjai.com/",
+		EnvLabel:        "prod",
+	})
+	cardWithAM := relayWithAM.BuildCard(AlertmanagerPayload{
+		Status:      "firing",
+		ExternalURL: "http://c4aa4e26fefe:9093",
+	})
+	rawAM, _ := json.Marshal(cardWithAM)
+	if !strings.Contains(string(rawAM), "[打开 Alertmanager](https://alerts.mzsjai.com)") {
+		t.Fatalf("expected explicit Alertmanager URL, got: %s", string(rawAM))
+	}
+}
