@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"net/url"
@@ -862,4 +864,44 @@ func PingDB() error {
 	lastPingTime = time.Now()
 	common.SysLog("Database pinged successfully")
 	return nil
+}
+
+// PingDBContext actively pings the main database without caching, honoring ctx.
+func PingDBContext(ctx context.Context) error {
+	if DB == nil {
+		return fmt.Errorf("main database is not initialized")
+	}
+	sqlDB, err := DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.PingContext(ctx)
+}
+
+// PingLogDBContext actively pings the dedicated log database when configured separately.
+func PingLogDBContext(ctx context.Context) error {
+	if LOG_DB == nil || LOG_DB == DB {
+		return nil
+	}
+	sqlDB, err := LOG_DB.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.PingContext(ctx)
+}
+
+// DBPoolStats returns sql.DBStats snapshots for main and (when separate) log databases.
+func DBPoolStats() map[string]sql.DBStats {
+	stats := make(map[string]sql.DBStats, 2)
+	if DB != nil {
+		if sqlDB, err := DB.DB(); err == nil {
+			stats["main"] = sqlDB.Stats()
+		}
+	}
+	if LOG_DB != nil && LOG_DB != DB {
+		if sqlDB, err := LOG_DB.DB(); err == nil {
+			stats["log"] = sqlDB.Stats()
+		}
+	}
+	return stats
 }

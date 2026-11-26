@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -91,6 +92,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			c.Set("call_analytics_error_status", newAPIError.StatusCode)
 			c.Set("call_analytics_error_code", string(newAPIError.GetErrorCode()))
+			c.Set("metrics_error_class", classifyRelayErrorClass(newAPIError))
 			if c.Writer.Written() {
 				return
 			}
@@ -251,11 +253,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		service.FinishSupplierAttempt(c, relayInfo, newAPIError, false)
 		if newAPIError == nil {
+			metrics.RecordChannelAttempt(channel.Id, channel.Name, relayInfo.OriginModelName, "success", attempts > 0)
 			c.Set("supplier_success_channel_id", channel.Id)
 			relayInfo.LastError = nil
 			return
 		}
 
+		metrics.RecordChannelAttempt(channel.Id, channel.Name, relayInfo.OriginModelName, classifyChannelAttemptResult(newAPIError), attempts > 0)
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
@@ -285,6 +289,68 @@ func stripThinkingForModelRedirect(c *gin.Context, request dto.Request) {
 	if openAIRequest, ok := request.(*dto.GeneralOpenAIRequest); ok {
 		openAIRequest.THINKING = nil
 	}
+}
+
+func isUpstreamRelayError(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	switch err.GetErrorType() {
+	case types.ErrorTypeUpstreamError, types.ErrorTypeOpenAIError, types.ErrorTypeClaudeError,
+		types.ErrorTypeGeminiError, types.ErrorTypeMidjourneyError, types.ErrorTypeRerankError:
+		return true
+	}
+	switch err.GetErrorCode() {
+	case types.ErrorCodeDoRequestFailed, types.ErrorCodeReadResponseBodyFailed,
+		types.ErrorCodeBadResponseStatusCode, types.ErrorCodeBadResponse,
+		types.ErrorCodeBadResponseBody, types.ErrorCodeEmptyResponse,
+		types.ErrorCodeAwsInvokeError, types.ErrorCodeChannelResponseTimeExceeded,
+		types.ErrorCodeChannelInvalidKey, types.ErrorCodeChannelNoAvailableKey:
+		return true
+	}
+	return false
+}
+
+func classifyRelayErrorClass(err *types.NewAPIError) string {
+	if err == nil {
+		return "none"
+	}
+	if isUpstreamRelayError(err) {
+		switch {
+		case err.StatusCode == http.StatusTooManyRequests:
+			return "upstream_429"
+		case err.StatusCode >= 500 || err.GetErrorCode() == types.ErrorCodeDoRequestFailed:
+			return "upstream_5xx"
+		default:
+			return "upstream_other"
+		}
+	}
+	if err.StatusCode >= 400 && err.StatusCode < 500 {
+		return "client_4xx"
+	}
+	return "gateway_5xx"
+}
+
+func classifyChannelAttemptResult(err *types.NewAPIError) string {
+	if err == nil {
+		return "success"
+	}
+	if err.GetErrorCode() == types.ErrorCodeDoRequestFailed {
+		return "network_error"
+	}
+	if isUpstreamRelayError(err) {
+		switch {
+		case err.StatusCode == http.StatusTooManyRequests:
+			return "upstream_429"
+		case err.StatusCode >= 500:
+			return "upstream_5xx"
+		case err.StatusCode >= 400:
+			return "upstream_4xx"
+		default:
+			return "upstream_error"
+		}
+	}
+	return "gateway_error"
 }
 
 var upgrader = websocket.Upgrader{

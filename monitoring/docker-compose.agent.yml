@@ -1,0 +1,88 @@
+# ==============================================================================
+# Plan A — Business Host Exporter Agent (runs on the mozia-api host)
+# Ultra-lightweight (< 150 MB total RAM), binds strictly to AGENT_BIND_IP.
+#
+# Usage on business host:
+#   docker compose --env-file .env.monitoring -f docker-compose.agent.yml up -d
+#
+# If the host ALREADY runs systemd node_exporter on :9100 (like test server 21),
+# either omit the node-exporter profile (default) or run with --profile node-exporter
+# on fresh hosts that do not have systemd node_exporter installed.
+# ==============================================================================
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: mozia-node-exporter
+    profiles:
+      - node-exporter
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - "--path.rootfs=/host"
+      - "--web.listen-address=${AGENT_BIND_IP:-127.0.0.1}:${NODE_EXPORTER_PORT:-9100}"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker/.+|run/docker/.+)($|/)"
+    volumes:
+      - /:/host:ro,rslave
+    mem_limit: 64m
+
+  cadvisor:
+    image: ${CADVISOR_IMAGE:-gcr.m.daocloud.io/cadvisor/cadvisor:v0.55.1}
+    container_name: mozia-cadvisor
+    restart: unless-stopped
+    privileged: true
+    command:
+      - "--housekeeping_interval=15s"
+      - "--docker_only=true"
+      - "--store_container_labels=false"
+      - "--disable_metrics=advtcp,cpu_topology,cpuset,disk,diskIO,hugetlb,memory_numa,process,referenced_memory,resctrl,sched,tcp,udp"
+    ports:
+      - "${AGENT_BIND_IP:-127.0.0.1}:${CADVISOR_PORT:-8088}:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
+      - /sys:/sys:ro
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    mem_limit: 192m
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    container_name: mozia-postgres-exporter
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: ${PG_EXPORTER_DSN:?set PG_EXPORTER_DSN in .env.monitoring}
+      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/postgres_exporter/queries.yaml
+    ports:
+      - "${AGENT_BIND_IP:-127.0.0.1}:${POSTGRES_EXPORTER_PORT:-9187}:9187"
+    volumes:
+      - ./postgres/queries.yaml:/etc/postgres_exporter/queries.yaml:ro
+    networks:
+      - postgres_db_internal
+    mem_limit: 64m
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0-alpine
+    container_name: mozia-redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: ${REDIS_EXPORTER_ADDR:-redis://redis-newapi:6379}
+      REDIS_PASSWORD: ${REDIS_EXPORTER_PASSWORD:-}
+    ports:
+      - "${AGENT_BIND_IP:-127.0.0.1}:${REDIS_EXPORTER_PORT:-9121}:9121"
+    networks:
+      - mozia_api_network
+      - postgres_db_internal
+    mem_limit: 64m
+
+networks:
+  postgres_db_internal:
+    external: true
+    name: ${POSTGRES_DOCKER_NETWORK:-postgres_db_internal}
+  mozia_api_network:
+    external: true
+    name: ${MOZIA_API_DOCKER_NETWORK:-mozia-api_mozia-api-network}

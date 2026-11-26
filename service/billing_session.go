@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 
@@ -143,6 +144,7 @@ func (s *BillingSession) Refund(c *gin.Context) {
 			}
 		}
 		if !refundSucceeded {
+			metrics.RecordBillingError("refund", "db_or_internal_error")
 			s.mu.Lock()
 			s.refunded = false
 			s.mu.Unlock()

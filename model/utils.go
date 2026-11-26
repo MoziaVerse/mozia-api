@@ -39,6 +39,31 @@ func InitBatchUpdater() {
 	})
 }
 
+// FlushBatchUpdates drains and persists any buffered quota/request counters immediately.
+// Intended to be called during graceful shutdown before closing the database.
+func FlushBatchUpdates() {
+	batchUpdate()
+}
+
+// PendingBatchUpdateCounts returns the number of buffered records waiting to be flushed
+// per batch update category.
+func PendingBatchUpdateCounts() map[string]int {
+	names := [...]string{
+		BatchUpdateTypeUserQuota:        "user_quota",
+		BatchUpdateTypeTokenQuota:       "token_quota",
+		BatchUpdateTypeUsedQuota:        "used_quota",
+		BatchUpdateTypeChannelUsedQuota: "channel_used_quota",
+		BatchUpdateTypeRequestCount:     "request_count",
+	}
+	counts := make(map[string]int, BatchUpdateTypeCount)
+	for i := 0; i < BatchUpdateTypeCount; i++ {
+		batchUpdateLocks[i].Lock()
+		counts[names[i]] = len(batchUpdateStores[i])
+		batchUpdateLocks[i].Unlock()
+	}
+	return counts
+}
+
 func addNewRecord(type_ int, id int, value int) {
 	batchUpdateLocks[type_].Lock()
 	defer batchUpdateLocks[type_].Unlock()

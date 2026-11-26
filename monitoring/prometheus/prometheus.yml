@@ -1,0 +1,52 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: mozia_api
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/targets/metrics_token
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/mozia_api.json
+        refresh_interval: 30s
+
+  - job_name: node_exporter
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/node_exporter.json
+        refresh_interval: 30s
+
+  - job_name: cadvisor
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/cadvisor.json
+        refresh_interval: 30s
+
+  - job_name: postgres_exporter
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/postgres_exporter.json
+        refresh_interval: 30s
+
+  - job_name: redis_exporter
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/redis_exporter.json
+        refresh_interval: 30s

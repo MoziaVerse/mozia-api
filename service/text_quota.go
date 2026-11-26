@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -378,6 +379,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	CaptureResellerBillingUsage(relayInfo, usage)
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+		metrics.RecordBillingError("settle", "db_or_internal_error")
 	}
 
 	logModel := summary.ModelName
@@ -488,6 +490,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+	recordRelayPerfMetrics(ctx, relayInfo, summary.PromptTokens, summary.CompletionTokens, customerQuota)
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})

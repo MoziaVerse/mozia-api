@@ -1,0 +1,224 @@
+groups:
+  - name: infra-host-and-containers
+    rules:
+      - alert: HostDown
+        expr: up{job="node_exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          dashboard: infra
+        annotations:
+          summary: "宿主机失联 ({{ $labels.instance }})"
+          description: "node_exporter 已连续 1 分钟无法抓取，业务机可能宕机、断网或防火墙拦截。"
+
+      - alert: HostCPUHighWarning
+        expr: 100 * (1 - avg by (instance, host) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 80
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "宿主机 CPU 使用率偏高 ({{ printf \"%.1f\" $value }}%)"
+          description: "宿主机 {{ $labels.instance }} CPU 持续 5 分钟超过 80%。"
+
+      - alert: HostCPUHighCritical
+        expr: 100 * (1 - avg by (instance, host) (rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 90
+        for: 3m
+        labels:
+          severity: critical
+          dashboard: infra
+        annotations:
+          summary: "宿主机 CPU 使用率严重告警 ({{ printf \"%.1f\" $value }}%)"
+          description: "宿主机 {{ $labels.instance }} CPU 持续 3 分钟超过 90%，可能影响网关鉴权与 SSE 转发延迟。"
+
+      - alert: HostLoadHigh
+        expr: node_load5 / count by (instance) (node_cpu_seconds_total{mode="idle"}) > 1.5
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "宿主机 5 分钟系统负载过高 (Load/Core={{ printf \"%.2f\" $value }})"
+          description: "宿主机 {{ $labels.instance }} 平均每核 Load5 超过 1.5。"
+
+      - alert: HostMemoryHighWarning
+        expr: 100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 85
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "宿主机内存使用率超过 85% ({{ printf \"%.1f\" $value }}%)"
+          description: "宿主机 {{ $labels.instance }} 可用内存偏低，请排查内存增长容器。"
+
+      - alert: HostMemoryHighCritical
+        expr: 100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 93
+        for: 2m
+        labels:
+          severity: critical
+          dashboard: infra
+        annotations:
+          summary: "宿主机内存即将耗尽 ({{ printf \"%.1f\" $value }}%)"
+          description: "宿主机 {{ $labels.instance }} 内存持续超过 93%，存在 OOM 风险！"
+
+      - alert: HostDiskSpaceWarning
+        expr: 100 * (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|autofs|fuse.*",mountpoint!~"/boot.*|/var/lib/(kubelet|docker|containerd).*|/run/.*|/snap/.*"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|autofs|fuse.*",mountpoint!~"/boot.*|/var/lib/(kubelet|docker|containerd).*|/run/.*|/snap/.*"})) > 80
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "磁盘空间使用率超过 80% ({{ $labels.mountpoint }}: {{ printf \"%.1f\" $value }}%)"
+          description: "宿主机 {{ $labels.instance }} 分区 {{ $labels.mountpoint }} 空间紧张，请检查日志与 Docker 镜像/卷占用。"
+
+      - alert: HostDiskSpaceCritical
+        expr: 100 * (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|autofs|fuse.*",mountpoint!~"/boot.*|/var/lib/(kubelet|docker|containerd).*|/run/.*|/snap/.*"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|nsfs|ramfs|autofs|fuse.*",mountpoint!~"/boot.*|/var/lib/(kubelet|docker|containerd).*|/run/.*|/snap/.*"})) > 90
+        for: 2m
+        labels:
+          severity: critical
+          dashboard: infra
+        annotations:
+          summary: "磁盘空间严重不足 ({{ $labels.mountpoint }}: {{ printf \"%.1f\" $value }}%)"
+          description: "宿主机 {{ $labels.instance }} 分区 {{ $labels.mountpoint }} 已超过 90%，写盘满后会导致数据库和 mozia-api 全面故障！"
+
+      - alert: HostDiskIOWaitHigh
+        expr: 100 * avg by (instance) (rate(node_cpu_seconds_total{mode="iowait"}[5m])) > 20
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "宿主机磁盘 I/O Wait 偏高 ({{ printf \"%.1f\" $value }}%)"
+          description: "磁盘读写等待占比超过 20%，可能是数据库刷盘或大量日志写入造成瓶颈。"
+
+      - alert: HostFileDescriptorsHigh
+        expr: 100 * (node_filefd_allocated / node_filefd_maximum) > 75
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "宿主机文件句柄 (FD) 使用率超过 75% ({{ printf \"%.1f\" $value }}%)"
+          description: "SSE 长连接持续增长可能耗尽系统文件描述符，请检查连接泄漏或调高句柄上限。"
+
+      - alert: HostNetworkPacketDrops
+        expr: sum by (instance, device) (rate(node_network_receive_drop_total{device!~"lo|veth.*|docker.*|br-.*"}[5m]) + rate(node_network_transmit_drop_total{device!~"lo|veth.*|docker.*|br-.*"}[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "宿主机网卡 {{ $labels.device }} 出现持续丢包 ({{ printf \"%.1f\" $value }} pkt/s)"
+          description: "宿主机 {{ $labels.instance }} 网卡持续丢包，可能导致大模型流式连接抖动或断流。"
+
+      - alert: CoreContainerOOMKilled
+        expr: increase(container_oom_events_total{name=~"mozia-api.*|redis-newapi|postgres.*"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          dashboard: infra
+        annotations:
+          summary: "核心容器发生 OOMKilled ({{ $labels.name }})"
+          description: "容器 {{ $labels.name }} 在过去 5 分钟内发生内存溢出被内核强杀，请立即检查内存上限与泄漏！"
+
+      - alert: CoreContainerMemoryHigh
+        expr: 100 * (container_memory_working_set_bytes{name=~"mozia-api.*|redis-newapi|postgres.*"} / container_spec_memory_limit_bytes{name=~"mozia-api.*|redis-newapi|postgres.*"}) > 85 and container_spec_memory_limit_bytes{name=~"mozia-api.*|redis-newapi|postgres.*"} > 0
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "核心容器内存水位偏高 ({{ $labels.name }}: {{ printf \"%.1f\" $value }}%)"
+          description: "容器 {{ $labels.name }} 工作集内存已超过容器限额的 85%。"
+
+      - alert: CoreContainerCPUThrottled
+        expr: 100 * (rate(container_cpu_cfs_throttled_periods_total{name=~"mozia-api.*|redis-newapi|postgres.*"}[5m]) / clamp_min(rate(container_cpu_cfs_periods_total{name=~"mozia-api.*|redis-newapi|postgres.*"}[5m]), 1)) > 25
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "核心容器发生持续 CPU 限流 ({{ $labels.name }}: {{ printf \"%.1f\" $value }}%)"
+          description: "容器 {{ $labels.name }} CPU CFS 限流比例超过 25%，建议适当放宽 CPU limit。"
+
+  - name: infra-postgres-and-redis
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0 or up{job="postgres_exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          dashboard: infra
+        annotations:
+          summary: "PostgreSQL 数据库不可达"
+          description: "postgres_exporter 无法连接 PostgreSQL，所有鉴权与计费将立即受影响！"
+
+      - alert: PostgresConnectionsHigh
+        expr: 100 * (sum by (instance) (pg_stat_activity_count) / max by (instance) (pg_settings_max_connections)) > 80
+        for: 3m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "PostgreSQL 连接数占比超过 80% ({{ printf \"%.1f\" $value }}%)"
+          description: "数据库活跃与空闲连接总占比过高，请检查 SQL_MAX_OPEN_CONNS 配置与长事务连接。"
+
+      - alert: PostgresLongRunningTransaction
+        expr: max by (instance, datname) (pg_stat_activity_max_tx_duration{datname="mozia_api_db"}) > 60
+        for: 2m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "PostgreSQL 存在超过 60s 的长事务 ({{ printf \"%.0f\" $value }}s)"
+          description: "库 {{ $labels.datname }} 出现长时间未提交事务，可能阻塞计费扣款或触发锁等待。"
+
+      - alert: PostgresDeadlocksDetected
+        expr: increase(pg_stat_database_deadlocks{datname="mozia_api_db"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "PostgreSQL 检测到死锁 ({{ printf \"%.0f\" $value }} 次/5m)"
+          description: "数据库 mozia_api_db 在过去 5 分钟内发生死锁，请检查并发扣费/日志写入 SQL。"
+
+      - alert: RedisDown
+        expr: redis_up == 0 or up{job="redis_exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          dashboard: infra
+        annotations:
+          summary: "Redis 服务不可达"
+          description: "redis_exporter 无法连接 redis-newapi，限流、缓存和供应商路由准入将受影响！"
+
+      - alert: RedisMemoryHigh
+        expr: 100 * (redis_memory_used_bytes / redis_memory_max_bytes) > 80 and redis_memory_max_bytes > 0
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "Redis 内存使用率超过 80% ({{ printf \"%.1f\" $value }}%)"
+          description: "redis-newapi 内存接近 maxmemory 上限。"
+
+      - alert: RedisKeyEvictions
+        expr: increase(redis_evicted_keys_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "Redis 发生 Key 淘汰 ({{ printf \"%.0f\" $value }} 个/5m)"
+          description: "Redis 因内存不足开始驱逐缓存 Key，可能导致令牌或限流状态异常。"
+
+      - alert: RedisConnectionsHigh
+        expr: 100 * (redis_connected_clients / clamp_min(redis_config_maxclients, 1)) > 80
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: infra
+        annotations:
+          summary: "Redis 连接数占比超过 80% ({{ printf \"%.1f\" $value }}%)"
+          description: "Redis 客户端连接数过高，请检查 REDIS_POOL_SIZE 与连接泄漏。"

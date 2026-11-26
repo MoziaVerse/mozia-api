@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,11 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 	if apiErr != nil {
 		failNewResellerBillingSettlement(relayInfo, settlementCreated)
 		RecordQuotaErrorLog(c, relayInfo.UserId, relayInfo.OriginModelName, apiErr)
+		reason := "db_or_internal_error"
+		if types.IsLocalQuotaError(apiErr) {
+			reason = "insufficient_quota"
+		}
+		metrics.RecordBillingError("pre_consume", reason)
 		return apiErr
 	}
 	relayInfo.Billing = session

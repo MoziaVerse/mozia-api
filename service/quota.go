@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -229,6 +230,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	CaptureResellerBillingUsage(relayInfo, usage)
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+		metrics.RecordBillingError("settle", "db_or_internal_error")
 	}
 
 	logModel := modelName
@@ -254,6 +256,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+	recordRelayPerfMetrics(ctx, relayInfo, usage.InputTokens, usage.OutputTokens, customerQuota)
 }
 
 func CalcOpenRouterCacheCreateTokens(usage dto.Usage, priceData types.PriceData) int {
@@ -356,6 +359,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	CaptureResellerBillingUsage(relayInfo, usage)
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+		metrics.RecordBillingError("settle", "db_or_internal_error")
 	}
 
 	logModel := relayInfo.OriginModelName
@@ -381,8 +385,48 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
 	})
+	recordRelayPerfMetrics(ctx, relayInfo, usage.PromptTokens, usage.CompletionTokens, customerQuota)
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(usage.CompletionTokens))
+	})
+}
+
+func recordRelayPerfMetrics(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, promptTokens, completionTokens, customerQuota int) {
+	if relayInfo == nil {
+		return
+	}
+	now := time.Now()
+	hasTTFT := relayInfo.IsStream && relayInfo.HasSendResponse() && relayInfo.FirstResponseTime.After(relayInfo.StartTime)
+	var ttft time.Duration
+	if hasTTFT {
+		ttft = relayInfo.FirstResponseTime.Sub(relayInfo.StartTime)
+	}
+	genEnd := now
+	if !relayInfo.StreamEndTime.IsZero() && relayInfo.StreamEndTime.After(relayInfo.FirstResponseTime) {
+		genEnd = relayInfo.StreamEndTime
+	}
+	genTime := genEnd.Sub(relayInfo.StartTime)
+	if hasTTFT {
+		if d := genEnd.Sub(relayInfo.FirstResponseTime); d > 0 {
+			genTime = d
+		}
+	}
+	username := ""
+	if ctx != nil {
+		username = ctx.GetString("username")
+	}
+	metrics.RecordRelayPerf(metrics.RelayPerfSample{
+		Model:            relayInfo.OriginModelName,
+		Group:            relayInfo.UsingGroup,
+		UserID:           relayInfo.UserId,
+		Username:         username,
+		IsStream:         relayInfo.IsStream,
+		HasTTFT:          hasTTFT,
+		TTFT:             ttft,
+		GenerationTime:   genTime,
+		PromptTokens:     promptTokens,
+		CompletionTokens: completionTokens,
+		QuotaConsumed:    customerQuota,
 	})
 }
 

@@ -2,13 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -19,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/router"
@@ -208,13 +213,108 @@ func main() {
 		port = strconv.Itoa(*common.Port)
 	}
 
+	// Configure Prometheus metrics runtime providers and dedicated internal server.
+	nodeRole := "master"
+	if !common.IsMasterNode {
+		nodeRole = "slave"
+	}
+	metrics.SetBuildInfo(common.NodeName, nodeRole, common.Version)
+	metrics.SetRuntimeProviders(metrics.RuntimeProviders{
+		ActiveConnections: func() int64 {
+			return middleware.GetStats().ActiveConnections
+		},
+		DBPoolStats: model.DBPoolStats,
+		RedisPoolStats: func() (metrics.RedisPoolStats, bool) {
+			if !common.RedisEnabled || common.RDB == nil {
+				return metrics.RedisPoolStats{}, false
+			}
+			ps := common.RDB.PoolStats()
+			return metrics.RedisPoolStats{
+				Hits:       ps.Hits,
+				Misses:     ps.Misses,
+				Timeouts:   ps.Timeouts,
+				TotalConns: ps.TotalConns,
+				IdleConns:  ps.IdleConns,
+				StaleConns: ps.StaleConns,
+			}, true
+		},
+		BatchUpdatePending:  model.PendingBatchUpdateCounts,
+		ChannelCacheSummary: model.ChannelCacheMetricsSnapshot,
+	})
+	metricsServer, err := metrics.StartServerFromEnv(metrics.Default(), func(listenErr error) {
+		common.SysError("metrics HTTP server error: " + listenErr.Error())
+	})
+	if err != nil {
+		common.SysError("failed to start metrics HTTP server: " + err.Error())
+	} else if metricsServer != nil {
+		common.SysLog("Prometheus metrics server listening on " + metricsServer.Addr())
+	}
+
 	// Log startup success message
 	common.LogStartupSuccess(startTime, port)
 
-	err = server.Run(":" + port)
-	if err != nil {
-		common.FatalLog("failed to start HTTP server: " + err.Error())
+	httpServer := &http.Server{
+		Addr:    ":" + port,
+		Handler: server,
 	}
+
+	serveErrCh := make(chan error, 1)
+	go func() {
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrCh <- err
+		}
+		close(serveErrCh)
+	}()
+
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+
+	select {
+	case err := <-serveErrCh:
+		if err != nil {
+			common.FatalLog("failed to start HTTP server: " + err.Error())
+		}
+		return
+	case <-sigCtx.Done():
+		common.SysLog("shutdown signal received, entering draining mode")
+	}
+
+	controller.SetDraining(true)
+
+	drainSeconds := common.GetEnvOrDefault("SHUTDOWN_DRAIN_SECONDS", 5)
+	if drainSeconds > 0 {
+		common.SysLog(fmt.Sprintf("waiting %ds for load balancer drain before closing HTTP server", drainSeconds))
+		time.Sleep(time.Duration(drainSeconds) * time.Second)
+	}
+
+	shutdownTimeoutSeconds := common.GetEnvOrDefault("SHUTDOWN_TIMEOUT_SECONDS", 60)
+	if shutdownTimeoutSeconds <= 0 {
+		shutdownTimeoutSeconds = 60
+	}
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), time.Duration(shutdownTimeoutSeconds)*time.Second)
+	defer cancelShutdown()
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		common.SysError("graceful HTTP shutdown timed out or failed: " + err.Error())
+	} else {
+		common.SysLog("HTTP server stopped cleanly")
+	}
+
+	if common.BatchUpdateEnabled {
+		common.SysLog("flushing pending batch updates before exit")
+		model.FlushBatchUpdates()
+	}
+	perfmetrics.FlushAll()
+
+	if metricsServer != nil {
+		metricsCtx, cancelMetrics := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = metricsServer.Shutdown(metricsCtx)
+		cancelMetrics()
+	}
+	if err := common.CloseRedis(); err != nil {
+		common.SysError("failed to close Redis client: " + err.Error())
+	}
+	common.SysLog("graceful shutdown complete")
 }
 
 func InjectUmamiAnalytics() {

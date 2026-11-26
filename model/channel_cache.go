@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -103,6 +104,54 @@ func SyncChannelCache(frequency int) {
 		common.SysLog("syncing channels from database")
 		InitChannelCache()
 	}
+}
+
+// ChannelCacheMetricsSnapshot captures channel counts by status and enabled
+// channel counts per (group, model) directly from the in-memory channel cache
+// without issuing any database queries.
+func ChannelCacheMetricsSnapshot() (metrics.ChannelCacheSnapshot, bool) {
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	if len(channelsIDM) == 0 && len(group2model2channels) == 0 {
+		return metrics.ChannelCacheSnapshot{}, false
+	}
+
+	statusCounts := map[string]int{
+		"enabled":         0,
+		"manual_disabled": 0,
+		"auto_disabled":   0,
+		"other":           0,
+	}
+	for _, ch := range channelsIDM {
+		if ch == nil {
+			continue
+		}
+		switch ch.Status {
+		case common.ChannelStatusEnabled:
+			statusCounts["enabled"]++
+		case common.ChannelStatusManuallyDisabled:
+			statusCounts["manual_disabled"]++
+		case common.ChannelStatusAutoDisabled:
+			statusCounts["auto_disabled"]++
+		default:
+			statusCounts["other"]++
+		}
+	}
+
+	modelHealthy := make(map[string]map[string]int, len(group2model2channels))
+	for group, models := range group2model2channels {
+		perModel := make(map[string]int, len(models))
+		for modelName, ids := range models {
+			perModel[modelName] = len(ids)
+		}
+		modelHealthy[group] = perModel
+	}
+
+	return metrics.ChannelCacheSnapshot{
+		StatusCounts:        statusCounts,
+		ModelHealthyChannel: modelHealthy,
+	}, true
 }
 
 func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string) (*Channel, error) {

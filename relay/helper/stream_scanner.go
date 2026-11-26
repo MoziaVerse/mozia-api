@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -106,13 +107,34 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		select {
 		case <-done:
 			info.StreamEndTime = streamEndTime
+			streamStatusLabel := "interrupted"
 			if info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
+				streamStatusLabel = "ok"
 				logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
 			} else {
+				if info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone && !info.StreamStatus.HasErrors() {
+					streamStatusLabel = "client_gone"
+				}
 				logger.LogError(c, fmt.Sprintf("stream ended: %s, received=%d", info.StreamStatus.Summary(), info.ReceivedResponseCount))
 			}
+			metrics.RecordStreamOutcome(metrics.StreamOutcomeSample{
+				Model:     info.OriginModelName,
+				Group:     info.UsingGroup,
+				UserID:    info.UserId,
+				Username:  c.GetString("username"),
+				Status:    streamStatusLabel,
+				EndReason: string(info.StreamStatus.EndReason),
+			})
 		case <-time.After(5 * time.Second):
 			logger.LogError(c, "timeout waiting for goroutines to exit")
+			metrics.RecordStreamOutcome(metrics.StreamOutcomeSample{
+				Model:     info.OriginModelName,
+				Group:     info.UsingGroup,
+				UserID:    info.UserId,
+				Username:  c.GetString("username"),
+				Status:    "interrupted",
+				EndReason: "goroutine_exit_timeout",
+			})
 		}
 
 		// Cancellation stops the workers. A timed-out worker may still send a

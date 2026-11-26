@@ -20,6 +20,9 @@ new-api
 .env.*
 !.env.example
 !.env.mozia.example
+!monitoring/.env.monitoring.example
+monitoring/.env.monitoring
+monitoring/prometheus/targets/
 *.bak
 *.swp
 *.pem

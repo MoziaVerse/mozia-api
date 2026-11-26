@@ -1,0 +1,430 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "一、服务可用性与全站 Token SLA 总览",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "sum(mozia_instance_ready)", "refId": "A" }],
+      "title": "就绪实例数 (/readyz)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "decimals": 2, "unit": "reqps" } },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "sum(rate(mozia_relay_requests_total[5m])) or vector(0)", "refId": "A" }],
+      "title": "全站 Relay QPS (5m)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 98 },
+              { "color": "green", "value": 99.5 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "100 * (sum(rate(mozia_relay_requests_total{outcome=\"success\"}[5m])) / clamp_min(sum(rate(mozia_relay_requests_total{error_class!~\"client_4xx|client_cancelled\"}[5m])), 0.0001))", "refId": "A" }],
+      "title": "服务端有效成功率 (不含4xx)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "100 * (sum(rate(mozia_relay_requests_total{error_class=~\"gateway_5xx|panic\"}[5m])) / clamp_min(sum(rate(mozia_relay_requests_total[5m])), 0.0001))", "refId": "A" }],
+      "title": "网关自身 5xx/Panic 率",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(mozia_relay_ttft_seconds_bucket[5m])))", "refId": "A" }],
+      "title": "全站 TTFT 首字延迟 P95",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 3 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 7,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "100 * (sum(rate(mozia_relay_stream_outcomes_total{status=\"interrupted\"}[5m])) / clamp_min(sum(rate(mozia_relay_stream_outcomes_total{status!=\"client_gone\"}[5m])), 0.0001))", "refId": "A" }],
+      "title": "流式半途异常中断率",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 10,
+      "title": "二、重点大客户 (VIP) 专盯区 (按用户 ID / 分组过滤)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "reqps" } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 6 },
+      "id": 11,
+      "targets": [
+        { "expr": "sum by (customer, user_id, error_class) (rate(mozia_vip_requests_total{customer=~\"$customer\"}[5m]))", "legendFormat": "{{customer}}({{user_id}}) {{error_class}}", "refId": "A" }
+      ],
+      "title": "大客户请求量与错误分类 (QPS)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "s" } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 6 },
+      "id": 12,
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le, customer, model) (rate(mozia_vip_ttft_seconds_bucket{customer=~\"$customer\"}[5m])))", "legendFormat": "TTFT P95 {{customer}} / {{model}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.50, sum by (le, customer, model) (rate(mozia_vip_ttft_seconds_bucket{customer=~\"$customer\"}[5m])))", "legendFormat": "TTFT P50 {{customer}} / {{model}}", "refId": "B" }
+      ],
+      "title": "大客户首字延迟 (TTFT P50 / P95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "currencyUSD" } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 6 },
+      "id": 13,
+      "targets": [
+        { "expr": "sum by (customer, user_id) (increase(mozia_vip_quota_consumed_total{customer=~\"$customer\"}[1h])) / 500000", "legendFormat": "1h 消耗 $ {{customer}}({{user_id}})", "refId": "A" }
+      ],
+      "title": "大客户小时级消费趋势 (USD 等价)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 13 },
+      "id": 14,
+      "targets": [
+        { "expr": "sum by (customer, direction) (rate(mozia_vip_tokens_total{customer=~\"$customer\"}[5m]))", "legendFormat": "{{customer}} {{direction}} tok/s", "refId": "A" }
+      ],
+      "title": "大客户 Token 吞吐量 (Prompt / Completion tok/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 13 },
+      "id": 15,
+      "targets": [
+        { "expr": "sum by (customer, status, end_reason) (increase(mozia_vip_stream_outcomes_total{customer=~\"$customer\",status!=\"ok\"}[15m]))", "legendFormat": "{{customer}} {{status}}/{{end_reason}}", "refId": "A" }
+      ],
+      "title": "大客户流式异常中断 / 客户端取消计数 (15m)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "id": 20,
+      "title": "三、多实例运维态、连接池与运行时健康",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "s" } },
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 20 },
+      "id": 21,
+      "targets": [
+        { "expr": "time() - process_start_time_seconds{job=\"mozia_api\"}", "legendFormat": "{{node_name}} Uptime", "refId": "A" }
+      ],
+      "title": "各实例运行时长 (跌落即发生重启)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 20 },
+      "id": 22,
+      "targets": [
+        { "expr": "mozia_http_active_connections", "legendFormat": "Active Conns ({{node_name}})", "refId": "A" },
+        { "expr": "go_goroutines{job=\"mozia_api\"}", "legendFormat": "Goroutines ({{node_name}})", "refId": "B" }
+      ],
+      "title": "活跃 HTTP/SSE 连接与 Goroutines",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 20 },
+      "id": 23,
+      "targets": [
+        { "expr": "mozia_db_pool_connections{db=\"main\",state=~\"open|in_use|max_open\"}", "legendFormat": "{{node_name}} {{state}}", "refId": "A" }
+      ],
+      "title": "mozia-api 主库连接池水位 (in_use vs max_open)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 20 },
+      "id": 24,
+      "targets": [
+        { "expr": "mozia_redis_pool_connections", "legendFormat": "{{node_name}} {{state}}", "refId": "A" },
+        { "expr": "rate(mozia_redis_pool_timeouts_total[5m])", "legendFormat": "{{node_name}} timeouts/s", "refId": "B" }
+      ],
+      "title": "mozia-api Redis 客户端池与超时",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 30,
+      "title": "四、错误分层、渠道重试率与 Token 延迟三剑客",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "reqps" } },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 28 },
+      "id": 31,
+      "targets": [
+        { "expr": "sum by (error_class) (rate(mozia_relay_requests_total{model=~\"$model\"}[5m]))", "legendFormat": "{{error_class}}", "refId": "A" }
+      ],
+      "title": "请求结果与错误分层趋势 (客户端4xx / 网关5xx / 上游429&5xx / 断流 / 取消)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "percent" } },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 28 },
+      "id": 32,
+      "targets": [
+        { "expr": "100 * (sum by (model) (rate(mozia_relay_channel_attempts_total{is_retry=\"true\",model=~\"$model\"}[5m])) / clamp_min(sum by (model) (rate(mozia_relay_channel_attempts_total{is_retry=\"false\",model=~\"$model\"}[5m])), 0.0001))", "legendFormat": "渠道重试率 {{model}}", "refId": "A" },
+        { "expr": "100 * (sum by (model) (rate(mozia_relay_requests_total{error_class=~\"upstream_.*|gateway_5xx|panic\",model=~\"$model\"}[5m])) / clamp_min(sum by (model) (rate(mozia_relay_requests_total{model=~\"$model\"}[5m])), 0.0001))", "legendFormat": "最终失败率 {{model}}", "refId": "B" }
+      ],
+      "title": "渠道重试率 vs 最终返回给客户的失败率 (%)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "s" } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 35 },
+      "id": 33,
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le, model) (rate(mozia_relay_ttft_seconds_bucket{model=~\"$model\"}[5m])))", "legendFormat": "P50 {{model}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le, model) (rate(mozia_relay_ttft_seconds_bucket{model=~\"$model\"}[5m])))", "legendFormat": "P95 {{model}}", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le, model) (rate(mozia_relay_ttft_seconds_bucket{model=~\"$model\"}[5m])))", "legendFormat": "P99 {{model}}", "refId": "C" }
+      ],
+      "title": "TTFT 首字延迟 (P50 / P95 / P99)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 35 },
+      "id": 34,
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le, model) (rate(mozia_relay_tps_bucket{model=~\"$model\"}[5m])))", "legendFormat": "P50 TPS {{model}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le, model) (rate(mozia_relay_tps_bucket{model=~\"$model\"}[5m])))", "legendFormat": "P95 TPS {{model}}", "refId": "B" }
+      ],
+      "title": "TPS 吐字速度 (Tokens / sec)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "s" } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 35 },
+      "id": 35,
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(mozia_relay_gateway_overhead_seconds_bucket[5m])))", "legendFormat": "Gateway Overhead P50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(mozia_relay_gateway_overhead_seconds_bucket[5m])))", "legendFormat": "Gateway Overhead P95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(mozia_relay_gateway_overhead_seconds_bucket[5m])))", "legendFormat": "Gateway Overhead P99", "refId": "C" }
+      ],
+      "title": "网关自身转发前耗时 (定位网关慢 vs 上游慢)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "id": 40,
+      "title": "五、流式中断、渠道冗余余量与计费账务健康",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 43 },
+      "id": 41,
+      "targets": [
+        { "expr": "sum by (status, end_reason) (increase(mozia_relay_stream_outcomes_total{model=~\"$model\"}[15m]))", "legendFormat": "{{status}} / {{end_reason}}", "refId": "A" }
+      ],
+      "title": "流式结束状态分布 (15m)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 2 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 43 },
+      "id": 42,
+      "targets": [
+        { "expr": "max by (group, model) (mozia_model_healthy_channels{model=~\"$model\"})", "format": "table", "instant": true, "refId": "A" }
+      ],
+      "title": "各模型健康渠道余量 (0=断流 / 1=单点预警)",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 43 },
+      "id": 43,
+      "targets": [
+        { "expr": "sum by (stage, reason) (increase(mozia_billing_errors_total[15m]))", "legendFormat": "BillingErr {{stage}}/{{reason}}", "refId": "A" },
+        { "expr": "sum by (node_name) (mozia_batch_update_pending_items)", "legendFormat": "BatchPending {{node_name}}", "refId": "B" },
+        { "expr": "sum by (provider, status) (increase(mozia_payment_webhook_total[15m]))", "legendFormat": "PayWebhook {{provider}}/{{status}}", "refId": "C" }
+      ],
+      "title": "计费异常、异步写账积压与支付回调",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["mozia", "token", "sla", "vip"],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(mozia_vip_requests_total, customer)",
+        "includeAll": true,
+        "label": "重点大客户 (VIP)",
+        "multi": true,
+        "name": "customer",
+        "query": { "query": "label_values(mozia_vip_requests_total, customer)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(mozia_relay_requests_total, model)",
+        "includeAll": true,
+        "label": "模型 (Model)",
+        "multi": true,
+        "name": "model",
+        "query": { "query": "label_values(mozia_relay_requests_total, model)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "Asia/Shanghai",
+  "title": "大盘二：mozia-api 多实例健康 & 大客户 Token SLA",
+  "uid": "mozia-token-sla",
+  "version": 1
+}

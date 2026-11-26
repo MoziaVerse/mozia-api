@@ -53,6 +53,25 @@ func InitRedisClient() (err error) {
 	return err
 }
 
+// PingRedisContext actively pings Redis without caching, honoring the caller's deadline.
+func PingRedisContext(ctx context.Context) error {
+	if !RedisEnabled {
+		return nil
+	}
+	if RDB == nil {
+		return errors.New("redis client is not initialized")
+	}
+	return RDB.Ping(ctx).Err()
+}
+
+// CloseRedis cleanly closes the Redis client pool during graceful shutdown.
+func CloseRedis() error {
+	if RDB == nil {
+		return nil
+	}
+	return RDB.Close()
+}
+
 func ParseRedisOption() *redis.Options {
 	opt, err := redis.ParseURL(os.Getenv("REDIS_CONN_STRING"))
 	if err != nil {

@@ -1,0 +1,51 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: feishu-warning
+  group_by: ["alertname", "severity", "node_name", "customer"]
+  group_wait: 20s
+  group_interval: 5m
+  repeat_interval: 2h
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: feishu-critical
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 30m
+    - matchers:
+        - severity = "warning"
+      receiver: feishu-warning
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 3h
+
+inhibit_rules:
+  # When a host or instance is completely down, suppress noisy secondary alerts on that target.
+  - source_matchers:
+      - alertname =~ "HostDown|MoziaInstanceDown"
+    target_matchers:
+      - alertname != "HostDown"
+      - alertname != "MoziaInstanceDown"
+    equal: ["instance"]
+
+  # Critical alerts inhibit warning alerts of the same alert group/model/customer.
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ["alertname", "node_name", "model", "customer"]
+
+receivers:
+  - name: feishu-critical
+    webhook_configs:
+      - url: "http://feishu-webhook:8060/webhook/critical"
+        send_resolved: true
+        max_alerts: 20
+
+  - name: feishu-warning
+    webhook_configs:
+      - url: "http://feishu-webhook:8060/webhook/warning"
+        send_resolved: true
+        max_alerts: 20

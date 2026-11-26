@@ -1,0 +1,298 @@
+groups:
+  - name: mozia-api-instance-health
+    rules:
+      - alert: MoziaInstanceDown
+        expr: up{job="mozia_api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "mozia-api 实例宕机 ({{ $labels.node_name }})"
+          description: "实例 {{ $labels.node_name }} ({{ $labels.instance }}) 已连续 1 分钟无法抓取指标。"
+
+      - alert: MoziaAllInstancesDown
+        expr: sum(up{job="mozia_api"}) == 0
+        for: 30s
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "紧急：mozia-api 全部实例不可用！"
+          description: "主从实例均已失联，对外 API 服务已完全中断！"
+
+      - alert: MoziaInstanceNotReady
+        expr: mozia_instance_ready == 0
+        for: 2m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "mozia-api 实例持续处于非就绪/摘流状态 ({{ $labels.node_name }})"
+          description: "实例 {{ $labels.node_name }} 超过 2 分钟未恢复就绪，请检查是否卡在停机或数据库/Redis异常。"
+
+      - alert: MoziaInstanceRestarted
+        expr: changes(process_start_time_seconds{job="mozia_api"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "mozia-api 实例发生重启 ({{ $labels.node_name }})"
+          description: "实例 {{ $labels.node_name }} 在过去 10 分钟内重启过。如果并非计划内滚动发版，请立刻排查 Panic 或 OOM！"
+
+      - alert: MoziaVersionMismatch
+        expr: count(count by (version) (mozia_build_info)) > 1
+        for: 10m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "mozia-api 多实例版本不一致"
+          description: "主从实例运行的代码版本已超过 10 分钟不一致，请确认滚动发版是否完整执行。"
+
+      - alert: MoziaDBPoolSaturation
+        expr: 100 * (mozia_db_pool_connections{state="in_use"} / clamp_min(mozia_db_pool_connections{state="max_open"}, 1)) > 80
+        for: 3m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "mozia-api 数据库连接池占用超过 80% ({{ $labels.node_name }}/{{ $labels.db }}: {{ printf \"%.1f\" $value }}%)"
+          description: "当前 SQL_MAX_OPEN_CONNS 接近打满，大客户并发升高时可能导致请求排队超时。"
+
+      - alert: MoziaGoroutineSpike
+        expr: go_goroutines{job="mozia_api"} > 5000
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "mozia-api 协程数异常偏高 ({{ $labels.node_name }}: {{ printf \"%.0f\" $value }})"
+          description: "Goroutine 数量持续超过 5000，存在 SSE 连接堆积或协程泄漏风险。"
+
+  - name: mozia-api-token-sla
+    rules:
+      - alert: MoziaHighGateway5xxRate
+        expr: |
+          100 * (
+            sum(rate(mozia_relay_requests_total{error_class=~"gateway_5xx|panic"}[5m]))
+            /
+            clamp_min(sum(rate(mozia_relay_requests_total[5m])), 0.001)
+          ) > 1
+          and sum(increase(mozia_relay_requests_total[5m])) >= 20
+        for: 2m
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "网关自身 5xx/Panic 错误率超标 ({{ printf \"%.2f\" $value }}%)"
+          description: "过去 5 分钟 mozia-api 网关内部 5xx/Panic 占比超过 1%，直接影响大客户 SLA，请立即排查！"
+
+      - alert: MoziaHighUpstreamFailureRate
+        expr: |
+          100 * (
+            sum by (model) (rate(mozia_relay_requests_total{error_class=~"upstream_.*"}[5m]))
+            /
+            clamp_min(sum by (model) (rate(mozia_relay_requests_total[5m])), 0.001)
+          ) > 5
+          and sum by (model) (increase(mozia_relay_requests_total[5m])) >= 20
+        for: 3m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "模型 {{ $labels.model }} 上游最终失败率偏高 ({{ printf \"%.2f\" $value }}%)"
+          description: "模型 {{ $labels.model }} 经过重试后仍返回给客户的上游错误率超过 5%，请检查渠道池健康度。"
+
+      - alert: MoziaHighChannelRetryRate
+        expr: |
+          100 * (
+            sum by (model) (rate(mozia_relay_channel_attempts_total{is_retry="true"}[5m]))
+            /
+            clamp_min(sum by (model) (rate(mozia_relay_channel_attempts_total{is_retry="false"}[5m])), 0.001)
+          ) > 20
+          and sum by (model) (increase(mozia_relay_channel_attempts_total{is_retry="false"}[5m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "模型 {{ $labels.model }} 渠道重试率飙升 ({{ printf \"%.1f\" $value }}%)"
+          description: "虽然重试可能兜底成功，但主渠道频繁报错已触发超过 20% 的重试，请提前排查劣质上游渠道。"
+
+      - alert: MoziaHighTTFT
+        expr: |
+          histogram_quantile(0.95, sum by (le, model) (rate(mozia_relay_ttft_seconds_bucket[5m]))) > 5
+          and sum by (model) (increase(mozia_relay_ttft_seconds_count[5m])) >= 10
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "模型 {{ $labels.model }} 首字延迟 (TTFT) P95 过高 ({{ printf \"%.2f\" $value }}s)"
+          description: "模型 {{ $labels.model }} 过去 5 分钟 TTFT P95 超过 5 秒，客户会明显感受到卡顿。"
+
+      - alert: MoziaHighGatewayOverhead
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(mozia_relay_gateway_overhead_seconds_bucket[5m]))) > 0.5
+          and sum(increase(mozia_relay_gateway_overhead_seconds_count[5m])) >= 20
+        for: 3m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "网关自身转发前耗时 P95 过高 ({{ printf \"%.3f\" $value }}s)"
+          description: "请求到达 mozia-api 至发往上游前的自身耗时 P95 超过 500ms，请排查数据库、Redis 或鉴权/选渠瓶颈。"
+
+      - alert: MoziaHighStreamInterruptRate
+        expr: |
+          100 * (
+            sum by (model) (rate(mozia_relay_stream_outcomes_total{status="interrupted"}[5m]))
+            /
+            clamp_min(sum by (model) (rate(mozia_relay_stream_outcomes_total{status!="client_gone"}[5m])), 0.001)
+          ) > 3
+          and sum by (model) (increase(mozia_relay_stream_outcomes_total{status!="client_gone"}[5m])) >= 15
+        for: 3m
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "模型 {{ $labels.model }} 流式半途异常中断率超标 ({{ printf \"%.2f\" $value }}%)"
+          description: "流式回复返回 200 后在输出中途因超时/断流/错误异常中断的比例超过 3%，客户拿到半截回复！"
+
+  - name: mozia-api-channels-and-billing
+    rules:
+      - alert: MoziaNoHealthyChannels
+        expr: max by (group, model) (mozia_model_healthy_channels) == 0 and sum by (group, model) (increase(mozia_relay_requests_total[30m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "活跃模型无可用健康渠道 ({{ $labels.group }}/{{ $labels.model }})"
+          description: "分组 {{ $labels.group }} 下最近有流量的模型 {{ $labels.model }} 健康渠道数已归零！"
+
+      - alert: MoziaSinglePointChannelCliff
+        expr: max by (group, model) (mozia_model_healthy_channels) == 1 and sum by (group, model) (increase(mozia_relay_requests_total[30m])) >= 10
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "单点渠道风险预警 ({{ $labels.group }}/{{ $labels.model }} 仅剩 1 个渠道)"
+          description: "活跃模型 {{ $labels.model }} 当前仅剩 1 个启用渠道，已无冗余容灾，请提前补充备用渠道。"
+
+      - alert: MoziaChannelAutoDisabled
+        expr: sum by (channel_id, channel_name) (increase(mozia_channel_auto_disable_total[5m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "上游渠道被自动禁用 (#{{ $labels.channel_id }} {{ $labels.channel_name }})"
+          description: "渠道 #{{ $labels.channel_id }} ({{ $labels.channel_name }}) 在过去 5 分钟触发了自动禁用。"
+
+      - alert: MoziaBillingInternalError
+        expr: sum by (stage) (increase(mozia_billing_errors_total{reason!="insufficient_quota"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "计费系统内部错误 ({{ $labels.stage }}: {{ printf \"%.0f\" $value }} 次/5m)"
+          description: "在 {{ $labels.stage }} 阶段发生非余额不足类的计费/结算/退款异常，可能造成账务偏差，请立即核查日志！"
+
+      - alert: MoziaBatchUpdateBacklog
+        expr: sum by (node_name) (mozia_batch_update_pending_items) > 1000
+        for: 3m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "异步批量写账队列积压 ({{ $labels.node_name }}: {{ printf \"%.0f\" $value }} 条)"
+          description: "内存批量计费更新队列持续积压超过 1000 条，请检查数据库写入性能。"
+
+      - alert: MoziaPaymentWebhookErrors
+        expr: sum by (provider) (increase(mozia_payment_webhook_total{status="error"}[10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "支付回调处理失败 ({{ $labels.provider }}: {{ printf \"%.0f\" $value }} 次/10m)"
+          description: "支付渠道 {{ $labels.provider }} 回调返回 5xx 异常，可能导致客户付款后未自动入账！"
+
+  - name: mozia-api-vip-customers
+    rules:
+      - alert: MoziaVIPHighErrorRate
+        expr: |
+          100 * (
+            sum by (customer, user_id) (rate(mozia_vip_requests_total{outcome="error",error_class!="client_4xx"}[5m]))
+            /
+            clamp_min(sum by (customer, user_id) (rate(mozia_vip_requests_total[5m])), 0.001)
+          ) > 2
+          and sum by (customer, user_id) (increase(mozia_vip_requests_total[5m])) >= 10
+        for: 2m
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "重点大客户服务错误率超标 ({{ $labels.customer }}: {{ printf \"%.2f\" $value }}%)"
+          description: "大客户 {{ $labels.customer }} (user_id={{ $labels.user_id }}) 过去 5 分钟服务端/上游错误率超过 2%，请立刻介入保障！"
+
+      - alert: MoziaVIPClient4xxSpike
+        expr: |
+          100 * (
+            sum by (customer, user_id) (rate(mozia_vip_requests_total{error_class="client_4xx"}[5m]))
+            /
+            clamp_min(sum by (customer, user_id) (rate(mozia_vip_requests_total[5m])), 0.001)
+          ) > 20
+          and sum by (customer, user_id) (increase(mozia_vip_requests_total[5m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "重点大客户 4xx 报错飙升 ({{ $labels.customer }}: {{ printf \"%.1f\" $value }}%)"
+          description: "大客户 {{ $labels.customer }} (user_id={{ $labels.user_id }}) 客户端 4xx 占比超过 20%（可能是余额不足、参数错误或 Key 异常），建议主动联系客户排查。"
+
+      - alert: MoziaVIPHighTTFT
+        expr: |
+          histogram_quantile(0.95, sum by (le, customer, user_id, model) (rate(mozia_vip_ttft_seconds_bucket[5m]))) > 5
+          and sum by (customer, user_id, model) (increase(mozia_vip_ttft_seconds_count[5m])) >= 5
+        for: 3m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "重点大客户首字延迟过高 ({{ $labels.customer }} / {{ $labels.model }}: {{ printf \"%.2f\" $value }}s)"
+          description: "大客户 {{ $labels.customer }} 调用 {{ $labels.model }} 的 TTFT P95 超过 5 秒。"
+
+      - alert: MoziaVIPStreamInterrupted
+        expr: |
+          100 * (
+            sum by (customer, user_id) (rate(mozia_vip_stream_outcomes_total{status="interrupted"}[5m]))
+            /
+            clamp_min(sum by (customer, user_id) (rate(mozia_vip_stream_outcomes_total{status!="client_gone"}[5m])), 0.001)
+          ) > 2
+          and sum by (customer, user_id) (increase(mozia_vip_stream_outcomes_total{status!="client_gone"}[5m])) >= 10
+        for: 2m
+        labels:
+          severity: critical
+          dashboard: mozia_sla
+        annotations:
+          summary: "重点大客户流式异常中断率超标 ({{ $labels.customer }}: {{ printf \"%.2f\" $value }}%)"
+          description: "大客户 {{ $labels.customer }} (user_id={{ $labels.user_id }}) 流式吐字半途中断率超过 2%！"
+
+      - alert: MoziaVIPQuotaSurge
+        expr: |
+          (sum by (customer, user_id) (increase(mozia_vip_quota_consumed_total[1h])) / 500000)
+          > 3 * clamp_min((sum by (customer, user_id) (increase(mozia_vip_quota_consumed_total[1h] offset 24h)) / 500000), 50)
+        for: 10m
+        labels:
+          severity: warning
+          dashboard: mozia_sla
+        annotations:
+          summary: "重点大客户小时级消耗突增 ({{ $labels.customer }})"
+          description: "大客户 {{ $labels.customer }} (user_id={{ $labels.user_id }}) 近 1 小时消耗（{{ printf \"%.2f\" $value }} 美元等价额度）较昨日同时段飙升超过 3 倍，请核实是否正常放量或 Key 泄露/计费异常。"

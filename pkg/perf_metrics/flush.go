@@ -24,10 +24,24 @@ func flushLoop() {
 }
 
 func flushCompletedBuckets() {
+	flushBuckets(false)
+}
+
+// FlushAll persists all in-memory performance metric buckets, including the
+// currently active bucket. Safe to call during graceful shutdown.
+func FlushAll() {
+	setting := perf_metrics_setting.GetSetting()
+	if !setting.Enabled {
+		return
+	}
+	flushBuckets(true)
+}
+
+func flushBuckets(includeCurrent bool) {
 	currentBucket := bucketStart(time.Now().Unix())
 	hotBuckets.Range(func(key, value any) bool {
 		k := key.(bucketKey)
-		if k.bucketTs >= currentBucket {
+		if !includeCurrent && k.bucketTs >= currentBucket {
 			return true
 		}
 

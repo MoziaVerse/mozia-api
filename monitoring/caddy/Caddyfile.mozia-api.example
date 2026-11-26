@@ -1,0 +1,57 @@
+# Production Caddyfile reference for mozia-api (primary :3369 + replica :3371)
+#
+# Key guarantees:
+# 1. Blocks public access to /metrics and /debug/pprof so internal telemetry is never exposed.
+# 2. Uses active health checks against /readyz (which checks DB + Redis + graceful draining state).
+#    During rolling restarts, SIGTERM switches /readyz to 503 immediately and drains for 5s,
+#    giving Caddy enough time to stop sending new requests before in-flight SSE streams close.
+# 3. Uses flush_interval -1 so SSE token streaming is never buffered by Caddy.
+
+api.example.com {
+	# Never expose Prometheus metrics or Go pprof on public domains
+	@blocked_internal path /metrics /metrics/* /debug/pprof /debug/pprof/*
+	respond @blocked_internal 404
+
+	reverse_proxy 127.0.0.1:3369 127.0.0.1:3371 {
+		lb_policy least_conn
+		lb_try_duration 3s
+		lb_try_interval 250ms
+
+		# Active readiness probing aligned with SHUTDOWN_DRAIN_SECONDS=5
+		health_uri /readyz
+		health_interval 3s
+		health_timeout 2s
+		health_status 200
+		fail_duration 15s
+		max_fails 2
+		unhealthy_status 503
+
+		# Mandatory for LLM Server-Sent Events (SSE) streaming
+		flush_interval -1
+
+		transport http {
+			dial_timeout 5s
+			response_header_timeout 300s
+			keepalive 90s
+		}
+	}
+}
+
+# Optional: expose Grafana on an internal/VPN-only or authenticated HTTPS domain.
+# Prefer SSH tunnel (ssh -L 3030:127.0.0.1:3030 <monitor-host>) or Tailscale/WireGuard
+# if you do not want Grafana reachable on the public internet.
+#
+# monitor.internal.example.com {
+# 	reverse_proxy 127.0.0.1:3030
+# }
+#
+# Optional: expose Uptime Kuma status page to enterprise customers
+# (only proxy /status/* publicly; keep /dashboard behind VPN/IP allowlist).
+#
+# status.example.com {
+# 	@status_public path /status /status/* /api/status-page/* /assets/* /icon.svg /manifest.json
+# 	handle @status_public {
+# 		reverse_proxy 127.0.0.1:3001
+# 	}
+# 	respond 404
+# }

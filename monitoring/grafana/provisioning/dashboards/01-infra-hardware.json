@@ -1,0 +1,358 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "一、基础底座核心状态总览",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "min(up{job=\"node_exporter\"})", "refId": "A" }],
+      "title": "宿主机探针",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 75 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))", "refId": "A" }],
+      "title": "宿主机 CPU 使用率",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))", "refId": "A" }],
+      "title": "宿主机内存使用率",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "max(100 * (1 - (node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay\"})))", "refId": "A" }],
+      "title": "根分区磁盘使用率",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "id": 6,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "min(pg_up)", "refId": "A" }],
+      "title": "PostgreSQL 状态",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 7,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "min(redis_up)", "refId": "A" }],
+      "title": "Redis 状态",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 10,
+      "title": "二、宿主机硬件资源 (CPU / Load / 内存 / 磁盘 / 网络 / FD)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "max": 100, "min": 0, "unit": "percent" } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 6 },
+      "id": 11,
+      "targets": [
+        { "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))", "legendFormat": "Total Used %", "refId": "A" },
+        { "expr": "100 * avg(rate(node_cpu_seconds_total{mode=\"user\"}[5m]))", "legendFormat": "User %", "refId": "B" },
+        { "expr": "100 * avg(rate(node_cpu_seconds_total{mode=\"system\"}[5m]))", "legendFormat": "System %", "refId": "C" },
+        { "expr": "100 * avg(rate(node_cpu_seconds_total{mode=\"iowait\"}[5m]))", "legendFormat": "IO Wait %", "refId": "D" }
+      ],
+      "title": "CPU 使用率与 IO Wait 拆解",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 6 },
+      "id": 12,
+      "targets": [
+        { "expr": "node_load1", "legendFormat": "Load 1m", "refId": "A" },
+        { "expr": "node_load5", "legendFormat": "Load 5m", "refId": "B" },
+        { "expr": "node_load15", "legendFormat": "Load 15m", "refId": "C" },
+        { "expr": "count(node_cpu_seconds_total{mode=\"idle\"})", "legendFormat": "CPU Cores", "refId": "D" }
+      ],
+      "title": "系统负载 (Load Average vs Cores)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "bytes" } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 6 },
+      "id": 13,
+      "targets": [
+        { "expr": "node_memory_MemTotal_bytes", "legendFormat": "Total", "refId": "A" },
+        { "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes", "legendFormat": "Used (incl. non-reclaimable)", "refId": "B" },
+        { "expr": "node_memory_MemAvailable_bytes", "legendFormat": "Available", "refId": "C" },
+        { "expr": "node_memory_Cached_bytes + node_memory_Buffers_bytes", "legendFormat": "Page Cache + Buffers", "refId": "D" }
+      ],
+      "title": "宿主机内存分配",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "Bps" } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 13 },
+      "id": 14,
+      "targets": [
+        { "expr": "sum by (device) (rate(node_disk_read_bytes_total{device!~\"loop.*|ram.*\"}[5m]))", "legendFormat": "Read {{device}}", "refId": "A" },
+        { "expr": "sum by (device) (rate(node_disk_written_bytes_total{device!~\"loop.*|ram.*\"}[5m]))", "legendFormat": "Write {{device}}", "refId": "B" }
+      ],
+      "title": "磁盘读写吞吐 (Bytes/s)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "Bps" } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 13 },
+      "id": 15,
+      "targets": [
+        { "expr": "sum by (device) (rate(node_network_receive_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))", "legendFormat": "RX {{device}}", "refId": "A" },
+        { "expr": "sum by (device) (rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))", "legendFormat": "TX {{device}}", "refId": "B" }
+      ],
+      "title": "网卡带宽流量 (RX / TX)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 13 },
+      "id": 16,
+      "targets": [
+        { "expr": "node_netstat_Tcp_CurrEstab", "legendFormat": "TCP Established", "refId": "A" },
+        { "expr": "node_sockstat_TCP_tw", "legendFormat": "TCP TimeWait", "refId": "B" },
+        { "expr": "node_filefd_allocated", "legendFormat": "Allocated FDs", "refId": "C" },
+        { "expr": "sum(rate(node_network_receive_drop_total{device!~\"lo|veth.*\"}[5m]) + rate(node_network_transmit_drop_total{device!~\"lo|veth.*\"}[5m]))", "legendFormat": "Packet Drops/s", "refId": "D" }
+      ],
+      "title": "TCP 连接数、文件句柄 (FD) 与丢包",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 20 },
+      "id": 20,
+      "title": "三、核心 Docker 容器运行态 (cAdvisor)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "percent" } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 21 },
+      "id": 21,
+      "targets": [
+        { "expr": "100 * sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"mozia-api.*|redis-newapi|postgres.*\"}[5m]))", "legendFormat": "{{name}} CPU%", "refId": "A" }
+      ],
+      "title": "核心容器 CPU 占用 (核数百分比)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "bytes" } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 21 },
+      "id": 22,
+      "targets": [
+        { "expr": "container_memory_working_set_bytes{name=~\"mozia-api.*|redis-newapi|postgres.*\"}", "legendFormat": "{{name}}", "refId": "A" }
+      ],
+      "title": "核心容器工作集内存 (Working Set)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 21 },
+      "id": 23,
+      "targets": [
+        { "expr": "increase(container_oom_events_total{name=~\"mozia-api.*|redis-newapi|postgres.*\"}[24h])", "legendFormat": "OOM 24h {{name}}", "refId": "A" },
+        { "expr": "100 * (rate(container_cpu_cfs_throttled_periods_total{name=~\"mozia-api.*|redis-newapi|postgres.*\"}[5m]) / clamp_min(rate(container_cpu_cfs_periods_total{name=~\"mozia-api.*|redis-newapi|postgres.*\"}[5m]), 1))", "legendFormat": "Throttle% {{name}}", "refId": "B" }
+      ],
+      "title": "容器 OOM 事件 (24h) 与 CPU 限流比例",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 28 },
+      "id": 30,
+      "title": "四、PostgreSQL 与 Redis 数据库底座",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 29 },
+      "id": 31,
+      "targets": [
+        { "expr": "sum by (state) (pg_stat_activity_count)", "legendFormat": "PG {{state}}", "refId": "A" },
+        { "expr": "max(pg_settings_max_connections)", "legendFormat": "PG max_connections", "refId": "B" }
+      ],
+      "title": "PostgreSQL 连接数分布 vs 上限",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 29 },
+      "id": 32,
+      "targets": [
+        { "expr": "100 * (sum(rate(pg_stat_database_blks_hit{datname=\"mozia_api_db\"}[5m])) / clamp_min(sum(rate(pg_stat_database_blks_hit{datname=\"mozia_api_db\"}[5m]) + rate(pg_stat_database_blks_read{datname=\"mozia_api_db\"}[5m])), 0.001))", "legendFormat": "Cache Hit %", "refId": "A" },
+        { "expr": "max(pg_stat_activity_max_tx_duration{datname=\"mozia_api_db\"})", "legendFormat": "Max Active Tx (s)", "refId": "B" },
+        { "expr": "sum(increase(pg_stat_database_deadlocks{datname=\"mozia_api_db\"}[15m]))", "legendFormat": "Deadlocks (15m)", "refId": "C" }
+      ],
+      "title": "PostgreSQL 缓存命中率、最长事务与死锁",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "bytes" } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 29 },
+      "id": 33,
+      "targets": [
+        { "expr": "pg_database_size_size_bytes{datname=~\"mozia.*\"}", "legendFormat": "{{datname}}", "refId": "A" }
+      ],
+      "title": "PostgreSQL 数据库磁盘体积",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0, "unit": "bytes" } },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 36 },
+      "id": 34,
+      "targets": [
+        { "expr": "redis_memory_used_bytes", "legendFormat": "Redis Used Memory", "refId": "A" },
+        { "expr": "redis_memory_max_bytes", "legendFormat": "Redis Max Memory", "refId": "B" }
+      ],
+      "title": "Redis 内存水位",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "min": 0 } },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 36 },
+      "id": 35,
+      "targets": [
+        { "expr": "redis_connected_clients", "legendFormat": "Connected Clients", "refId": "A" },
+        { "expr": "rate(redis_commands_processed_total[1m])", "legendFormat": "Commands/sec", "refId": "B" },
+        { "expr": "increase(redis_evicted_keys_total[5m])", "legendFormat": "Evicted Keys (5m)", "refId": "C" }
+      ],
+      "title": "Redis 连接数、QPS 与 Key 淘汰",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 39,
+  "tags": ["mozia", "infra", "hardware"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "Asia/Shanghai",
+  "title": "大盘一：服务器硬件 & 基础底座监控",
+  "uid": "mozia-infra-hardware",
+  "version": 1
+}

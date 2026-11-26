@@ -12,7 +12,9 @@ import (
 	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/metrics"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -510,6 +512,19 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 					logger.LogDebug(c, "SSE ping goroutine stopped by defer")
 				}
 			}()
+		}
+	}
+
+	if info != nil && info.RetryIndex == 0 && (c == nil || !c.GetBool("metrics_overhead_recorded")) {
+		startTime := info.StartTime
+		if c != nil {
+			if reqStart := common2.GetContextKeyTime(c, appconstant.ContextKeyRequestStartTime); !reqStart.IsZero() {
+				startTime = reqStart
+			}
+			c.Set("metrics_overhead_recorded", true)
+		}
+		if !startTime.IsZero() {
+			metrics.RecordGatewayOverhead(info.OriginModelName, info.UsingGroup, time.Since(startTime))
 		}
 	}
 
