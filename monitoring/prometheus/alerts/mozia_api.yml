@@ -123,7 +123,7 @@ groups:
 
       - alert: MoziaHighTTFT
         expr: |
-          histogram_quantile(0.95, sum by (le, model) (rate(mozia_relay_ttft_seconds_bucket[5m]))) > 5
+          histogram_quantile(0.95, sum by (le, model) (rate(mozia_relay_ttft_seconds_bucket[5m]))) > 15
           and sum by (model) (increase(mozia_relay_ttft_seconds_count[5m])) >= 10
         for: 5m
         labels:
@@ -131,7 +131,7 @@ groups:
           dashboard: mozia_sla
         annotations:
           summary: "模型 {{ $labels.model }} 首字延迟 (TTFT) P95 过高 ({{ printf \"%.2f\" $value }}s)"
-          description: "模型 {{ $labels.model }} 过去 5 分钟 TTFT P95 超过 5 秒，客户会明显感受到卡顿。"
+          description: "模型 {{ $labels.model }} 过去 5 分钟 TTFT P95 超过 15 秒，客户会明显感受到卡顿。"
 
       - alert: MoziaHighGatewayOverhead
         expr: |
@@ -259,15 +259,15 @@ groups:
 
       - alert: MoziaVIPHighTTFT
         expr: |
-          histogram_quantile(0.95, sum by (le, customer, user_id, model) (rate(mozia_vip_ttft_seconds_bucket[5m]))) > 5
-          and sum by (customer, user_id, model) (increase(mozia_vip_ttft_seconds_count[5m])) >= 5
-        for: 3m
+          histogram_quantile(0.95, sum by (le, customer, user_id, model) (rate(mozia_vip_ttft_seconds_bucket[5m]))) > 15
+          and sum by (customer, user_id, model) (increase(mozia_vip_ttft_seconds_count[5m])) >= 10
+        for: 5m
         labels:
           severity: warning
           dashboard: mozia_sla
         annotations:
           summary: "重点大客户首字延迟过高 ({{ $labels.customer }} / {{ $labels.model }}: {{ printf \"%.2f\" $value }}s)"
-          description: "大客户 {{ $labels.customer }} 调用 {{ $labels.model }} 的 TTFT P95 超过 5 秒。"
+          description: "大客户 {{ $labels.customer }} 调用 {{ $labels.model }} 的 TTFT P95 超过 15 秒。"
 
       - alert: MoziaVIPStreamInterrupted
         expr: |
